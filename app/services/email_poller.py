@@ -27,20 +27,56 @@ _FAULT_TYPE_MAP = {
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
+def _html_to_text(html: str) -> str:
+    """Convert HTML email body to plain text."""
+    # Replace block-level tags with newlines
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<p[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</div>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<div[^>]*>", "\n", text, flags=re.IGNORECASE)
+    # Strip all remaining tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Decode common HTML entities
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    # Collapse multiple blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _extract_body(msg: email.message.Message) -> str:
-    """Return the plain-text body of an email message."""
+    """Return the plain-text body of an email message (handles HTML-only emails)."""
+    plain = None
+    html = None
+
     if msg.is_multipart():
         for part in msg.walk():
             ct = part.get_content_type()
             cd = str(part.get("Content-Disposition", ""))
-            if ct == "text/plain" and "attachment" not in cd:
+            if "attachment" in cd:
+                continue
+            if ct == "text/plain" and plain is None:
                 payload = part.get_payload(decode=True)
                 charset = part.get_content_charset() or "utf-8"
-                return payload.decode(charset, errors="replace")
+                plain = payload.decode(charset, errors="replace")
+            elif ct == "text/html" and html is None:
+                payload = part.get_payload(decode=True)
+                charset = part.get_content_charset() or "utf-8"
+                html = payload.decode(charset, errors="replace")
     else:
+        ct = msg.get_content_type()
         payload = msg.get_payload(decode=True)
         charset = msg.get_content_charset() or "utf-8"
-        return payload.decode(charset, errors="replace")
+        body = payload.decode(charset, errors="replace")
+        if ct == "text/html":
+            html = body
+        else:
+            plain = body
+
+    if plain:
+        return plain
+    if html:
+        return _html_to_text(html)
     return ""
 
 
@@ -196,12 +232,13 @@ def poll_emails(db) -> int:
                 try:
                     from app.services.whatsapp_service import _send_message
                     if s.dispatcher_whatsapp:
+                        floor_str = f" קומה {fields['floor']}" if fields["floor"] else ""
+                        phone_str = f"\n📞 {fields['phone']}" if fields["phone"] else ""
                         _send_message(
                             s.dispatcher_whatsapp,
                             f"🚨 קריאת שירות חדשה\n"
-                            f"📍 {fields['city']} {fields['address']}"
-                            + (f" קומה {fields['floor']}" if fields["floor"] else "")
-                            + f"\n👤 {fields['name']} | 📞 {fields['phone']}\n"
+                            f"📍 {fields['city']}, {fields['address']}{floor_str}\n"
+                            f"👤 {fields['name']}{phone_str}\n"
                             f"סוג: {fields['call_type']}",
                         )
                 except Exception:
