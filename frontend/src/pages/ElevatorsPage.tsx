@@ -7,7 +7,7 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listElevators, createElevator, importElevatorsFromPdf } from '../api/elevators'
+import { listElevators, createElevator, importElevatorsFromPdf, importElevatorsFromExcel } from '../api/elevators'
 import { ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS } from '../utils/constants'
 import { formatDate } from '../utils/dates'
 
@@ -21,7 +21,9 @@ export default function ElevatorsPage() {
   const [page, setPage] = useState(1)
   const [opened, { open, close }] = useDisclosure()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const xlsxInputRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
+  const [importingXl, setImportingXl] = useState(false)
 
   const [newElev, setNewElev] = useState({
     address: '', city: '', floor_count: 1,
@@ -57,6 +59,27 @@ export default function ElevatorsPage() {
     onError: () => notifications.show({ message: 'שגיאה בהוספת מעלית', color: 'red' }),
   })
 
+  async function handleExcelImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImportingXl(true)
+    try {
+      const stats = await importElevatorsFromExcel(file)
+      qc.invalidateQueries({ queryKey: ['elevators'] })
+      notifications.show({
+        message: `יובאו ${stats.total_parsed} מעליות — נוצרו: ${stats.created}, עודכנו: ${stats.updated}, דולגו: ${stats.skipped}`,
+        color: 'teal',
+        autoClose: 8000,
+      })
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail ?? 'שגיאה לא ידועה'
+      notifications.show({ message: `שגיאה ביבוא: ${detail}`, color: 'red' })
+    } finally {
+      setImportingXl(false)
+    }
+  }
+
   async function handlePdfImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -83,6 +106,21 @@ export default function ElevatorsPage() {
       <Group justify="space-between">
         <Title order={2}>מעליות ({filtered.length})</Title>
         <Group>
+          <input
+            ref={xlsxInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            style={{ display: 'none' }}
+            onChange={handleExcelImport}
+          />
+          <Button
+            variant="filled"
+            color="teal"
+            loading={importingXl}
+            onClick={() => xlsxInputRef.current?.click()}
+          >
+            יבוא מ-Excel
+          </Button>
           <input
             ref={fileInputRef}
             type="file"

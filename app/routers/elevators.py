@@ -132,6 +132,36 @@ def get_elevator_calls(
 
 
 @router.post(
+    "/import-excel",
+    summary="Import elevators from Excel",
+    description="Upload an .xlsx report and import elevator data. Requires ADMIN or DISPATCHER role.",
+)
+async def import_elevators_excel(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Parse an Excel elevator report and upsert records into the database."""
+    if current_user.role not in ("ADMIN", "DISPATCHER"):
+        raise HTTPException(status_code=403, detail="Admin or Dispatcher access required")
+
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="יש להעלות קובץ Excel בלבד (.xlsx)")
+
+    excel_bytes = await file.read()
+    if not excel_bytes:
+        raise HTTPException(status_code=400, detail="הקובץ ריק")
+
+    try:
+        from app.services.excel_import_service import import_elevators_from_excel
+        stats = import_elevators_from_excel(db, excel_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"שגיאה בפענוח הקובץ: {exc}")
+
+    return stats
+
+
+@router.post(
     "/import-pdf",
     summary="Import elevators from PDF",
     description="Upload a PDF report and import elevator data. Requires ADMIN or DISPATCHER role.",

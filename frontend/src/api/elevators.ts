@@ -31,6 +31,20 @@ export async function getElevatorAnalytics(id: string) {
   return data
 }
 
+export async function importElevatorsFromExcel(file: File): Promise<{
+  total_parsed: number
+  created: number
+  updated: number
+  skipped: number
+}> {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await client.post('/elevators/import-excel', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
 export async function importElevatorsFromPdf(file: File): Promise<{
   total_parsed: number
   created: number
