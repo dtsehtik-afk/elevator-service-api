@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, TextInput, Select, Badge, Text, Button,
@@ -7,7 +7,7 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listElevators, createElevator } from '../api/elevators'
+import { listElevators, createElevator, importElevatorsFromPdf } from '../api/elevators'
 import { ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS } from '../utils/constants'
 import { formatDate } from '../utils/dates'
 
@@ -20,6 +20,8 @@ export default function ElevatorsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [opened, { open, close }] = useDisclosure()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
 
   const [newElev, setNewElev] = useState({
     address: '', city: '', floor_count: 1,
@@ -55,11 +57,49 @@ export default function ElevatorsPage() {
     onError: () => notifications.show({ message: 'שגיאה בהוספת מעלית', color: 'red' }),
   })
 
+  async function handlePdfImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImporting(true)
+    try {
+      const stats = await importElevatorsFromPdf(file)
+      qc.invalidateQueries({ queryKey: ['elevators'] })
+      notifications.show({
+        message: `יובאו ${stats.total_parsed} מעליות — נוצרו: ${stats.created}, עודכנו: ${stats.updated}, דולגו: ${stats.skipped}`,
+        color: 'teal',
+        autoClose: 8000,
+      })
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail ?? 'שגיאה לא ידועה'
+      notifications.show({ message: `שגיאה ביבוא: ${detail}`, color: 'red' })
+    } finally {
+      setImporting(false)
+    }
+  }
+
   return (
     <Stack gap="lg">
       <Group justify="space-between">
         <Title order={2}>מעליות ({filtered.length})</Title>
-        <Button onClick={open}>+ הוסף מעלית</Button>
+        <Group>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            style={{ display: 'none' }}
+            onChange={handlePdfImport}
+          />
+          <Button
+            variant="outline"
+            color="teal"
+            loading={importing}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            יבוא מ-PDF
+          </Button>
+          <Button onClick={open}>+ הוסף מעלית</Button>
+        </Group>
       </Group>
 
       <Group>

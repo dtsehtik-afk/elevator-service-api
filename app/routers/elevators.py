@@ -3,7 +3,7 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, require_admin
@@ -129,3 +129,33 @@ def get_elevator_calls(
         raise HTTPException(status_code=404, detail="Elevator not found")
     from app.services.service_call_service import list_service_calls
     return list_service_calls(db, elevator_id=elevator_id, limit=200)
+
+
+@router.post(
+    "/import-pdf",
+    summary="Import elevators from PDF",
+    description="Upload a PDF report and import elevator data. Requires ADMIN or DISPATCHER role.",
+)
+async def import_elevators_pdf(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Parse a PDF elevator report and upsert records into the database."""
+    if current_user.role not in ("ADMIN", "DISPATCHER"):
+        raise HTTPException(status_code=403, detail="Admin or Dispatcher access required")
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="יש להעלות קובץ PDF בלבד")
+
+    pdf_bytes = await file.read()
+    if not pdf_bytes:
+        raise HTTPException(status_code=400, detail="הקובץ ריק")
+
+    try:
+        from app.services.pdf_import_service import import_elevators_from_pdf
+        stats = import_elevators_from_pdf(db, pdf_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"שגיאה בפענוח ה-PDF: {exc}")
+
+    return stats

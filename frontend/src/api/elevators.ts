@@ -30,3 +30,17 @@ export async function getElevatorAnalytics(id: string) {
   const { data } = await client.get(`/elevators/${id}/analytics`)
   return data
 }
+
+export async function importElevatorsFromPdf(file: File): Promise<{
+  total_parsed: number
+  created: number
+  updated: number
+  skipped: number
+}> {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await client.post('/elevators/import-pdf', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
