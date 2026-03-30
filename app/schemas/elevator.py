@@ -42,9 +42,20 @@ class ElevatorUpdate(BaseModel):
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
 
 
-class ElevatorResponse(ElevatorBase):
-    """Full elevator response including computed fields."""
+class ElevatorResponse(BaseModel):
+    """Full elevator response — no strict validation, returns whatever is in DB."""
     id: uuid.UUID
+    address: str
+    city: str
+    building_name: Optional[str] = None
+    floor_count: int
+    model: Optional[str] = None
+    manufacturer: Optional[str] = None
+    installation_date: Optional[date] = None
+    serial_number: Optional[str] = None
+    last_service_date: Optional[date] = None
+    next_service_date: Optional[date] = None
+    status: str
     risk_score: float
     created_at: datetime
     updated_at: datetime

@@ -131,36 +131,38 @@ def parse_pdf(pdf_bytes: bytes) -> list[ParsedElevator]:
                 date_pattern = re.compile(r'\d{2}/\d{2}/\d{2}')
                 dates = date_pattern.findall(line)
 
-                # Remove serial, dates and numeric tokens to get address parts
-                remaining = parts[:-1]  # Remove serial
-                address_parts = []
-                for p in remaining:
-                    if not date_pattern.match(p) and not p.isdigit() and p not in ('0', '1', '2', '3'):
-                        address_parts.append(p)
+                # Address tokens are everything AFTER the last date and before the serial.
+                # Line format: page vat 0 type date date date date date city house street serial
+                last_date_idx = -1
+                for i, p in enumerate(parts[:-1]):
+                    if date_pattern.match(p):
+                        last_date_idx = i
 
-                if not address_parts:
+                if last_date_idx == -1:
+                    continue  # no dates found — not a data row
+
+                # addr_tokens: [city_token(s), house_num, street_token(s)]  (reversed Hebrew)
+                addr_tokens = parts[last_date_idx + 1:-1]
+
+                if not addr_tokens:
                     continue
 
-                # The address in reversed PDF: [city_reversed] [house_num] [street_reversed]
-                # Try to parse: last meaningful tokens are street + house + city
-                street_reversed = ''
-                house_num = ''
-                city_reversed = ''
-
-                # Find house number (numeric token in address)
+                # Find the house number (first purely numeric token in address area)
                 house_idx = None
-                for i, p in enumerate(address_parts):
-                    if p.isdigit() or (len(p) <= 4 and p.rstrip('א-ת').isdigit()):
+                for i, p in enumerate(addr_tokens):
+                    if p.isdigit():
                         house_idx = i
                         break
 
                 if house_idx is not None:
-                    city_part = ' '.join(address_parts[:house_idx]) if house_idx > 0 else ''
-                    house_num = address_parts[house_idx]
-                    street_part = ' '.join(address_parts[house_idx + 1:]) if house_idx + 1 < len(address_parts) else ''
+                    city_part = ' '.join(addr_tokens[:house_idx]) if house_idx > 0 else ''
+                    house_num = addr_tokens[house_idx]
+                    street_part = ' '.join(addr_tokens[house_idx + 1:]) if house_idx + 1 < len(addr_tokens) else ''
                 else:
-                    city_part = address_parts[0] if address_parts else ''
-                    street_part = ' '.join(address_parts[1:]) if len(address_parts) > 1 else ''
+                    # No house number found — treat first token as city, rest as street
+                    city_part = addr_tokens[0]
+                    house_num = ''
+                    street_part = ' '.join(addr_tokens[1:]) if len(addr_tokens) > 1 else ''
 
                 city = _detect_city(city_part)
                 street_fixed = street_part[::-1].strip() if street_part else ''
