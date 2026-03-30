@@ -1,0 +1,465 @@
+import { useState, useMemo } from 'react'
+import {
+  Stack, Title, Group, Select, Badge, Text, Button, Paper,
+  Modal, Textarea, Pagination, Table, ScrollArea, Loader, Center,
+  Divider, Timeline, ThemeIcon, Box, Checkbox, Alert,
+} from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { notifications } from '@mantine/notifications'
+import { listCalls, createCall, updateCall, getCallDetails } from '../api/calls'
+import { listElevators } from '../api/elevators'
+import { useAuthStore } from '../stores/authStore'
+import {
+  PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
+} from '../utils/constants'
+import { formatDateTime } from '../utils/dates'
+import { ServiceCall, CallDetail } from '../types'
+
+const PAGE_SIZE = 20
+
+const ASSIGNMENT_STATUS_LABELS: Record<string, string> = {
+  PENDING_CONFIRMATION: 'ממתין לאישור',
+  CONFIRMED: 'אושר',
+  REJECTED: 'נדחה',
+  CANCELLED: 'בוטל',
+  AUTO_ASSIGNED: 'הושלם',
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge color={CALL_STATUS_COLORS[status] ?? 'gray'} variant="light" size="sm">
+      {CALL_STATUS_LABELS[status] ?? status}
+    </Badge>
+  )
+}
+
+export default function CallsPage() {
+  const qc = useQueryClient()
+  const userName = useAuthStore(s => s.userName)
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [newOpened, { open: openNew, close: closeNew }] = useDisclosure()
+  const [updateOpened, { open: openUpdate, close: closeUpdate }] = useDisclosure()
+  const [detailOpened, { open: openDetail, close: closeDetail }] = useDisclosure()
+  const [selectedCall, setSelectedCall] = useState<ServiceCall | null>(null)
+  const [detailCall, setDetailCall] = useState<CallDetail | null>(null)
+
+  const [newForm, setNewForm] = useState({
+    elevator_id: '',
+    description: '',
+    priority: 'MEDIUM',
+    fault_type: 'OTHER',
+  })
+  const [updateForm, setUpdateForm] = useState({
+    status: '',
+    resolution_notes: '',
+    quote_needed: false,
+  })
+
+  const { data: calls = [], isLoading } = useQuery({
+    queryKey: ['calls'],
+    queryFn: () => listCalls(),
+    refetchInterval: 30_000,
+  })
+
+  const { data: elevators = [] } = useQuery({
+    queryKey: ['elevators'],
+    queryFn: () => listElevators(),
+  })
+
+  const { data: callDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ['call-detail', detailCall?.id],
+    queryFn: () => getCallDetails(detailCall!.id),
+    enabled: !!detailCall,
+  })
+
+  const elevatorOptions = elevators.map(e => ({
+    value: e.id,
+    label: `#${e.serial_number} — ${e.address}, ${e.city}`,
+  }))
+
+  const filtered = useMemo(() => {
+    return calls.filter(c => {
+      const matchStatus = !statusFilter || c.status === statusFilter
+      const matchPriority = !priorityFilter || c.priority === priorityFilter
+      return matchStatus && matchPriority
+    })
+  }, [calls, statusFilter, priorityFilter])
+
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  const createMutation = useMutation({
+    mutationFn: createCall,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      notifications.show({ message: 'קריאת שירות נפתחה', color: 'green' })
+      closeNew()
+      setNewForm({ elevator_id: '', description: '', priority: 'MEDIUM', fault_type: 'OTHER' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בפתיחת קריאה', color: 'red' }),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: any }) => updateCall(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['call-detail'] })
+      notifications.show({ message: 'קריאה עודכנה', color: 'green' })
+      closeUpdate()
+    },
+    onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
+  })
+
+  function openDetailModal(call: ServiceCall) {
+    setDetailCall(call as CallDetail)
+    openDetail()
+  }
+
+  function openUpdateModal(call: ServiceCall) {
+    setSelectedCall(call)
+    setUpdateForm({
+      status: call.status,
+      resolution_notes: call.resolution_notes ?? '',
+      quote_needed: call.quote_needed ?? false,
+    })
+    openUpdate()
+  }
+
+  const detail = callDetail ?? detailCall
+
+  return (
+    <Stack gap="lg">
+      <Group justify="space-between">
+        <Title order={2}>קריאות שירות ({filtered.length})</Title>
+        <Button onClick={openNew}>+ קריאה חדשה</Button>
+      </Group>
+
+      <Group>
+        <Select
+          placeholder="סטטוס"
+          data={[
+            { value: 'OPEN', label: 'פתוחה' },
+            { value: 'ASSIGNED', label: 'שובצה' },
+            { value: 'IN_PROGRESS', label: 'בטיפול' },
+            { value: 'RESOLVED', label: 'נפתרה' },
+            { value: 'CLOSED', label: 'סגורה' },
+          ]}
+          value={statusFilter}
+          onChange={v => { setStatusFilter(v); setPage(1) }}
+          clearable w={160}
+        />
+        <Select
+          placeholder="עדיפות"
+          data={[
+            { value: 'CRITICAL', label: 'קריטי' },
+            { value: 'HIGH', label: 'גבוה' },
+            { value: 'MEDIUM', label: 'בינוני' },
+            { value: 'LOW', label: 'נמוך' },
+          ]}
+          value={priorityFilter}
+          onChange={v => { setPriorityFilter(v); setPage(1) }}
+          clearable w={140}
+        />
+      </Group>
+
+      <Paper withBorder radius="md">
+        {isLoading ? (
+          <Center h={200}><Loader /></Center>
+        ) : (
+          <ScrollArea>
+            <Table highlightOnHover style={{ cursor: 'pointer' }}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>עדיפות</Table.Th>
+                  <Table.Th>תיאור</Table.Th>
+                  <Table.Th>סוג תקלה</Table.Th>
+                  <Table.Th>סטטוס</Table.Th>
+                  <Table.Th>דווח ע"י</Table.Th>
+                  <Table.Th>תאריך</Table.Th>
+                  <Table.Th></Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {paginated.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={7}><Center h={100}><Text c="dimmed">לא נמצאו קריאות</Text></Center></Table.Td>
+                  </Table.Tr>
+                ) : paginated.map(c => (
+                  <Table.Tr key={c.id} onClick={() => openDetailModal(c)}>
+                    <Table.Td><Badge color={PRIORITY_COLORS[c.priority]} size="sm">{PRIORITY_LABELS[c.priority]}</Badge></Table.Td>
+                    <Table.Td>
+                      <Stack gap={0}>
+                        <Text size="sm" lineClamp={1}>{c.description}</Text>
+                        <Group gap={4}>
+                          {c.is_recurring && <Text size="xs" c="orange">🔁 חוזרת</Text>}
+                          {c.quote_needed && <Text size="xs" c="yellow">💰 הצעת מחיר</Text>}
+                        </Group>
+                      </Stack>
+                    </Table.Td>
+                    <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[c.fault_type]}</Text></Table.Td>
+                    <Table.Td><StatusBadge status={c.status} /></Table.Td>
+                    <Table.Td><Text size="sm">{c.reported_by}</Text></Table.Td>
+                    <Table.Td><Text size="xs" c="dimmed">{formatDateTime(c.created_at)}</Text></Table.Td>
+                    <Table.Td onClick={e => e.stopPropagation()}>
+                      <Button size="xs" variant="light" onClick={() => openUpdateModal(c)}>
+                        עדכן
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
+      </Paper>
+
+      {filtered.length > PAGE_SIZE && (
+        <Group justify="center">
+          <Pagination total={Math.ceil(filtered.length / PAGE_SIZE)} value={page} onChange={setPage} />
+        </Group>
+      )}
+
+      {/* ── Detail modal ── */}
+      <Modal
+        opened={detailOpened}
+        onClose={closeDetail}
+        title={<Text fw={700} size="lg">פרטי קריאת שירות</Text>}
+        size="lg"
+      >
+        {detailLoading || !detail ? (
+          <Center h={200}><Loader /></Center>
+        ) : (
+          <Stack gap="md">
+            {/* Header badges */}
+            <Group>
+              <Badge color={PRIORITY_COLORS[detail.priority]}>{PRIORITY_LABELS[detail.priority]}</Badge>
+              <StatusBadge status={detail.status} />
+              {detail.is_recurring && <Badge color="orange" variant="light">🔁 תקלה חוזרת</Badge>}
+              {detail.quote_needed && <Badge color="yellow" variant="filled">💰 נדרשת הצעת מחיר</Badge>}
+            </Group>
+
+            {/* Elevator + call info */}
+            <Paper withBorder p="md" radius="md">
+              <Stack gap="xs">
+                {'elevator_address' in detail && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>📍 כתובת</Text>
+                    <Text size="sm" fw={600}>{detail.elevator_address}, {detail.elevator_city}</Text>
+                    {detail.elevator_serial && <Text size="xs" c="dimmed">#{detail.elevator_serial}</Text>}
+                  </Group>
+                )}
+                <Group gap="xs">
+                  <Text size="sm" c="dimmed" w={100}>⚡ סוג תקלה</Text>
+                  <Text size="sm">{FAULT_TYPE_LABELS[detail.fault_type]}</Text>
+                </Group>
+                <Group gap="xs">
+                  <Text size="sm" c="dimmed" w={100}>👤 דווח ע"י</Text>
+                  <Text size="sm">{detail.reported_by}</Text>
+                </Group>
+                <Group gap="xs">
+                  <Text size="sm" c="dimmed" w={100}>📅 נפתחה</Text>
+                  <Text size="sm">{formatDateTime(detail.created_at)}</Text>
+                </Group>
+                {detail.resolved_at && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>✅ נסגרה</Text>
+                    <Text size="sm">{formatDateTime(detail.resolved_at)}</Text>
+                  </Group>
+                )}
+              </Stack>
+            </Paper>
+
+            {/* Description */}
+            <Box>
+              <Text size="sm" c="dimmed" mb={4}>תיאור התקלה</Text>
+              <Text size="sm">{detail.description}</Text>
+            </Box>
+
+            {/* Technician report — shown when resolved */}
+            {(detail.status === 'RESOLVED' || detail.status === 'CLOSED') && (
+              <>
+                <Divider label="דו״ח טכנאי" labelPosition="center" />
+                {detail.resolution_notes ? (
+                  <Paper withBorder p="md" radius="md" bg="green.0">
+                    <Text size="sm" c="dimmed" mb={6}>פרטי הטיפול</Text>
+                    <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{detail.resolution_notes}</Text>
+                  </Paper>
+                ) : (
+                  <Text size="sm" c="dimmed" fs="italic">לא הוזן דו"ח טכנאי</Text>
+                )}
+                {detail.quote_needed && (
+                  <Alert color="yellow" title="💰 נדרשת הצעת מחיר ללקוח" radius="md">
+                    הטכנאי ציין כי יש להכין הצעת מחיר ולשלוח ללקוח.
+                  </Alert>
+                )}
+              </>
+            )}
+
+            {/* Assignments */}
+            {'assignments' in detail && detail.assignments.length > 0 && (
+              <>
+                <Divider label="שיבוץ טכנאים" labelPosition="center" />
+                <Stack gap="xs">
+                  {detail.assignments.map(a => (
+                    <Paper key={a.id} withBorder p="sm" radius="md">
+                      <Group justify="space-between">
+                        <Group gap="xs">
+                          <Text size="sm" fw={600}>👨‍🔧 {a.technician_name}</Text>
+                          <Badge size="xs" color="gray" variant="light">
+                            {ASSIGNMENT_STATUS_LABELS[a.status] ?? a.status}
+                          </Badge>
+                        </Group>
+                        <Group gap="xs">
+                          {a.travel_minutes && (
+                            <Text size="xs" c="dimmed">🚗 ~{a.travel_minutes} דק׳</Text>
+                          )}
+                          <Text size="xs" c="dimmed">{formatDateTime(a.assigned_at)}</Text>
+                        </Group>
+                      </Group>
+                    </Paper>
+                  ))}
+                </Stack>
+              </>
+            )}
+
+            {/* Audit trail */}
+            {'audit_logs' in detail && detail.audit_logs.length > 0 && (
+              <>
+                <Divider label="היסטוריית סטטוסים" labelPosition="center" />
+                <Timeline active={detail.audit_logs.length - 1} bulletSize={20} lineWidth={2}>
+                  {detail.audit_logs.map(log => (
+                    <Timeline.Item
+                      key={log.id}
+                      bullet={<Text size="xs">•</Text>}
+                      title={
+                        <Group gap="xs">
+                          {log.old_status && (
+                            <StatusBadge status={log.old_status} />
+                          )}
+                          {log.old_status && <Text size="xs" c="dimmed">→</Text>}
+                          <StatusBadge status={log.new_status} />
+                        </Group>
+                      }
+                    >
+                      <Text size="xs" c="dimmed">{log.changed_by} · {formatDateTime(log.changed_at)}</Text>
+                      {log.notes && <Text size="xs" mt={2}>{log.notes}</Text>}
+                    </Timeline.Item>
+                  ))}
+                </Timeline>
+              </>
+            )}
+
+            <Group justify="flex-end" mt="md">
+              <Button variant="default" onClick={closeDetail}>סגור</Button>
+              <Button onClick={() => {
+                closeDetail()
+                openUpdateModal(detail)
+              }}>
+                ✏️ עריכה
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+
+      {/* ── New call modal ── */}
+      <Modal opened={newOpened} onClose={closeNew} title="פתח קריאת שירות חדשה" size="lg">
+        <Stack gap="sm">
+          <Select
+            label="מעלית" placeholder="בחר מעלית..." required
+            data={elevatorOptions}
+            value={newForm.elevator_id}
+            onChange={v => setNewForm(s => ({ ...s, elevator_id: v ?? '' }))}
+            searchable
+          />
+          <Textarea
+            label="תיאור התקלה" required minRows={3}
+            value={newForm.description}
+            onChange={e => setNewForm(s => ({ ...s, description: e.target.value }))}
+          />
+          <Group grow>
+            <Select
+              label="עדיפות"
+              data={[
+                { value: 'CRITICAL', label: 'קריטי' }, { value: 'HIGH', label: 'גבוה' },
+                { value: 'MEDIUM', label: 'בינוני' }, { value: 'LOW', label: 'נמוך' },
+              ]}
+              value={newForm.priority}
+              onChange={v => setNewForm(s => ({ ...s, priority: v ?? 'MEDIUM' }))}
+            />
+            <Select
+              label="סוג תקלה"
+              data={[
+                { value: 'MECHANICAL', label: 'מכאני' }, { value: 'ELECTRICAL', label: 'חשמלי' },
+                { value: 'SOFTWARE', label: 'תוכנה' }, { value: 'STUCK', label: 'תקועה' },
+                { value: 'DOOR', label: 'דלת' }, { value: 'OTHER', label: 'אחר' },
+              ]}
+              value={newForm.fault_type}
+              onChange={v => setNewForm(s => ({ ...s, fault_type: v ?? 'OTHER' }))}
+            />
+          </Group>
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={closeNew}>ביטול</Button>
+            <Button
+              loading={createMutation.isPending}
+              disabled={!newForm.elevator_id || !newForm.description}
+              onClick={() => createMutation.mutate({
+                elevator_id: newForm.elevator_id,
+                reported_by: userName || 'מזכירה',
+                description: newForm.description,
+                priority: newForm.priority,
+                fault_type: newForm.fault_type,
+              })}
+            >
+              פתח קריאה
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* ── Update modal ── */}
+      <Modal opened={updateOpened} onClose={closeUpdate} title="עדכן קריאת שירות">
+        <Stack gap="sm">
+          <Select
+            label="סטטוס"
+            data={[
+              { value: 'OPEN', label: 'פתוחה' }, { value: 'ASSIGNED', label: 'שובצה' },
+              { value: 'IN_PROGRESS', label: 'בטיפול' }, { value: 'RESOLVED', label: 'נפתרה' },
+              { value: 'CLOSED', label: 'סגורה' },
+            ]}
+            value={updateForm.status}
+            onChange={v => setUpdateForm(s => ({ ...s, status: v ?? '' }))}
+          />
+          <Textarea
+            label='הערות / דו"ח טיפול' minRows={3}
+            value={updateForm.resolution_notes}
+            onChange={e => setUpdateForm(s => ({ ...s, resolution_notes: e.target.value }))}
+          />
+          <Checkbox
+            label="💰 נדרשת הצעת מחיר ללקוח"
+            checked={updateForm.quote_needed}
+            onChange={e => setUpdateForm(s => ({ ...s, quote_needed: e.currentTarget.checked }))}
+          />
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={closeUpdate}>ביטול</Button>
+            <Button
+              loading={updateMutation.isPending}
+              onClick={() => selectedCall && updateMutation.mutate({
+                id: selectedCall.id,
+                payload: {
+                  status: updateForm.status || undefined,
+                  resolution_notes: updateForm.resolution_notes || undefined,
+                  quote_needed: updateForm.quote_needed,
+                },
+              })}
+            >
+              שמור
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Stack>
+  )
+}

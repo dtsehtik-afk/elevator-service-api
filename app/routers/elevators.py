@@ -1,0 +1,131 @@
+"""Router for elevator CRUD and analytics endpoints."""
+
+import uuid
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
+from app.auth.dependencies import get_current_user, require_admin
+from app.database import get_db
+from app.models.technician import Technician
+from app.schemas.elevator import ElevatorAnalytics, ElevatorCreate, ElevatorResponse, ElevatorUpdate
+from app.schemas.service_call import ServiceCallResponse
+from app.services import elevator_service
+
+router = APIRouter()
+
+
+@router.get(
+    "",
+    response_model=List[ElevatorResponse],
+    summary="List elevators",
+    description="Return a paginated, filtered list of elevators. Requires authentication.",
+)
+def list_elevators(
+    city: Optional[str] = Query(None, description="Filter by city (partial match)"),
+    status: Optional[str] = Query(None, description="Filter by status: ACTIVE | INACTIVE | UNDER_REPAIR"),
+    min_risk: Optional[float] = Query(None, ge=0, le=100, description="Minimum risk score"),
+    max_risk: Optional[float] = Query(None, ge=0, le=100, description="Maximum risk score"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: Technician = Depends(get_current_user),
+):
+    """List elevators with optional filters."""
+    return elevator_service.list_elevators(db, city, status, min_risk, max_risk, skip, limit)
+
+
+@router.post(
+    "",
+    response_model=ElevatorResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create elevator",
+    description="Add a new elevator to the system. Requires ADMIN or DISPATCHER role.",
+)
+def create_elevator(
+    data: ElevatorCreate,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Create a new elevator record."""
+    from app.auth.dependencies import require_roles
+    if current_user.role not in ("ADMIN", "DISPATCHER"):
+        raise HTTPException(status_code=403, detail="Admin or Dispatcher access required")
+    return elevator_service.create_elevator(db, data)
+
+
+@router.get(
+    "/{elevator_id}",
+    response_model=ElevatorResponse,
+    summary="Get elevator",
+    description="Return full details of a single elevator.",
+)
+def get_elevator(
+    elevator_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: Technician = Depends(get_current_user),
+):
+    """Fetch a single elevator by ID."""
+    elevator = elevator_service.get_elevator(db, elevator_id)
+    if not elevator:
+        raise HTTPException(status_code=404, detail="Elevator not found")
+    return elevator
+
+
+@router.put(
+    "/{elevator_id}",
+    response_model=ElevatorResponse,
+    summary="Update elevator",
+    description="Update elevator details. Requires ADMIN or DISPATCHER role.",
+)
+def update_elevator(
+    elevator_id: uuid.UUID,
+    data: ElevatorUpdate,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Update an existing elevator's details."""
+    if current_user.role not in ("ADMIN", "DISPATCHER"):
+        raise HTTPException(status_code=403, detail="Admin or Dispatcher access required")
+    elevator = elevator_service.update_elevator(db, elevator_id, data)
+    if not elevator:
+        raise HTTPException(status_code=404, detail="Elevator not found")
+    return elevator
+
+
+@router.get(
+    "/{elevator_id}/analytics",
+    response_model=ElevatorAnalytics,
+    summary="Elevator analytics",
+    description="Fault breakdown and recurring call analysis for a specific elevator.",
+)
+def get_elevator_analytics(
+    elevator_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: Technician = Depends(get_current_user),
+):
+    """Return analytics for a specific elevator."""
+    analytics = elevator_service.get_elevator_analytics(db, elevator_id)
+    if not analytics:
+        raise HTTPException(status_code=404, detail="Elevator not found")
+    return analytics
+
+
+@router.get(
+    "/{elevator_id}/calls",
+    response_model=List[ServiceCallResponse],
+    summary="Elevator service call history",
+    description="Return all service calls for a specific elevator.",
+)
+def get_elevator_calls(
+    elevator_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: Technician = Depends(get_current_user),
+):
+    """Return service call history for an elevator."""
+    elevator = elevator_service.get_elevator(db, elevator_id)
+    if not elevator:
+        raise HTTPException(status_code=404, detail="Elevator not found")
+    from app.services.service_call_service import list_service_calls
+    return list_service_calls(db, elevator_id=elevator_id, limit=200)

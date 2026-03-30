@@ -1,0 +1,42 @@
+# Secrets — never commit these
+.env
+*.env
+.env.example
+
+# Claude
+.claude/
+
+# Vite cache
+.vite/
+
+# Database
+elevator_dev.db
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.env
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
