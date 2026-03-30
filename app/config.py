@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # Public base URL for technician portal links (e.g. http://192.168.1.100:8000)
     app_base_url: str = "http://localhost:8000"
 
+    # Gmail IMAP polling (for direct email → service call ingestion)
+    gmail_user: str = ""
+    gmail_app_password: str = ""
+
     @property
     def cors_origins_list(self) -> List[str]:
         """Parse comma-separated CORS origins into a list."""

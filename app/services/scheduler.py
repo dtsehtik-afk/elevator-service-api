@@ -223,6 +223,22 @@ def _poll_whatsapp_replies():
             break
 
 
+def _poll_email_calls():
+    """Poll Gmail every 60 seconds for new service-call emails."""
+    from app.database import SessionLocal
+    from app.services.email_poller import poll_emails
+
+    db = SessionLocal()
+    try:
+        count = poll_emails(db)
+        if count:
+            logger.info("📧 Email poller created %d new service call(s)", count)
+    except Exception as exc:
+        logger.error("Email poller job failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     global _scheduler
@@ -230,6 +246,7 @@ def start_scheduler():
     _scheduler.add_job(_run_nightly_maintenance,        "cron",     hour=0,  minute=5)
     _scheduler.add_job(_send_morning_location_requests, "cron",     hour=7,  minute=15)
     _scheduler.add_job(_poll_whatsapp_replies,          "interval", seconds=15)
+    _scheduler.add_job(_poll_email_calls,               "interval", seconds=60)
     _scheduler.start()
     logger.info("Background scheduler started")
 
