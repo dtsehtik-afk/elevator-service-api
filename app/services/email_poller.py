@@ -81,7 +81,8 @@ def _extract_body(msg: email.message.Message) -> str:
     # Prefer plain text if available, but always clean it too
     if plain:
         # Even "plain text" emails may contain inline HTML tags from bad generators
-        if re.search(r"<[a-zA-Z][^>]*>", plain):
+        # Check for both opening (<p>) and closing (</p>) tags
+        if re.search(r"</?[a-zA-Z][^>]*>", plain):
             return _html_to_text(plain)
         return html_mod.unescape(plain).strip()
     if html:
