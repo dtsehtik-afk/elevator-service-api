@@ -28,7 +28,7 @@ def list_elevators(
     min_risk: Optional[float] = Query(None, ge=0, le=100, description="Minimum risk score"),
     max_risk: Optional[float] = Query(None, ge=0, le=100, description="Maximum risk score"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=2000),
     db: Session = Depends(get_db),
     _: Technician = Depends(get_current_user),
 ):

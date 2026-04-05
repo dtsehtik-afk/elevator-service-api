@@ -41,6 +41,9 @@ class Assignment(Base):
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    reminder_sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     service_call: Mapped["ServiceCall"] = relationship(  # noqa: F821

@@ -55,9 +55,15 @@ def login(
     summary="Current user",
     description="Return profile of the currently authenticated user.",
 )
-def me(db: Session = Depends(get_db), token: str = ""):
+def me(
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(__import__("app.auth.dependencies", fromlist=["get_current_user"]).get_current_user),
+):
     """Return the current authenticated user's profile."""
-    from app.auth.dependencies import get_current_user
-    from fastapi import Request
-    # Handled by dependency injection when used directly in routes
-    return {"message": "Use /auth/me with a valid Bearer token"}
+    return {
+        "id":         str(current_user.id),
+        "email":      current_user.email,
+        "name":       current_user.name,
+        "role":       current_user.role,
+        "is_active":  current_user.is_active,
+    }

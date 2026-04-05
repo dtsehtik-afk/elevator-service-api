@@ -1,6 +1,7 @@
 """Analytics queries — aggregated statistics for management reporting."""
 
 import calendar
+import io
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
@@ -172,6 +173,166 @@ def get_monthly_summary(db: Session, year: int, month: int) -> Dict[str, Any]:
         "calls_by_priority": by_priority,
         "calls_by_fault_type": by_fault,
     }
+
+
+def get_elevator_history(db: Session, elevator_id) -> Dict[str, Any]:
+    """Return full service call history for a specific elevator."""
+    elevator = db.query(Elevator).filter(Elevator.id == elevator_id).first()
+    if not elevator:
+        return {}
+
+    calls = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.elevator_id == elevator_id)
+        .order_by(ServiceCall.created_at.desc())
+        .all()
+    )
+
+    call_list = []
+    for c in calls:
+        # Find assigned technician
+        assignment = (
+            db.query(Assignment)
+            .filter(Assignment.service_call_id == c.id,
+                    Assignment.status.in_(["CONFIRMED", "COMPLETED"]))
+            .order_by(Assignment.assigned_at.desc())
+            .first()
+        )
+        tech_name = None
+        if assignment:
+            tech = db.query(Technician).filter(Technician.id == assignment.technician_id).first()
+            tech_name = tech.name if tech else None
+
+        resolution_hours = None
+        if c.resolved_at and c.created_at:
+            resolution_hours = round((c.resolved_at - c.created_at).total_seconds() / 3600, 1)
+
+        call_list.append({
+            "id": str(c.id),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
+            "status": c.status,
+            "fault_type": c.fault_type,
+            "priority": c.priority,
+            "description": c.description,
+            "reported_by": c.reported_by,
+            "technician": tech_name,
+            "resolution_hours": resolution_hours,
+            "resolution_notes": c.resolution_notes,
+            "is_recurring": c.is_recurring,
+        })
+
+    return {
+        "elevator_id": str(elevator.id),
+        "address": elevator.address,
+        "city": elevator.city,
+        "building_name": elevator.building_name,
+        "serial_number": elevator.serial_number,
+        "total_calls": len(calls),
+        "calls": call_list,
+    }
+
+
+def export_calls_excel(
+    db: Session,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    elevator_id=None,
+) -> bytes:
+    """
+    Export service calls to an Excel file.
+    Returns raw bytes of the .xlsx file.
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError:
+        raise RuntimeError("openpyxl not installed — run: pip install openpyxl")
+
+    query = db.query(ServiceCall)
+    if date_from:
+        query = query.filter(ServiceCall.created_at >= date_from)
+    if date_to:
+        query = query.filter(ServiceCall.created_at <= date_to)
+    if elevator_id:
+        query = query.filter(ServiceCall.elevator_id == elevator_id)
+
+    calls = query.order_by(ServiceCall.created_at.desc()).all()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "קריאות שירות"
+    ws.sheet_view.rightToLeft = True
+
+    # Header style
+    header_fill = PatternFill("solid", fgColor="1E3A5F")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+
+    headers = [
+        "תאריך פתיחה", "עיר", "כתובת", "בניין", "סוג תקלה",
+        "עדיפות", "סטטוס", "מדווח", "טכנאי", "שעות טיפול",
+        "הערות סגירה", "חוזרת",
+    ]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    _STATUS_HE = {
+        "OPEN": "פתוח", "ASSIGNED": "שובץ", "IN_PROGRESS": "בטיפול",
+        "RESOLVED": "טופל", "CLOSED": "סגור",
+    }
+    _FAULT_HE = {
+        "STUCK": "מעלית תקועה", "DOOR": "תקלת דלת", "ELECTRICAL": "חשמלית",
+        "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית",
+    }
+    _PRI_HE = {
+        "CRITICAL": "קריטי", "HIGH": "גבוה", "MEDIUM": "בינוני", "LOW": "נמוך",
+    }
+
+    for row_num, c in enumerate(calls, 2):
+        elevator = db.query(Elevator).filter(Elevator.id == c.elevator_id).first()
+        assignment = (
+            db.query(Assignment)
+            .filter(Assignment.service_call_id == c.id,
+                    Assignment.status.in_(["CONFIRMED", "COMPLETED"]))
+            .first()
+        )
+        tech_name = ""
+        if assignment:
+            tech = db.query(Technician).filter(Technician.id == assignment.technician_id).first()
+            tech_name = tech.name if tech else ""
+
+        resolution_hours = ""
+        if c.resolved_at and c.created_at:
+            resolution_hours = round((c.resolved_at - c.created_at).total_seconds() / 3600, 1)
+
+        row = [
+            c.created_at.strftime("%d/%m/%Y %H:%M") if c.created_at else "",
+            elevator.city if elevator else "",
+            elevator.address if elevator else "",
+            elevator.building_name if elevator else "",
+            _FAULT_HE.get(c.fault_type, c.fault_type),
+            _PRI_HE.get(c.priority, c.priority),
+            _STATUS_HE.get(c.status, c.status),
+            c.reported_by or "",
+            tech_name,
+            resolution_hours,
+            c.resolution_notes or "",
+            "כן" if c.is_recurring else "לא",
+        ]
+        for col, val in enumerate(row, 1):
+            ws.cell(row=row_num, column=col, value=val)
+
+    # Auto-width columns
+    for col in ws.columns:
+        max_len = max((len(str(cell.value or "")) for cell in col), default=0)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def get_risk_elevators(db: Session, threshold: float = 70.0) -> List[Dict[str, Any]]:

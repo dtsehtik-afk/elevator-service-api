@@ -103,7 +103,7 @@ def list_elevators(
         query = query.filter(Elevator.risk_score >= min_risk)
     if max_risk is not None:
         query = query.filter(Elevator.risk_score <= max_risk)
-    return query.offset(skip).limit(min(limit, 200)).all()
+    return query.offset(skip).limit(min(limit, 2000)).all()
 
 
 def update_elevator(

@@ -45,13 +45,16 @@ def _detect_priority(text: str) -> str:
 
 _FIELD_PATTERNS: dict[str, str] = {
     "call_time":    r"מועד התקשרות\s*[:\-]\s*(.+)",
-    "call_type":    r"סוג פניה\s*[:\-]\s*(.+)",
-    "name":         r"שם\s*[:\-]\s*(.+)",
+    # "סוג פניה" or plain "סוג" — both used by different beepertalk formats
+    "call_type":    r"סוג(?:\s+פניה)?\s*[:\-]\s*(.+)",
+    # "שם" label or name after 👤 emoji
+    "name":         r"(?:שם\s*[:\-]\s*|👤\s*)(.+)",
     "city":         r"עיר\s*[:\-]\s*(.+)",
     "street":       r"רחוב\s*[:\-]\s*(.+)",
     "house_number": r"מס[\'׳]?\s*בית\s*[:\-]\s*(.*)",
     "floor":        r"קומה\s*[:\-]\s*(.+)",
-    "phone":        r"טלפון\s*[:\-]\s*(.+)",
+    # "טלפון" label or phone after 📞 emoji (with optional leading |)
+    "phone":        r"(?:טלפון\s*[:\-]\s*|[|]?\s*📞\s*)(\d[\d\-\s]+)",
     "context":      r"הקשר פניה\s*[:\-]\s*(.+)",
 }
 

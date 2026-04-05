@@ -153,13 +153,16 @@ def rank_technicians(
 def assign_with_confirmation(
     db: Session,
     service_call: ServiceCall,
+    exclude_tech_ids: list[uuid.UUID] | None = None,
+    needs_confirmation: bool = True,
 ) -> Optional[Assignment]:
     """
     Main entry point called after a service call is created.
 
     1. Ranks available technicians.
-    2. Creates a PENDING_CONFIRMATION assignment for the top candidate.
-    3. Sends a WhatsApp message asking for acceptance.
+    2. Creates an assignment record (PENDING_CONFIRMATION or CONFIRMED based on needs_confirmation).
+    3. Sends a WhatsApp message asking for acceptance (needs_confirmation=True)
+       or a direct assignment notification (needs_confirmation=False, used for email calls).
     4. Returns the Assignment (or None if no candidate is available).
     """
     elevator = db.query(Elevator).filter(Elevator.id == service_call.elevator_id).first()
@@ -169,6 +172,10 @@ def assign_with_confirmation(
 
     candidates = rank_technicians(db, elevator, service_call.fault_type, service_call.priority)
 
+    # Filter out technicians who already rejected this call
+    if exclude_tech_ids:
+        candidates = [c for c in candidates if c.technician.id not in exclude_tech_ids]
+
     if not candidates:
         logger.warning("No available technicians for call %s", service_call.id)
         return None
@@ -176,31 +183,35 @@ def assign_with_confirmation(
     best = candidates[0]
     tech = best.technician
 
-    # Create PENDING_CONFIRMATION assignment
+    # Assignment status depends on whether we need the technician to confirm
+    assign_status  = "PENDING_CONFIRMATION" if needs_confirmation else "CONFIRMED"
+    call_status    = "ASSIGNED"             if needs_confirmation else "IN_PROGRESS"
+    notes_suffix   = "pending confirmation" if needs_confirmation else "auto-confirmed (email call)"
+
     assignment = Assignment(
         service_call_id=service_call.id,
         technician_id=tech.id,
         assignment_type="AUTO",
-        status="PENDING_CONFIRMATION",
+        status=assign_status,
         travel_minutes=best.travel_minutes,
         notes=(
             f"AI recommendation | score={best.score:.3f} | "
-            f"travel={best.travel_minutes}min | calls_today={best.daily_calls}"
+            f"travel={best.travel_minutes}min | calls_today={best.daily_calls} | {notes_suffix}"
         ),
     )
     db.add(assignment)
     db.flush()
 
     # Update call status
-    service_call.status = "ASSIGNED"
+    service_call.status = call_status
     service_call.assigned_at = datetime.now(timezone.utc)
 
     audit = AuditLog(
         service_call_id=service_call.id,
         changed_by="ai_agent",
         old_status="OPEN",
-        new_status="ASSIGNED",
-        notes=f"AI assigned to {tech.name} — pending confirmation",
+        new_status=call_status,
+        notes=f"AI assigned to {tech.name} — {notes_suffix}",
     )
     db.add(audit)
     db.commit()
@@ -209,22 +220,49 @@ def assign_with_confirmation(
     # Send WhatsApp notification
     phone = tech.whatsapp_number or tech.phone
     if phone:
-        sent = whatsapp_service.notify_technician_new_call(
-            phone=phone,
-            technician_name=tech.name,
-            call_id=str(service_call.id),
-            address=elevator.address,
-            city=elevator.city,
-            fault_type=service_call.fault_type,
-            priority=service_call.priority,
-            caller_name=_extract_caller(service_call.reported_by),
-            caller_phone=_extract_phone(service_call.reported_by),
-            travel_minutes=best.travel_minutes,
-        )
+        caller_name  = _extract_caller(service_call.reported_by)
+        caller_phone = _extract_phone(service_call.reported_by)
+
+        if needs_confirmation:
+            sent = whatsapp_service.notify_technician_new_call(
+                phone=phone,
+                technician_name=tech.name,
+                call_id=str(service_call.id),
+                address=elevator.address,
+                city=elevator.city,
+                fault_type=service_call.fault_type,
+                priority=service_call.priority,
+                caller_name=caller_name,
+                caller_phone=caller_phone,
+                travel_minutes=best.travel_minutes,
+                description=service_call.description or "",
+            )
+        else:
+            sent = whatsapp_service.notify_technician_auto_assigned(
+                phone=phone,
+                technician_name=tech.name,
+                address=elevator.address,
+                city=elevator.city,
+                fault_type=service_call.fault_type,
+                priority=service_call.priority,
+                caller_name=caller_name,
+                caller_phone=caller_phone,
+                travel_minutes=best.travel_minutes,
+                description=service_call.description or "",
+            )
+
         if sent:
             logger.info("WhatsApp sent to %s (%s)", tech.name, phone)
         else:
-            logger.warning("WhatsApp failed for %s — assignment pending anyway", tech.name)
+            logger.warning("WhatsApp failed for %s — assignment created anyway", tech.name)
+
+        # If technician is already out in the field (has GPS), update their route
+        if tech.current_latitude and tech.current_longitude:
+            try:
+                from app.services.route_service import notify_technician_new_stop
+                notify_technician_new_stop(db, tech, service_call)
+            except Exception as exc:
+                logger.error("Route update failed for %s: %s", tech.name, exc)
     else:
         logger.warning("Technician %s has no phone — WhatsApp skipped", tech.name)
 
@@ -236,9 +274,14 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
     Called when a technician sends "1" via WhatsApp.
     Finds their latest PENDING_CONFIRMATION assignment and confirms it.
     """
+    from app.services.whatsapp_service import _send_message
+
     tech = _find_tech_by_phone(db, technician_phone)
     if not tech:
+        logger.warning("confirm_assignment: technician not found for %s", technician_phone)
         return None
+
+    phone_out = tech.whatsapp_number or tech.phone
 
     assignment = (
         db.query(Assignment)
@@ -250,36 +293,48 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
         .first()
     )
     if not assignment:
+        _send_message(phone_out,
+                      "ℹ️ אין קריאה פעילה הממתינה לאישורך כרגע.")
         return None
 
     assignment.status = "CONFIRMED"
 
     call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+    elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call else None
+
     if call:
         audit = AuditLog(
             service_call_id=call.id,
-            changed_by=tech.email,
+            changed_by=tech.email or tech.name,
             old_status="ASSIGNED",
             new_status="IN_PROGRESS",
             notes=f"{tech.name} אישר קבלת הקריאה — בדרך ({assignment.travel_minutes or '?'} דק׳)",
         )
-        call.status = "IN_PROGRESS"  # stays here until technician files report
+        call.status = "IN_PROGRESS"
         db.add(audit)
-
-    # Send confirmation back to technician
-    from app.services.whatsapp_service import _send_message
-    elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call else None
-    if elevator:
-        _send_message(
-            tech.whatsapp_number or tech.phone,
-            f"✅ קיבלת את הקריאה!\n"
-            f"📍 {elevator.address}, {elevator.city}\n"
-            f"🚗 זמן נסיעה: ~{assignment.travel_minutes or '?'} דקות\n\n"
-            f"בסיום הטיפול, שלח *דוח* כדי לסגור את הקריאה."
-        )
 
     db.commit()
     db.refresh(assignment)
+
+    # Confirmation message back to technician
+    addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+    maps_url = (
+        f"https://maps.google.com/?q={elevator.latitude},{elevator.longitude}"
+        if elevator and elevator.latitude else
+        f"https://maps.google.com/?q={elevator.address}+{elevator.city}+ישראל"
+    )
+    _send_message(
+        phone_out,
+        f"✅ *קיבלת את הקריאה!*\n"
+        f"────────────────────\n"
+        f"📍 {addr}\n"
+        f"🚗 זמן נסיעה: ~{assignment.travel_minutes or '?'} דקות\n"
+        f"🔗 {maps_url}\n"
+        f"────────────────────\n"
+        f"בסיום הטיפול שלח: *דוח* + תיאור קצר"
+    )
+
+    logger.info("✅ %s confirmed assignment for call %s", tech.name, call.id if call else "?")
     return assignment
 
 
@@ -288,9 +343,14 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
     Called when a technician sends "2" via WhatsApp.
     Marks the assignment as REJECTED and tries the next-best candidate.
     """
+    from app.services.whatsapp_service import _send_message
+
     tech = _find_tech_by_phone(db, technician_phone)
     if not tech:
+        logger.warning("reject_assignment: technician not found for %s", technician_phone)
         return None
+
+    phone_out = tech.whatsapp_number or tech.phone
 
     assignment = (
         db.query(Assignment)
@@ -302,15 +362,20 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
         .first()
     )
     if not assignment:
+        _send_message(phone_out,
+                      "ℹ️ אין קריאה פעילה הממתינה לתגובתך כרגע.")
         return None
 
     assignment.status = "REJECTED"
+
+    # Acknowledge rejection immediately
+    _send_message(phone_out, "↩️ הקריאה נדחתה — מועברת לטכנאי אחר.")
 
     call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
     if call:
         audit = AuditLog(
             service_call_id=call.id,
-            changed_by=tech.email,
+            changed_by=tech.email or tech.name,
             old_status="ASSIGNED",
             new_status="OPEN",
             notes=f"{tech.name} דחה את הקריאה — מחפש טכנאי אחר",
@@ -319,15 +384,31 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
         db.add(audit)
         db.commit()
 
-        # Try to assign the next available technician (excluding the rejecter)
-        elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
-        if elevator:
-            candidates = rank_technicians(db, elevator, call.fault_type, call.priority)
-            # Filter out the technician who just rejected
-            candidates = [c for c in candidates if c.technician.id != tech.id]
-            if candidates:
-                next_assignment = assign_with_confirmation(db, call)
-                return next_assignment
+        # Collect ALL technicians who already rejected this call (not just the current one)
+        rejected_ids = [
+            a.technician_id
+            for a in db.query(Assignment).filter(
+                Assignment.service_call_id == call.id,
+                Assignment.status == "REJECTED",
+            ).all()
+        ]
+
+        # Try to assign next technician, explicitly excluding all rejecters
+        next_assignment = assign_with_confirmation(db, call, exclude_tech_ids=rejected_ids)
+        if next_assignment:
+            return next_assignment
+
+        # No technician available — notify dispatcher
+        from app.config import get_settings
+        from app.services.whatsapp_service import notify_dispatcher_unassigned
+        s = get_settings()
+        if s.dispatcher_whatsapp:
+            elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+            if elevator:
+                notify_dispatcher_unassigned(
+                    s.dispatcher_whatsapp,
+                    elevator.address, elevator.city, call.fault_type,
+                )
 
     db.commit()
     return assignment
@@ -336,20 +417,28 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 def _find_tech_by_phone(db: Session, phone: str) -> Optional[Technician]:
-    """Look up a technician by phone or WhatsApp number."""
+    """Look up a technician by phone or WhatsApp number (format-agnostic)."""
     digits = "".join(c for c in phone if c.isdigit())
-    # Normalize: strip leading 972 or 0
-    if digits.startswith("972"):
-        digits = "0" + digits[3:]
 
-    return (
+    # Try last 9 digits (works for 05X, 972X, +972X formats)
+    last9 = digits[-9:]
+
+    tech = (
         db.query(Technician)
         .filter(
-            (Technician.phone.contains(digits[-9:])) |
-            (Technician.whatsapp_number.contains(digits[-9:]))
+            (Technician.phone.contains(last9)) |
+            (Technician.whatsapp_number.contains(last9))
         )
         .first()
     )
+
+    if not tech:
+        logger.warning(
+            "⚠️  No technician found for phone '%s' (last9='%s'). "
+            "Check that the technician's phone is saved correctly in the DB.",
+            phone, last9,
+        )
+    return tech
 
 
 def _extract_caller(reported_by: str) -> str:

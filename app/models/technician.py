@@ -1,13 +1,48 @@
 """Technician model — represents a field technician."""
 
+import json
+import os
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, Boolean, DateTime, Float, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import ARRAY, JSON, TypeDecorator, Uuid
 
 from app.database import Base
+
+
+class _FlexArray(TypeDecorator):
+    """
+    Stores as a native ARRAY on PostgreSQL (for performance + compat with
+    existing schema), and as a JSON array on SQLite (for local dev).
+    """
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(ARRAY(String))
+        return dialect.type_descriptor(JSON())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return []
+        if dialect.name == "postgresql":
+            return value  # pass list as-is for native ARRAY
+        # SQLite — store as JSON string
+        return value if isinstance(value, list) else list(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        # Stored as a JSON string (SQLite path)
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return []
 
 
 class Technician(Base):
@@ -24,8 +59,8 @@ class Technician(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="TECHNICIAN")
 
-    # Specializations stored as PostgreSQL array
-    specializations: Mapped[list] = mapped_column(ARRAY(String), nullable=False, default=list)
+    # Specializations — native ARRAY on PostgreSQL, JSON array on SQLite
+    specializations: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
 
     # WhatsApp number for notifications (may differ from phone)
     whatsapp_number: Mapped[str] = mapped_column(String(30), nullable=True)
@@ -40,8 +75,8 @@ class Technician(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     max_daily_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
 
-    # Preferred working area codes
-    area_codes: Mapped[list] = mapped_column(ARRAY(String), nullable=False, default=list)
+    # Preferred working area codes — native ARRAY on PostgreSQL, JSON array on SQLite
+    area_codes: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

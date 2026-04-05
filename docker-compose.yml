@@ -2,11 +2,11 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
     restart: always
     environment:
-      POSTGRES_USER: elevator_user
-      POSTGRES_PASSWORD: elevator_pass
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: elevator_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -19,14 +19,35 @@ services:
   app:
     build: .
     restart: always
-    ports:
-      - "80:8000"
+    # Port exposed only internally — nginx handles public traffic
+    expose:
+      - "8000"
     env_file:
       - .env
     depends_on:
       db:
         condition: service_healthy
 
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certbot/conf:/etc/letsencrypt:ro
+      - ./nginx/certbot/www:/var/www/certbot:ro
+    depends_on:
+      - app
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./nginx/certbot/conf:/etc/letsencrypt
+      - ./nginx/certbot/www:/var/www/certbot
+    # Run manually: docker compose run --rm certbot certonly ...
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done"
 
 volumes:
   postgres_data:

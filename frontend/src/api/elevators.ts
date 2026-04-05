@@ -2,7 +2,7 @@ import client from './client'
 import { Elevator, ElevatorFilters } from '../types'
 
 export async function listElevators(filters: ElevatorFilters = {}): Promise<Elevator[]> {
-  const { data } = await client.get<Elevator[]>('/elevators', { params: { limit: 200, ...filters } })
+  const { data } = await client.get<Elevator[]>('/elevators', { params: { limit: 2000, ...filters } })
   return data
 }
 

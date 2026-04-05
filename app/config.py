@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     gmail_user: str = ""
     gmail_app_password: str = ""
 
+    # OpenAI — used for Whisper voice transcription
+    openai_api_key: str = ""
+
+    # Anthropic — used for WhatsApp chat agent (Claude)
+    anthropic_api_key: str = ""
+
     @property
     def cors_origins_list(self) -> List[str]:
         """Parse comma-separated CORS origins into a list."""

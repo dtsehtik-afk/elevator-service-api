@@ -79,6 +79,33 @@ def create_call(
     return call
 
 
+@router.delete(
+    "",
+    status_code=status.HTTP_200_OK,
+    summary="Delete all open service calls",
+    description="Deletes every service call that is not yet RESOLVED or CLOSED. Admin only.",
+)
+def delete_open_calls(
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Bulk-delete all open/assigned/in-progress service calls."""
+    if current_user.role not in ("ADMIN", "MANAGER"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.models.service_call import ServiceCall
+    open_statuses = ["OPEN", "ASSIGNED", "IN_PROGRESS"]
+    deleted = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.status.in_(open_statuses))
+        .all()
+    )
+    count = len(deleted)
+    for call in deleted:
+        db.delete(call)
+    db.commit()
+    return {"deleted": count}
+
+
 @router.get(
     "/{call_id}",
     response_model=ServiceCallResponse,
