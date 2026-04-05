@@ -118,20 +118,24 @@ def _parse_with_claude(body: str, api_key: str) -> Optional[dict]:
 
         resp = client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=300,
+            max_tokens=400,
             system=(
-                "אתה מנתח מיילים של קריאות שירות למעליות. "
-                "חלץ את השדות הבאים מגוף המייל והחזר JSON בלבד (ללא הסברים):\n"
-                "- name: שם המתקשר\n"
-                "- city: עיר\n"
-                "- address: כתובת (רחוב + מספר בית)\n"
-                "- phone: מספר טלפון\n"
-                "- floor: קומה (מחרוזת, ריקה אם לא ידוע)\n"
-                "- call_type: סוג הפניה כפי שנכתב\n"
-                "- fault_type: אחד מהבאים בלבד: STUCK / DOOR / ELECTRICAL / MECHANICAL / SOFTWARE / OTHER\n"
-                "  (STUCK = תקועה/תקיעה, DOOR = דלת, ELECTRICAL = חשמל, MECHANICAL = מכני/ג'נרטור, SOFTWARE = תוכנה)\n"
-                "- description: תיאור חופשי קצר של התקלה (משפט אחד)\n\n"
-                "אם שדה לא קיים — השתמש במחרוזת ריקה."
+                "אתה מנתח מיילים של קריאות שירות למעליות שמגיעות מחברת beepertalk. "
+                "המיילים כתובים בעברית ועשויים להכיל אימוג'ים כמו 📍 לכתובת, 👤 לשם, 📞 לטלפון. "
+                "חלץ את השדות הבאים והחזר JSON בלבד, ללא הסברים, ללא markdown:\n"
+                "{\n"
+                '  "name": "שם המתקשר",\n'
+                '  "city": "שם העיר בלבד",\n'
+                '  "address": "שם הרחוב + מספר בית (ללא שם עיר)",\n'
+                '  "phone": "מספר טלפון ספרות בלבד",\n'
+                '  "floor": "מספר קומה או ריקה",\n'
+                '  "call_type": "סוג הפניה כפי שנכתב במייל",\n'
+                '  "fault_type": "STUCK|DOOR|ELECTRICAL|MECHANICAL|SOFTWARE|OTHER",\n'
+                '  "description": "תיאור קצר של התקלה"\n'
+                "}\n\n"
+                "fault_type בחר לפי: תקועה/תקיעה→STUCK, דלת→DOOR, חשמל→ELECTRICAL, "
+                "מכני/ג'נרטור→MECHANICAL, תוכנה→SOFTWARE, אחר→OTHER.\n"
+                "אם שדה לא קיים — החזר מחרוזת ריקה."
             ),
             messages=[{"role": "user", "content": f"גוף המייל:\n\n{body}"}],
         )
@@ -239,27 +243,34 @@ def _parse_email_regex(body: str) -> dict:
     }
 
 
-def _parse_email(body: str, api_key: str = "") -> dict:
+def _parse_email(body: str, api_key: str = "") -> Optional[dict]:
     """
-    Parse email body into structured fields.
-    Uses Claude if api_key is available; falls back to regex.
+    Parse email body into structured fields using Claude.
+    Returns None if Claude is unavailable or parsing fails.
     """
-    if api_key:
-        result = _parse_with_claude(body, api_key)
-        if result:
-            # Normalise fault_type in case Claude returned something unexpected
-            valid = {"STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "OTHER"}
-            if result.get("fault_type") not in valid:
-                raw = result.get("fault_type", "") + result.get("call_type", "")
-                result["fault_type"] = "OTHER"
-                for key, val in _FAULT_TYPE_MAP.items():
-                    if key in raw:
-                        result["fault_type"] = val
-                        break
-            return result
+    if not api_key:
+        logger.error(
+            "ANTHROPIC_API_KEY is not set — cannot parse email with Claude. "
+            "Set ANTHROPIC_API_KEY in .env to enable email processing."
+        )
+        return None
 
-    # Fallback
-    return _parse_email_regex(body)
+    result = _parse_with_claude(body, api_key)
+    if not result:
+        logger.error("Claude failed to parse email body — skipping this email.")
+        return None
+
+    # Normalise fault_type in case Claude returned something unexpected
+    valid = {"STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "OTHER"}
+    if result.get("fault_type") not in valid:
+        raw = result.get("fault_type", "") + result.get("call_type", "")
+        result["fault_type"] = "OTHER"
+        for key, val in _FAULT_TYPE_MAP.items():
+            if key in raw:
+                result["fault_type"] = val
+                break
+
+    return result
 
 
 # ── elevator matching ──────────────────────────────────────────────────────────
@@ -357,7 +368,12 @@ def poll_emails(db) -> int:
 
                 fields = _parse_email(body, api_key=api_key)
 
-                if not fields["city"] and not fields["address"]:
+                if fields is None:
+                    logger.warning("Email parsing returned no data — skipping (see above for reason)")
+                    mail.store(mid, "+FLAGS", "\\Seen")
+                    continue
+
+                if not fields.get("city") and not fields.get("address"):
                     logger.warning("Could not extract address from email — skipping")
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
