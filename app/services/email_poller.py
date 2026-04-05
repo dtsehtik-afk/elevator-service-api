@@ -104,43 +104,43 @@ def _field(body: str, label: str) -> str:
     return value
 
 
-# ── Claude-powered smart parser ────────────────────────────────────────────────
+# ── Gemini-powered smart parser ────────────────────────────────────────────────
 
-def _parse_with_claude(body: str, api_key: str) -> Optional[dict]:
+_GEMINI_PROMPT = (
+    "אתה מנתח מיילים של קריאות שירות למעליות שמגיעות מחברת beepertalk. "
+    "המיילים כתובים בעברית ועשויים להכיל אימוג'ים כמו 📍 לכתובת, 👤 לשם, 📞 לטלפון. "
+    "חלץ את השדות הבאים והחזר JSON בלבד, ללא הסברים, ללא markdown:\n"
+    "{\n"
+    '  "name": "שם המתקשר",\n'
+    '  "city": "שם העיר בלבד",\n'
+    '  "address": "שם הרחוב + מספר בית (ללא שם עיר)",\n'
+    '  "phone": "מספר טלפון ספרות בלבד",\n'
+    '  "floor": "מספר קומה או ריקה",\n'
+    '  "call_type": "סוג הפניה כפי שנכתב במייל",\n'
+    '  "fault_type": "STUCK|DOOR|ELECTRICAL|MECHANICAL|SOFTWARE|OTHER",\n'
+    '  "description": "תיאור קצר של התקלה"\n'
+    "}\n\n"
+    "fault_type בחר לפי: תקועה/תקיעה→STUCK, דלת→DOOR, חשמל→ELECTRICAL, "
+    "מכני/ג'נרטור→MECHANICAL, תוכנה→SOFTWARE, אחר→OTHER.\n"
+    "אם שדה לא קיים — החזר מחרוזת ריקה."
+)
+
+
+def _parse_with_gemini(body: str, api_key: str) -> Optional[dict]:
     """
-    Use Claude to extract structured fields from an arbitrary email body.
+    Use Gemini to extract structured fields from an arbitrary email body.
     Returns a dict with keys: name, city, address, phone, floor, call_type, fault_type
     or None on failure.
     """
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-
-        resp = client.messages.create(
-            model="claude-3-5-haiku-20241022",
-            max_tokens=400,
-            system=(
-                "אתה מנתח מיילים של קריאות שירות למעליות שמגיעות מחברת beepertalk. "
-                "המיילים כתובים בעברית ועשויים להכיל אימוג'ים כמו 📍 לכתובת, 👤 לשם, 📞 לטלפון. "
-                "חלץ את השדות הבאים והחזר JSON בלבד, ללא הסברים, ללא markdown:\n"
-                "{\n"
-                '  "name": "שם המתקשר",\n'
-                '  "city": "שם העיר בלבד",\n'
-                '  "address": "שם הרחוב + מספר בית (ללא שם עיר)",\n'
-                '  "phone": "מספר טלפון ספרות בלבד",\n'
-                '  "floor": "מספר קומה או ריקה",\n'
-                '  "call_type": "סוג הפניה כפי שנכתב במייל",\n'
-                '  "fault_type": "STUCK|DOOR|ELECTRICAL|MECHANICAL|SOFTWARE|OTHER",\n'
-                '  "description": "תיאור קצר של התקלה"\n'
-                "}\n\n"
-                "fault_type בחר לפי: תקועה/תקיעה→STUCK, דלת→DOOR, חשמל→ELECTRICAL, "
-                "מכני/ג'נרטור→MECHANICAL, תוכנה→SOFTWARE, אחר→OTHER.\n"
-                "אם שדה לא קיים — החזר מחרוזת ריקה."
-            ),
-            messages=[{"role": "user", "content": f"גוף המייל:\n\n{body}"}],
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=_GEMINI_PROMPT,
         )
-
-        raw = resp.content[0].text.strip()
+        resp = model.generate_content(f"גוף המייל:\n\n{body}")
+        raw = resp.text.strip()
         # Strip markdown fences if present
         if raw.startswith("```"):
             raw = re.sub(r"^```[a-z]*\n?", "", raw)
@@ -148,7 +148,7 @@ def _parse_with_claude(body: str, api_key: str) -> Optional[dict]:
         return json.loads(raw.strip())
 
     except Exception as exc:
-        logger.error("Claude email parsing failed: %s", exc)
+        logger.error("Gemini email parsing failed: %s", exc)
         return None
 
 
@@ -245,17 +245,17 @@ def _parse_email_regex(body: str) -> dict:
 
 def _parse_email(body: str, api_key: str = "") -> Optional[dict]:
     """
-    Parse email body into structured fields using Claude.
-    Returns None if Claude is unavailable or parsing fails.
+    Parse email body into structured fields using Gemini.
+    Returns None if Gemini is unavailable or parsing fails.
     """
     if not api_key:
         logger.error(
-            "ANTHROPIC_API_KEY is not set — cannot parse email with Claude. "
-            "Set ANTHROPIC_API_KEY in .env to enable email processing."
+            "GEMINI_API_KEY is not set — cannot parse email. "
+            "Set GEMINI_API_KEY in .env to enable email processing."
         )
         return None
 
-    result = _parse_with_claude(body, api_key)
+    result = _parse_with_gemini(body, api_key)
     if not result:
         logger.error("Claude failed to parse email body — skipping this email.")
         return None
@@ -355,7 +355,7 @@ def poll_emails(db) -> int:
             return 0
 
         logger.info("📧 Found %d new service-call email(s)", len(msg_ids))
-        api_key = getattr(s, "anthropic_api_key", "")
+        api_key = getattr(s, "gemini_api_key", "")
 
         for mid in msg_ids:
             try:
