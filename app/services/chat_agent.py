@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import anthropic
+import httpx
 from sqlalchemy.orm import Session
 
 from app.models.assignment import Assignment
@@ -25,126 +25,60 @@ from app.models.technician import Technician
 
 logger = logging.getLogger(__name__)
 
-# ── Tool definitions for Claude ───────────────────────────────────────────────
+# ── Tool definitions for Gemini REST API ─────────────────────────────────────
 
-_TOOLS = [
-    {
-        "name": "search_elevators",
-        "description": (
-            "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי. "
-            "מחזיר רשימת מעליות תואמות עם פרטים בסיסיים."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "מחרוזת חיפוש — כתובת, שם עיר, שם בניין וכו'",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "מספר תוצאות מקסימלי (ברירת מחדל: 5)",
-                    "default": 5,
-                },
-            },
-            "required": ["query"],
+_GEMINI_TOOLS = [{
+    "function_declarations": [
+        {
+            "name": "search_elevators",
+            "description": "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "query": {"type": "STRING", "description": "מחרוזת חיפוש"},
+                "limit": {"type": "INTEGER", "description": "מספר תוצאות מקסימלי"},
+            }, "required": ["query"]},
         },
-    },
-    {
-        "name": "get_elevator_calls",
-        "description": (
-            "מחזיר היסטוריית קריאות שירות עבור מעלית ספציפית לפי מזהה. "
-            "כולל תאריך, סוג תקלה, סטטוס, טכנאי שטיפל והערות סגירה."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "elevator_id": {
-                    "type": "string",
-                    "description": "UUID של המעלית",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "מספר קריאות אחרונות להחזיר (ברירת מחדל: 10)",
-                    "default": 10,
-                },
-            },
-            "required": ["elevator_id"],
+        {
+            "name": "get_elevator_calls",
+            "description": "מחזיר היסטוריית קריאות שירות עבור מעלית ספציפית לפי מזהה.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "elevator_id": {"type": "STRING", "description": "UUID של המעלית"},
+                "limit": {"type": "INTEGER", "description": "מספר קריאות אחרונות"},
+            }, "required": ["elevator_id"]},
         },
-    },
-    {
-        "name": "get_recent_calls",
-        "description": (
-            "מחזיר קריאות שירות מהימים האחרונים. "
-            "ניתן לסנן לפי סטטוס, טכנאי, עיר."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "description": "כמה ימים אחורה לחפש (ברירת מחדל: 7)",
-                    "default": 7,
-                },
-                "status": {
-                    "type": "string",
-                    "description": "סנן לפי סטטוס: OPEN, ASSIGNED, IN_PROGRESS, RESOLVED, CLOSED",
-                },
-                "city": {
-                    "type": "string",
-                    "description": "סנן לפי עיר",
-                },
-                "technician_name": {
-                    "type": "string",
-                    "description": "סנן לפי שם טכנאי",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "מספר תוצאות מקסימלי",
-                    "default": 15,
-                },
-            },
-            "required": [],
+        {
+            "name": "get_recent_calls",
+            "description": "מחזיר קריאות שירות מהימים האחרונים. ניתן לסנן לפי סטטוס, טכנאי, עיר.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "days": {"type": "INTEGER", "description": "כמה ימים אחורה"},
+                "status": {"type": "STRING", "description": "OPEN/ASSIGNED/IN_PROGRESS/RESOLVED/CLOSED"},
+                "city": {"type": "STRING", "description": "סנן לפי עיר"},
+                "technician_name": {"type": "STRING", "description": "סנן לפי שם טכנאי"},
+                "limit": {"type": "INTEGER", "description": "מספר תוצאות מקסימלי"},
+            }, "required": []},
         },
-    },
-    {
-        "name": "get_technician_info",
-        "description": "מחזיר פרטים ומידע על טכנאי — קריאות פתוחות, עומס עבודה.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "שם הטכנאי (חלקי או מלא)",
-                },
-            },
-            "required": ["name"],
+        {
+            "name": "get_technician_info",
+            "description": "מחזיר פרטים ומידע על טכנאי — קריאות פתוחות, עומס עבודה.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "name": {"type": "STRING", "description": "שם הטכנאי"},
+            }, "required": ["name"]},
         },
-    },
-    {
-        "name": "get_elevator_maintenance",
-        "description": "מחזיר רשומות תחזוקה תקופתית עבור מעלית.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "elevator_id": {
-                    "type": "string",
-                    "description": "UUID של המעלית",
-                },
-            },
-            "required": ["elevator_id"],
+        {
+            "name": "get_elevator_maintenance",
+            "description": "מחזיר רשומות תחזוקה תקופתית עבור מעלית.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "elevator_id": {"type": "STRING", "description": "UUID של המעלית"},
+            }, "required": ["elevator_id"]},
         },
-    },
-    {
-        "name": "get_system_summary",
-        "description": "מחזיר סיכום כללי של מצב המערכת — קריאות פתוחות, טכנאים פעילים וכו'.",
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
+        {
+            "name": "get_system_summary",
+            "description": "מחזיר סיכום כללי של מצב המערכת — קריאות פתוחות, טכנאים פעילים.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
         },
-    },
-]
+    ]
+}]
+
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 
 # ── DB query functions (called when Claude invokes a tool) ────────────────────
@@ -449,52 +383,51 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי") 
     from app.config import get_settings
     s = get_settings()
 
-    if not s.anthropic_api_key:
-        return "❌ שירות השאלות אינו מוגדר (חסר ANTHROPIC_API_KEY)"
+    if not s.gemini_api_key:
+        return "❌ שירות השאלות אינו מוגדר (חסר GEMINI_API_KEY)"
 
-    client = anthropic.Anthropic(api_key=s.anthropic_api_key)
+    contents = [{"role": "user", "parts": [{"text": f"{asker_name} שואל: {question}"}]}]
 
-    messages = [
-        {"role": "user", "content": f"{asker_name} שואל: {question}"}
-    ]
+    with httpx.Client(timeout=30) as client:
+        for _iteration in range(6):
+            payload = {
+                "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
+                "tools": _GEMINI_TOOLS,
+                "contents": contents,
+            }
+            resp = client.post(f"{_GEMINI_URL}?key={s.gemini_api_key}", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
 
-    # Agentic loop — Claude may call multiple tools before answering
-    for _iteration in range(6):  # max 6 rounds
-        response = client.messages.create(
-            model="claude-3-5-haiku-20241022",   # fast + cheap
-            max_tokens=1024,
-            system=_SYSTEM_PROMPT,
-            tools=_TOOLS,
-            messages=messages,
-        )
+            parts = data["candidates"][0]["content"]["parts"]
 
-        # If Claude is done — return the text answer
-        if response.stop_reason == "end_turn":
-            for block in response.content:
-                if hasattr(block, "text"):
-                    return block.text.strip()
-            return "לא הצלחתי לעבד את השאלה."
+            # Collect function calls
+            fn_calls = [p["functionCall"] for p in parts if "functionCall" in p]
 
-        # Claude wants to use tools
-        if response.stop_reason == "tool_use":
-            # Add Claude's response (with tool calls) to history
-            messages.append({"role": "assistant", "content": response.content})
+            if not fn_calls:
+                # No tool calls — return text answer
+                for p in parts:
+                    if "text" in p and p["text"]:
+                        return p["text"].strip()
+                return "לא הצלחתי לעבד את השאלה."
 
-            # Execute each tool and collect results
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    logger.info("🔧 Chat agent calling tool: %s(%s)", block.name, block.input)
-                    result = _run_tool(db, block.name, block.input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(result, ensure_ascii=False),
-                    })
+            # Append model turn
+            contents.append({"role": "model", "parts": parts})
 
-            messages.append({"role": "user", "content": tool_results})
-            continue
+            # Execute tools and build response turn
+            fn_responses = []
+            for fn_call in fn_calls:
+                name = fn_call["name"]
+                args = fn_call.get("args", {})
+                logger.info("🔧 Chat agent calling tool: %s(%s)", name, args)
+                result = _run_tool(db, name, args)
+                fn_responses.append({
+                    "functionResponse": {
+                        "name": name,
+                        "response": {"result": json.dumps(result, ensure_ascii=False)},
+                    }
+                })
 
-        break  # unexpected stop reason
+            contents.append({"role": "user", "parts": fn_responses})
 
     return "לא הצלחתי לענות על השאלה — נסה לנסח אחרת."

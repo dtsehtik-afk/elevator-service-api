@@ -1,7 +1,9 @@
 """Webhook endpoints for external integrations (Make.com, telephony providers, Green API)."""
 
+import html as html_lib
 import json
 import logging
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -20,6 +22,19 @@ from app.services import whatsapp_service
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+
+def _clean_html(text: str) -> str:
+    """Strip HTML tags and decode entities from email body."""
+    # Replace block-level tags with newlines so fields stay on separate lines
+    text = re.sub(r"</?(p|br|div|li|tr|td|th)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    # Remove all remaining tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Decode HTML entities (&amp; &#39; &nbsp; etc.)
+    text = html_lib.unescape(text)
+    # Collapse multiple blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _extract_email_body(raw_bytes: bytes, content_type: str) -> str:
@@ -142,7 +157,7 @@ async def receive_call(
     """
     raw = await request.body()
     content_type = request.headers.get("content-type", "")
-    email_body = _extract_email_body(raw, content_type)
+    email_body = _clean_html(_extract_email_body(raw, content_type))
 
     logger.debug("Webhook /call received body (%d chars)", len(email_body))
 

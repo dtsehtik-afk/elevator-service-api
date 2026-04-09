@@ -134,15 +134,17 @@ def _parse_with_gemini(body: str, api_key: str) -> Optional[dict]:
     or None on failure.
     """
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=_GEMINI_PROMPT,
+        import httpx
+        resp = httpx.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            json={
+                "system_instruction": {"parts": [{"text": _GEMINI_PROMPT}]},
+                "contents": [{"role": "user", "parts": [{"text": f"גוף המייל:\n\n{body}"}]}],
+            },
+            timeout=20,
         )
-        resp = model.generate_content(f"גוף המייל:\n\n{body}")
-        raw = resp.text.strip()
-        # Strip markdown fences if present
+        resp.raise_for_status()
+        raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```[a-z]*\n?", "", raw)
             raw = re.sub(r"\n?```$", "", raw)
@@ -364,8 +366,11 @@ def poll_emails(db) -> int:
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
                 body = _extract_body(msg)
+                # Always force-clean HTML before passing to AI — beepertalk plain-text
+                # parts often contain literal </p><p> tags that slip through detection
+                body = _html_to_text(body)
 
-                logger.debug("📧 Email body (first 300 chars): %s", body[:300])
+                logger.info("📧 Email body (first 400 chars): %s", body[:400])
 
                 fields = _parse_email(body, api_key=api_key)
 

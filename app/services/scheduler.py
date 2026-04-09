@@ -540,11 +540,11 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
       - QUESTION → answer a system query
       - IGNORE   → not a meaningful action
     """
-    import anthropic
+    import urllib.request
     from app.models.technician import Technician
 
-    if not settings.anthropic_api_key:
-        # Fallback to keyword routing if Claude not configured
+    if not settings.gemini_api_key:
+        # Fallback to keyword routing if Gemini not configured
         if any(w in text for w in ["דוח", "סיום", "סיימתי", "טיפלתי", "סגור"]):
             _handle_technician_report(db, phone, text)
         elif any(w in text for w in ["לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך"]):
@@ -567,25 +567,32 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
         return
 
     try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        resp = client.messages.create(
-            model="claude-3-5-haiku-20241022",
-            max_tokens=100,
-            system=(
-                "אתה מנתח כוונות של הודעות ווצאפ מטכנאים של חברת מעליות. "
-                "החזר JSON בלבד (ללא הסברים) עם שדה 'intent' אחד מתוך:\n"
-                "- REPORT   (הטכנאי מדווח שסיים טיפול / שולח סיכום)\n"
-                "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה)\n"
-                "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה)\n"
-                "- IGNORE   (ברכה, תגובה לא רלוונטית)\n"
-                "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה)."
-            ),
-            messages=[{"role": "user", "content": text}],
+        import json, urllib.request as _ur, urllib.error
+        _prompt = (
+            "אתה מנתח כוונות של הודעות ווצאפ מטכנאים של חברת מעליות. "
+            "החזר JSON בלבד (ללא הסברים) עם שדה 'intent' אחד מתוך:\n"
+            "- REPORT   (הטכנאי מדווח שסיים טיפול / שולח סיכום)\n"
+            "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה)\n"
+            "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה)\n"
+            "- IGNORE   (ברכה, תגובה לא רלוונטית)\n"
+            "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה).\n\n"
+            f"הודעה: {text}"
         )
-
-        import json
-        raw = resp.content[0].text.strip()
-        # Strip markdown code fences if present
+        import urllib.request, json as _json
+        import urllib.error
+        _payload = json.dumps({
+            "contents": [{"parts": [{"text": _prompt}]}],
+            "generationConfig": {"maxOutputTokens": 150},
+        }).encode()
+        _req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.gemini_api_key}",
+            data=_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(_req, timeout=10) as _r:
+            _data = json.loads(_r.read())
+        raw = _data["candidates"][0]["content"]["parts"][0]["text"].strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
         parsed  = json.loads(raw)
@@ -705,7 +712,7 @@ def _handle_chat_question(db, phone: str, question: str, settings) -> None:
 
     logger.info("💬 Chat question from %s: %s", asker_name, question)
 
-    if not settings.anthropic_api_key:
+    if not settings.gemini_api_key:
         _handle_chat_question_simple(db, phone, question, settings)
         return
 
