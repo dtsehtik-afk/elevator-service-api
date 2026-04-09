@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0004_quote_needed"
-down_revision = "0003_ai_assignment"
+down_revision = "0003"
 branch_labels = None
 depends_on = None
 
