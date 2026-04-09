@@ -92,12 +92,20 @@ _MORNING_QUOTES = [
     "🌄 \"בוקר חדש, סיכוי חדש, יום חדש לעשות את ההבדל.\"",
 ]
 
-# Personal motivational message per technician (by name)
-_PERSONAL_MESSAGES = {
-    "תומר חנה": "תומר, אתה עמוד השדרה של הצוות — הלקוחות סומכים עליך! 💪",
-    "משרד": "יום טוב! כל פנייה שמגיעה אליכם היא הזדמנות לשירות מעולה. 🌟",
-    "דניס": "דניס, ההתמסרות שלך לעבודה מעוררת השראה לכולם! 🏆",
-}
+def _generate_personal_motivation(name: str, api_key: str) -> str:
+    """Use Gemini to generate a fresh personal motivational sentence for a technician."""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        resp = model.generate_content(
+            f"כתוב משפט מוטיבציה אישי קצר (משפט אחד בלבד) בעברית לטכנאי מעליות בשם {name}. "
+            f"הודעה חמה, מעודדת ואישית. ללא הסברים, רק המשפט עצמו."
+        )
+        return resp.text.strip()
+    except Exception as exc:
+        logger.warning("Gemini motivation generation failed for %s: %s", name, exc)
+        return ""
 
 def _send_morning_location_requests():
     """Morning job (08:00): send each active technician a WhatsApp with location request + motivational quote."""
@@ -127,7 +135,8 @@ def _send_morning_location_requests():
             base_url = get_settings().app_base_url
             portal_link = f"{base_url}/app/tech/{tech.id}"
             quote = random.choice(_MORNING_QUOTES)
-            personal = _PERSONAL_MESSAGES.get(tech.name, "")
+            gemini_key = getattr(get_settings(), "gemini_api_key", "")
+            personal = _generate_personal_motivation(tech.name, gemini_key) if gemini_key else ""
 
             msg = (
                 f"בוקר טוב {tech.name} 👋\n\n"
