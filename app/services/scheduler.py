@@ -92,6 +92,13 @@ _MORNING_QUOTES = [
     "🌄 \"בוקר חדש, סיכוי חדש, יום חדש לעשות את ההבדל.\"",
 ]
 
+# Personal motivational message per technician (by name)
+_PERSONAL_MESSAGES = {
+    "תומר חנה": "תומר, אתה עמוד השדרה של הצוות — הלקוחות סומכים עליך! 💪",
+    "משרד": "יום טוב! כל פנייה שמגיעה אליכם היא הזדמנות לשירות מעולה. 🌟",
+    "דניס": "דניס, ההתמסרות שלך לעבודה מעוררת השראה לכולם! 🏆",
+}
+
 def _send_morning_location_requests():
     """Morning job (08:00): send each active technician a WhatsApp with location request + motivational quote."""
     import random
@@ -120,10 +127,13 @@ def _send_morning_location_requests():
             base_url = get_settings().app_base_url
             portal_link = f"{base_url}/app/tech/{tech.id}"
             quote = random.choice(_MORNING_QUOTES)
+            personal = _PERSONAL_MESSAGES.get(tech.name, "")
 
             msg = (
                 f"בוקר טוב {tech.name} 👋\n\n"
-                f"{quote}\n\n"
+                f"{quote}\n"
+                + (f"{personal}\n\n" if personal else "\n")
+                +
                 f"────────────────────\n"
                 f"לתיאום קריאות חכם לפי מיקום, אנא שתף *מיקום חי ל-8 שעות* בצ׳אט זה.\n\n"
                 f"איך משתפים:\n"
@@ -936,7 +946,7 @@ def start_scheduler():
     # All cron times are in Israel local time (Asia/Jerusalem)
     _scheduler = BackgroundScheduler(timezone=ZoneInfo("Asia/Jerusalem"))
     _scheduler.add_job(_run_nightly_maintenance,             "cron",     hour=0,  minute=5)
-    _scheduler.add_job(_send_morning_location_requests,      "cron",     hour=8,  minute=0)
+    _scheduler.add_job(_send_morning_location_requests,      "cron",     hour=7,  minute=45)
     _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
