@@ -329,6 +329,62 @@ def _find_or_create_elevator(db, city: str, address: str):
     return elev
 
 
+# ── rescue blast ──────────────────────────────────────────────────────────────
+
+def _send_rescue_blast(db, fields: dict, caller_name: str, caller_phone: str, description: str):
+    """Send an emergency rescue alert to ALL active technicians."""
+    import math
+    from app.models.technician import Technician
+    from app.services.whatsapp_service import notify_rescue_emergency
+
+    technicians = (
+        db.query(Technician)
+        .filter(Technician.is_active == True, Technician.role == "TECHNICIAN")  # noqa: E712
+        .all()
+    )
+    if not technicians:
+        return
+
+    # Find closest technician by GPS (if available)
+    elev_lat = fields.get("_lat")
+    elev_lon = fields.get("_lon")
+    closest_name = None
+
+    if elev_lat and elev_lon:
+        def _dist(t):
+            if t.current_latitude and t.current_longitude:
+                dlat = float(t.current_latitude) - elev_lat
+                dlon = float(t.current_longitude) - elev_lon
+                return math.sqrt(dlat**2 + dlon**2)
+            return float("inf")
+
+        sorted_techs = sorted(technicians, key=_dist)
+        if sorted_techs[0].current_latitude:
+            closest_name = sorted_techs[0].name
+    else:
+        # No GPS — mark first available technician as closest
+        available = [t for t in technicians if t.is_available]
+        if available:
+            closest_name = available[0].name
+
+    for tech in technicians:
+        phone = tech.whatsapp_number or tech.phone
+        if not phone:
+            continue
+        notify_rescue_emergency(
+            phone=phone,
+            technician_name=tech.name,
+            address=fields.get("address", ""),
+            city=fields.get("city", ""),
+            caller_name=caller_name,
+            caller_phone=caller_phone,
+            description=description,
+            closest_tech_name=closest_name,
+            is_closest=(tech.name == closest_name),
+        )
+    logger.info("🚨 Rescue blast sent to %d technicians", len(technicians))
+
+
 # ── main poller ────────────────────────────────────────────────────────────────
 
 def poll_emails(db) -> int:
@@ -404,30 +460,43 @@ def poll_emails(db) -> int:
                 else:
                     reported_by = caller_name
 
+                # Detect rescue/emergency (people trapped)
+                _RESCUE_KEYWORDS = {"חילוץ", "לכודים", "לכוד", "כלואים", "כלוא", "תקועים", "נתקע"}
+                combined_text = f"{fields.get('call_type','')} {fields.get('description','')}".lower()
+                is_rescue = any(kw in combined_text for kw in _RESCUE_KEYWORDS)
+
                 from app.models.service_call import ServiceCall
                 call = ServiceCall(
                     elevator_id=elevator.id,
                     reported_by=reported_by,
                     description=description,
                     fault_type=fields["fault_type"],
-                    priority="MEDIUM",
+                    priority="CRITICAL" if is_rescue else "MEDIUM",
                     status="OPEN",
                 )
                 db.add(call)
                 db.commit()
                 created += 1
                 logger.info(
-                    "✅ Service call created for elevator %s (%s %s) — reported by %s",
+                    "✅ Service call created for elevator %s (%s %s) — reported by %s%s",
                     elevator.serial_number or elevator.id,
                     fields["city"], fields["address"], fields.get("name"),
+                    " [RESCUE]" if is_rescue else "",
                 )
 
-                # Run AI assignment — email calls are auto-confirmed (no 1/2 needed)
+                # Rescue: blast ALL technicians immediately
+                if is_rescue:
+                    try:
+                        _send_rescue_blast(db, fields, caller_name, caller_phone, description)
+                    except Exception as exc:
+                        logger.error("Rescue blast failed: %s", exc)
+
+                # Regular assignment — always ask for confirmation (1/2)
                 assignment = None
                 try:
                     from app.services import ai_assignment_agent
                     assignment = ai_assignment_agent.assign_with_confirmation(
-                        db, call, needs_confirmation=False
+                        db, call, needs_confirmation=True
                     )
                 except Exception as exc:
                     logger.error("AI assignment failed for email-polled call: %s", exc)

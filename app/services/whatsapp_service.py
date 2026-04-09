@@ -190,6 +190,49 @@ def notify_technician_call_cancelled(phone: str, address: str, city: str) -> boo
     return _send_message(phone, message)
 
 
+def notify_rescue_emergency(
+    phone: str,
+    technician_name: str,
+    address: str,
+    city: str,
+    caller_name: str,
+    caller_phone: str,
+    description: str,
+    closest_tech_name: Optional[str],
+    is_closest: bool,
+) -> bool:
+    """Send an urgent rescue alert to a technician (people trapped in elevator)."""
+    ts = _now_il()
+    maps_url = f"https://maps.google.com/?q={address}+{city}+ישראל"
+
+    closest_line = ""
+    if closest_tech_name:
+        if is_closest:
+            closest_line = f"📌 *אתה הטכנאי הקרוב ביותר למיקום!*\n"
+        else:
+            closest_line = f"📌 *הטכנאי הקרוב ביותר:* {closest_tech_name}\n"
+
+    caller_line = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
+    phone_line  = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
+    desc_line   = f"📝 {description}\n" if description else ""
+
+    message = (
+        f"🚨🚨🚨 *חילוץ — אנשים לכודים במעלית* 🚨🚨🚨\n"
+        f"🗓 {ts}\n"
+        f"════════════════════\n"
+        f"📍 *כתובת:* {address}, {city}\n"
+        f"{desc_line}"
+        f"{caller_line}"
+        f"{phone_line}"
+        f"{closest_line}"
+        f"🔗 {maps_url}\n"
+        f"════════════════════\n"
+        f"⚡ *נדרשת הגעה מיידית!*\n"
+        f"השב *1* לאישור הגעה"
+    )
+    return _send_message(phone, message)
+
+
 def notify_dispatcher_unassigned(phone: str, address: str, city: str, fault_type: str) -> bool:
     """Notify the dispatcher that no technician could be assigned."""
     fault = _FAULT_LABEL.get(fault_type, fault_type)
