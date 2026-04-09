@@ -414,6 +414,115 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
     return assignment
 
 
+def get_pending_assignments_for_phone(db: Session, phone: str) -> list:
+    """
+    Return all PENDING_CONFIRMATION assignments for a technician (by phone).
+    Each item: {"assignment_id": str, "address": str, "city": str}
+    """
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return []
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.technician_id == tech.id,
+                Assignment.status == "PENDING_CONFIRMATION")
+        .order_by(Assignment.assigned_at.asc())
+        .all()
+    )
+    result = []
+    for a in assignments:
+        call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
+        elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call else None
+        result.append({
+            "assignment_id": str(a.id),
+            "address": elevator.address if elevator else "",
+            "city": elevator.city if elevator else "",
+        })
+    return result
+
+
+def confirm_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Optional[Assignment]:
+    """Confirm a specific assignment by its ID."""
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return None
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.technician_id == tech.id,
+        Assignment.status == "PENDING_CONFIRMATION",
+    ).first()
+    if not assignment:
+        return None
+
+    from app.services.whatsapp_service import _send_message
+    assignment.status = "CONFIRMED"
+    call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+    elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call else None
+    if call:
+        call.status = "IN_PROGRESS"
+        db.add(AuditLog(
+            service_call_id=call.id,
+            changed_by=tech.email or tech.name,
+            old_status="ASSIGNED", new_status="IN_PROGRESS",
+            notes=f"{tech.name} אישר קבלת הקריאה",
+        ))
+    db.commit()
+
+    addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+    maps_url = (
+        f"https://maps.google.com/?q={elevator.address}+{elevator.city}+ישראל"
+        if elevator else ""
+    )
+    phone_out = tech.whatsapp_number or tech.phone
+    _send_message(phone_out,
+        f"✅ *קיבלת את הקריאה!*\n"
+        f"📍 {addr}\n"
+        f"🚗 ~{assignment.travel_minutes or '?'} דקות\n"
+        f"🔗 {maps_url}\n"
+        f"בסיום שלח: *דוח* + תיאור קצר"
+    )
+    logger.info("✅ %s confirmed assignment %s", tech.name, assignment_id)
+    return assignment
+
+
+def reject_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Optional[Assignment]:
+    """Reject a specific assignment by its ID and try to reassign."""
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return None
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.technician_id == tech.id,
+        Assignment.status == "PENDING_CONFIRMATION",
+    ).first()
+    if not assignment:
+        return None
+
+    from app.services.whatsapp_service import _send_message
+    assignment.status = "REJECTED"
+    call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+    if call:
+        call.status = "OPEN"
+        db.add(AuditLog(
+            service_call_id=call.id,
+            changed_by=tech.email or tech.name,
+            old_status="ASSIGNED", new_status="OPEN",
+            notes=f"{tech.name} דחה את הקריאה",
+        ))
+        db.commit()
+        rejected_ids = [
+            a.technician_id for a in db.query(Assignment).filter(
+                Assignment.service_call_id == call.id,
+                Assignment.status == "REJECTED",
+            ).all()
+        ]
+        assign_with_confirmation(db, call, exclude_tech_ids=rejected_ids)
+    else:
+        db.commit()
+    logger.info("❌ %s rejected assignment %s", tech.name, assignment_id)
+    return assignment
+
+
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 def _find_tech_by_phone(db: Session, phone: str) -> Optional[Technician]:

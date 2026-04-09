@@ -222,6 +222,71 @@ def _handle_technician_report(db, phone: str, text: str):
     logger.info("📋 Call %s resolved by %s", call.id, tech.name)
 
 
+def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:
+    """
+    Parse a technician's free-text reply using Gemini and accept/reject
+    the relevant pending assignments.
+    Falls back to classic 1/2 if only one pending call or Gemini unavailable.
+    """
+    from app.services import ai_assignment_agent
+
+    # Classic 1/2 fallback (single pending or explicit digit)
+    if text.strip() == "1" and len(pending) == 1:
+        ai_assignment_agent.confirm_assignment_by_id(db, phone, pending[0]["assignment_id"])
+        return
+    if text.strip() == "2" and len(pending) == 1:
+        ai_assignment_agent.reject_assignment_by_id(db, phone, pending[0]["assignment_id"])
+        return
+
+    # Gemini natural-language parsing
+    gemini_key = getattr(s, "gemini_api_key", "")
+    result = {"accept": [], "reject": []} if not gemini_key else _parse_reply_gemini(text, pending, gemini_key)
+
+    if not result["accept"] and not result["reject"]:
+        # Could not parse → treat as free text
+        _handle_free_text(db, phone, text, s)
+        return
+
+    for aid in result["accept"]:
+        ai_assignment_agent.confirm_assignment_by_id(db, phone, aid)
+    for aid in result["reject"]:
+        ai_assignment_agent.reject_assignment_by_id(db, phone, aid)
+
+
+def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
+    """
+    Ask Gemini to match a technician's free-text reply to pending assignments.
+    Returns {"accept": [assignment_id, ...], "reject": [assignment_id, ...]}.
+    """
+    import json as _json
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+
+        calls_desc = "\n".join(
+            f"- ID: {p['assignment_id']} | כתובת: {p['address']}, {p['city']}"
+            for p in pending
+        )
+        prompt = (
+            f"טכנאי קיבל את הקריאות הבאות הממתינות לאישורו:\n{calls_desc}\n\n"
+            f"הטכנאי שלח: \"{text}\"\n\n"
+            f"החזר JSON בלבד (ללא הסברים):\n"
+            f'{{ "accept": ["id1",...], "reject": ["id2",...] }}\n'
+            f"אם לא ברור — החזר רשימות ריקות."
+        )
+        resp = model.generate_content(prompt)
+        raw = resp.text.strip()
+        if raw.startswith("```"):
+            import re as _re
+            raw = _re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = _re.sub(r"\n?```$", "", raw)
+        return _json.loads(raw)
+    except Exception as exc:
+        logger.warning("Gemini reply parsing failed: %s", exc)
+        return {"accept": [], "reject": []}
+
+
 def _poll_whatsapp_replies():
     """
     Poll Green API every 15 seconds for incoming WhatsApp messages.
@@ -349,14 +414,9 @@ def _poll_whatsapp_replies():
                             text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
 
                         logger.info("📩 Message from %s: %r", phone, text)
-                        if text == "1":
-                            assignment = ai_assignment_agent.confirm_assignment(db, phone)
-                            if assignment:
-                                logger.info("✅ Assignment confirmed by %s", phone)
-                        elif text == "2":
-                            assignment = ai_assignment_agent.reject_assignment(db, phone)
-                            if assignment:
-                                logger.info("❌ Assignment rejected by %s", phone)
+                        pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
+                        if pending:
+                            _handle_tech_reply(db, phone, text, pending, s)
                         elif len(text) > 0:
                             _handle_free_text(db, phone, text, s)
                 finally:
