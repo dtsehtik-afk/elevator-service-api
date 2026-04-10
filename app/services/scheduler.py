@@ -676,9 +676,13 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
             .first())
 
     dispatcher_digits = "".join(c for c in (settings.dispatcher_whatsapp or "") if c.isdigit())
-    is_dispatcher = digits[-9:] == dispatcher_digits[-9:]
+    is_dispatcher = bool(dispatcher_digits and digits[-9:] == dispatcher_digits[-9:])
+
+    # If sender is completely unknown (not technician, not dispatcher) — still respond
+    # via the chat agent so the office / any internal sender gets an answer.
     if not tech and not is_dispatcher:
-        logger.debug("Free-text from unknown number %s — ignored", phone)
+        logger.info("📩 Message from unregistered number %s — routing to chat agent", phone)
+        _handle_chat_question(db, phone, text, settings)
         return
 
     try:
@@ -820,14 +824,9 @@ def _handle_chat_question(db, phone: str, question: str, settings) -> None:
         )
         .first()
     )
-    asker_name = tech.name if tech else "משתמש"
+    asker_name = tech.name if tech else "המשרד"
 
-    # Only known technicians / managers OR dispatcher number
-    dispatcher_digits = "".join(c for c in (settings.dispatcher_whatsapp or "") if c.isdigit())
-    is_dispatcher = digits[-9:] == dispatcher_digits[-9:]
-    if not tech and not is_dispatcher:
-        logger.debug("Chat question from unknown number %s — ignored", phone)
-        return
+    # Allow all senders — unknown numbers (office, manager) still get an answer
 
     logger.info("💬 Chat question from %s: %s", asker_name, question)
 

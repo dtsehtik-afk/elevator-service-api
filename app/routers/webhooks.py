@@ -325,9 +325,14 @@ def receive_whatsapp(
     if not text:
         return {"status": "empty_text"}
 
-    # For outgoing self-send: skip echo of system messages (long messages we sent)
-    if webhook_type == "outgoingMessageReceived" and len(text) > 30:
-        return {"status": "ignored_outgoing_echo"}
+    # Outgoing messages are echoes of what the system sent — skip ALL of them.
+    # The only exception is the self-send scenario (Denis's phone == technician phone)
+    # where very short messages (1/2/כן/לא) are genuine replies.
+    if webhook_type == "outgoingMessageReceived":
+        if len(text) > 10:
+            # Almost certainly a system notification echo — ignore
+            return {"status": "ignored_outgoing_echo"}
+        # Short text (1/2/ok/etc.) — might be a self-send reply; continue processing
 
     logger.info("📩 WhatsApp from %s: %r", phone, text)
 
