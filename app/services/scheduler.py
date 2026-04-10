@@ -635,15 +635,27 @@ def _handle_self_assign(db, phone: str, text: str) -> None:
 
 def _handle_free_text(db, phone: str, text: str, settings) -> None:
     """
-    Route ANY free-text message from a technician through Claude for intent detection.
-    Claude decides whether to:
+    Route ANY free-text message from a technician through Gemini for intent detection.
+    Always sends a reply — never silently ignores a message.
       - REPORT   → close active call with notes
       - TAKE     → self-assign an open call
-      - QUESTION → answer a system query
-      - IGNORE   → not a meaningful action
+      - QUESTION → answer via chat agent
+      - IGNORE   → echo the message back and ask for clarification
     """
     import urllib.request
     from app.models.technician import Technician
+    from app.services.whatsapp_service import _send_message
+
+    def _fallback_reply():
+        """Reply when we genuinely can't understand the message."""
+        _send_message(phone,
+            f"❓ לא הבנתי את הבקשה.\n"
+            f"האם התכוונת: *\"{text}\"*?\n\n"
+            f"ניתן לשלוח:\n"
+            f"• *דוח* + תיאור — לסגירת קריאה\n"
+            f"• *לקחתי* + כתובת — לרישום עצמי\n"
+            f"• שאלה חופשית — ואני אנסה לענות 🤖"
+        )
 
     if not settings.gemini_api_key:
         # Fallback to keyword routing if Gemini not configured
@@ -666,6 +678,7 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
     dispatcher_digits = "".join(c for c in (settings.dispatcher_whatsapp or "") if c.isdigit())
     is_dispatcher = digits[-9:] == dispatcher_digits[-9:]
     if not tech and not is_dispatcher:
+        logger.debug("Free-text from unknown number %s — ignored", phone)
         return
 
     try:
@@ -675,9 +688,11 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
             "החזר JSON בלבד (ללא הסברים) עם שדה 'intent' אחד מתוך:\n"
             "- REPORT   (הטכנאי מדווח שסיים טיפול / שולח סיכום)\n"
             "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה)\n"
-            "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה)\n"
-            "- IGNORE   (ברכה, תגובה לא רלוונטית)\n"
+            "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה, סטטוס)\n"
+            "- IGNORE   (ברכה קצרה כמו 'אוקיי', 'תודה', 'סבבה', אמוג'י בלבד)\n"
             "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה).\n\n"
+            "חשוב: רק הודעות קצרות וחסרות תוכן כמו 'אוקיי', 'תודה', 'סבבה' הן IGNORE. "
+            "כל הודעה שיש בה תוכן מהותי — אפילו אם לא ברור — תהיה QUESTION.\n\n"
             f"הודעה: {text}"
         )
         import urllib.request, json as _json
@@ -709,11 +724,13 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
             _handle_self_assign(db, phone, extract or text)
         elif intent == "QUESTION":
             _handle_chat_question(db, phone, text, settings)
-        # IGNORE → do nothing
+        else:
+            # IGNORE — short ack only (ok, thanks, 👍) — brief confirmation
+            _send_message(phone, "👍")
 
     except Exception as exc:
-        logger.error("Intent detection failed: %s — falling back to chat", exc)
-        _handle_chat_question(db, phone, text, settings)
+        logger.error("Intent detection failed: %s — falling back to clarification", exc)
+        _fallback_reply()
 
 
 def _handle_chat_question_simple(db, phone: str, question: str, settings) -> None:

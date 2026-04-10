@@ -307,10 +307,14 @@ def receive_whatsapp(
         return {"status": "location_empty"}
 
     # ── Voice message — transcribe with Gemini ───────────────────────────────
+    is_voice = False
     if msg_type == "audioMessage":
         text = _transcribe_audio_gemini(msg_data)
         if not text:
+            from app.services.whatsapp_service import _send_message
+            _send_message(phone, "⚠️ לא הצלחתי לתמלל את ההודעה הקולית. אנא שלח הודעת טקסט.")
             return {"status": "audio_transcription_failed"}
+        is_voice = True
         logger.info("🎤 Voice from %s transcribed: %s", phone, text)
     # ── Text message ──────────────────────────────────────────────────────────
     elif msg_type == "extendedTextMessage":
@@ -326,6 +330,11 @@ def receive_whatsapp(
         return {"status": "ignored_outgoing_echo"}
 
     logger.info("📩 WhatsApp from %s: %r", phone, text)
+
+    # For voice messages — echo the transcription back so the tech knows what was understood
+    if is_voice:
+        from app.services.whatsapp_service import _send_message
+        _send_message(phone, f"🎤 *שמעתי:* \"{text}\"")
 
     # ── Route: pending assignment reply or free-text ──────────────────────────
     pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
