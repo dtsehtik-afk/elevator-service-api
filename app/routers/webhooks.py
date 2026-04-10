@@ -269,60 +269,68 @@ def receive_whatsapp(
     db: Session = Depends(get_db),
 ):
     """
-    Green API calls this endpoint when a technician sends a WhatsApp reply.
-    "1" → confirm assignment
-    "2" → reject (try next technician)
+    Green API pushes every WhatsApp message here.
+    Handles: assignment confirmation (natural language or 1/2), location updates, free-text queries.
     """
-    if payload.typeWebhook != "incomingMessageReceived":
+    webhook_type = payload.typeWebhook
+
+    # Accept both incoming (regular) and outgoing (self-send: instance phone == technician phone)
+    if webhook_type not in ("incomingMessageReceived", "outgoingMessageReceived"):
         return {"status": "ignored"}
 
-    sender   = payload.senderData.get("sender", "")   # "972521234567@c.us"
-    msg_data = payload.messageData
-    msg_type = msg_data.get("typeMessage", "")
-    phone    = sender.replace("@c.us", "")
+    sender_data = payload.senderData
+    msg_data    = payload.messageData
+    msg_type    = msg_data.get("typeMessage", "")
 
-    if not sender:
+    # For outgoing (self-send), use chatId as the phone; for incoming use sender
+    if webhook_type == "outgoingMessageReceived":
+        phone = sender_data.get("chatId", "").replace("@c.us", "")
+    else:
+        phone = sender_data.get("sender", "").replace("@c.us", "").replace("@s.whatsapp.net", "")
+
+    if not phone:
         return {"status": "empty"}
 
-    # ── Location message (live or static) ────────────────────────────────────
+    # ── Location message ──────────────────────────────────────────────────────
     if msg_type in ("locationMessage", "liveLocationMessage"):
         loc = msg_data.get("locationMessageData") or msg_data.get("liveLocationMessageData", {})
-        lat = loc.get("latitude")
-        lng = loc.get("longitude")
-
+        lat, lng = loc.get("latitude"), loc.get("longitude")
         if lat is not None and lng is not None:
-            from app.models.technician import Technician as TechModel
             tech = _find_tech_by_phone_local(db, phone)
             if tech:
                 tech.current_latitude  = float(lat)
                 tech.current_longitude = float(lng)
                 db.commit()
-                logger.info("📍 Location updated for %s: %.5f, %.5f", tech.name, lat, lng)
-                return {"status": "location_updated", "name": tech.name, "lat": lat, "lng": lng}
-            else:
-                logger.warning("Location received from unknown phone: %s", phone)
-                return {"status": "unknown_technician"}
-
+                logger.info("📍 Location updated for %s", tech.name)
+                return {"status": "location_updated"}
         return {"status": "location_empty"}
 
-    # ── Text message — assignment confirmation ────────────────────────────────
-    text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
+    # ── Text message ──────────────────────────────────────────────────────────
+    if msg_type == "extendedTextMessage":
+        text = msg_data.get("extendedTextMessageData", {}).get("text", "").strip()
+    else:
+        text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
 
-    if text == "1":
-        assignment = ai_assignment_agent.confirm_assignment(db, phone)
-        if assignment:
-            logger.info("✅ Technician %s confirmed assignment %s", phone, assignment.id)
-            return {"status": "confirmed", "assignment_id": str(assignment.id)}
-        return {"status": "no_pending_assignment"}
+    if not text:
+        return {"status": "empty_text"}
 
-    elif text == "2":
-        assignment = ai_assignment_agent.reject_assignment(db, phone)
-        if assignment:
-            logger.info("❌ Technician %s rejected assignment %s", phone, assignment.id)
-            return {"status": "rejected", "assignment_id": str(assignment.id)}
-        return {"status": "no_pending_assignment"}
+    # For outgoing self-send: skip echo of system messages (long messages we sent)
+    if webhook_type == "outgoingMessageReceived" and len(text) > 30:
+        return {"status": "ignored_outgoing_echo"}
 
-    return {"status": "ignored", "received": text}
+    logger.info("📩 WhatsApp from %s: %r", phone, text)
+
+    # ── Route: pending assignment reply or free-text ──────────────────────────
+    pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
+    if pending:
+        from app.services.scheduler import _handle_tech_reply
+        _handle_tech_reply(db, phone, text, pending, settings)
+        return {"status": "processed"}
+
+    # Free-text: report / question / self-assign
+    from app.services.scheduler import _handle_free_text
+    _handle_free_text(db, phone, text, settings)
+    return {"status": "processed"}
 
 
 # ── Private helper ───────────────────────────────────────────────────────────
