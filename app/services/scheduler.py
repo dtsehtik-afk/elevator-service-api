@@ -92,17 +92,32 @@ _MORNING_QUOTES = [
     "🌄 \"בוקר חדש, סיכוי חדש, יום חדש לעשות את ההבדל.\"",
 ]
 
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+
+def _gemini_text(prompt: str, api_key: str, max_tokens: int = 200) -> str:
+    """Send a simple text prompt to Gemini REST API and return the response text."""
+    import httpx
+    resp = httpx.post(
+        f"{_GEMINI_URL}?key={api_key}",
+        json={
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
 def _generate_personal_motivation(name: str, api_key: str) -> str:
     """Use Gemini to generate a fresh personal motivational sentence for a technician."""
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        resp = model.generate_content(
+        return _gemini_text(
             f"כתוב משפט מוטיבציה אישי קצר (משפט אחד בלבד) בעברית לטכנאי מעליות בשם {name}. "
-            f"הודעה חמה, מעודדת ואישית. ללא הסברים, רק המשפט עצמו."
+            f"הודעה חמה, מעודדת ואישית. ללא הסברים, רק המשפט עצמו.",
+            api_key,
         )
-        return resp.text.strip()
     except Exception as exc:
         logger.warning("Gemini motivation generation failed for %s: %s", name, exc)
         return ""
@@ -260,10 +275,6 @@ def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
     """
     import json as _json
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-
         calls_desc = "\n".join(
             f"- ID: {p['assignment_id']} | כתובת: {p['address']}, {p['city']}"
             for p in pending
@@ -275,13 +286,11 @@ def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
             f'{{ "accept": ["id1",...], "reject": ["id2",...] }}\n'
             f"אם לא ברור — החזר רשימות ריקות."
         )
-        resp = model.generate_content(prompt)
-        raw = resp.text.strip()
+        raw = _gemini_text(prompt, api_key, max_tokens=200)
         if raw.startswith("```"):
-            import re as _re
-            raw = _re.sub(r"^```[a-z]*\n?", "", raw)
-            raw = _re.sub(r"\n?```$", "", raw)
-        return _json.loads(raw)
+            raw = re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = re.sub(r"\n?```$", "", raw)
+        return _json.loads(raw.strip())
     except Exception as exc:
         logger.warning("Gemini reply parsing failed: %s", exc)
         return {"accept": [], "reject": []}
