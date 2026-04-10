@@ -176,7 +176,7 @@ def _send_morning_location_requests():
 
 
 def _handle_technician_report(db, phone: str, text: str):
-    """Resolve the technician's active IN_PROGRESS call when they send a report."""
+    """Resolve ALL of the technician's active calls when they send a report."""
     from app.models.assignment import Assignment, AuditLog
     from app.models.service_call import ServiceCall
     from app.models.technician import Technician
@@ -193,48 +193,62 @@ def _handle_technician_report(db, phone: str, text: str):
     if not tech:
         return
 
-    # Find their active IN_PROGRESS call
-    assignment = (
-        db.query(Assignment)
-        .filter(Assignment.technician_id == tech.id,
-                Assignment.status == "CONFIRMED")
-        .order_by(Assignment.assigned_at.desc())
-        .first()
-    )
-    if not assignment:
-        return
-
-    call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
-    if not call or call.status not in ("IN_PROGRESS", "ASSIGNED"):
-        return
-
-    # Extract report text (everything after "דוח ")
+    # Extract report notes (strip common prefixes)
     notes = text
-    for prefix in ("דוח ", 'דו"ח ', "סיום "):
+    for prefix in ("דוח ", 'דו"ח ', "סיום ", "סגור ", "סגירה "):
         if notes.startswith(prefix):
             notes = notes[len(prefix):]
             break
+    notes = notes or "טופל על ידי טכנאי"
 
-    call.status       = "RESOLVED"
-    call.resolved_at  = datetime.now(timezone.utc)
-    call.resolution_notes = notes or "טופל על ידי טכנאי"
-    assignment.status = "AUTO_ASSIGNED"  # completed
-
-    audit = AuditLog(
-        service_call_id=call.id,
-        changed_by=tech.email,
-        old_status="IN_PROGRESS",
-        new_status="RESOLVED",
-        notes=f"דו\"ח טכנאי: {notes or 'ללא הערות'}",
+    # Find ALL confirmed assignments for this technician
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.technician_id == tech.id,
+                Assignment.status == "CONFIRMED")
+        .all()
     )
-    db.add(audit)
+
+    closed = 0
+    for assignment in assignments:
+        call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+        if not call or call.status not in ("IN_PROGRESS", "ASSIGNED", "OPEN"):
+            continue
+
+        old_status = call.status
+        call.status = "RESOLVED"
+        call.resolved_at = datetime.now(timezone.utc)
+        call.resolution_notes = notes
+        assignment.status = "AUTO_ASSIGNED"  # marks as completed
+
+        audit = AuditLog(
+            service_call_id=call.id,
+            changed_by=tech.email or tech.name,
+            old_status=old_status,
+            new_status="RESOLVED",
+            notes=f"דו\"ח טכנאי: {notes}",
+        )
+        db.add(audit)
+        closed += 1
+
     db.commit()
 
-    _send_message(
-        tech.whatsapp_number or tech.phone,
-        f"✅ הקריאה נסגרה בהצלחה. תודה {tech.name}!"
-    )
-    logger.info("📋 Call %s resolved by %s", call.id, tech.name)
+    if closed == 0:
+        _send_message(
+            tech.whatsapp_number or tech.phone,
+            f"ℹ️ {tech.name}, לא נמצאו קריאות פעילות פתוחות על שמך."
+        )
+    elif closed == 1:
+        _send_message(
+            tech.whatsapp_number or tech.phone,
+            f"✅ הקריאה נסגרה בהצלחה. תודה {tech.name}!"
+        )
+    else:
+        _send_message(
+            tech.whatsapp_number or tech.phone,
+            f"✅ {closed} קריאות נסגרו בהצלחה. תודה {tech.name}!"
+        )
+    logger.info("📋 %d call(s) resolved by %s", closed, tech.name)
 
 
 def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:

@@ -1,5 +1,6 @@
 """Webhook endpoints for external integrations (Make.com, telephony providers, Green API)."""
 
+import base64
 import html as html_lib
 import json
 import logging
@@ -305,8 +306,14 @@ def receive_whatsapp(
                 return {"status": "location_updated"}
         return {"status": "location_empty"}
 
+    # ── Voice message — transcribe with Gemini ───────────────────────────────
+    if msg_type == "audioMessage":
+        text = _transcribe_audio_gemini(msg_data)
+        if not text:
+            return {"status": "audio_transcription_failed"}
+        logger.info("🎤 Voice from %s transcribed: %s", phone, text)
     # ── Text message ──────────────────────────────────────────────────────────
-    if msg_type == "extendedTextMessage":
+    elif msg_type == "extendedTextMessage":
         text = msg_data.get("extendedTextMessageData", {}).get("text", "").strip()
     else:
         text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
@@ -333,7 +340,90 @@ def receive_whatsapp(
     return {"status": "processed"}
 
 
-# ── Private helper ───────────────────────────────────────────────────────────
+# ── Private helpers ──────────────────────────────────────────────────────────
+
+def _transcribe_audio_gemini(msg_data: dict) -> str:
+    """
+    Download voice message from Green API and transcribe it via Gemini.
+
+    Green API puts the download URL inside fileMessageData.downloadUrl.
+    We fetch the audio bytes, base64-encode them, and send them to
+    Gemini as inline audio data with a Hebrew transcription prompt.
+    """
+    import httpx
+
+    file_data = msg_data.get("fileMessageData") or {}
+    download_url = file_data.get("downloadUrl", "")
+    mime_type = file_data.get("mimeType", "audio/ogg; codecs=opus")
+    # Gemini wants a clean mime type (no codec suffix)
+    clean_mime = mime_type.split(";")[0].strip() or "audio/ogg"
+
+    if not download_url:
+        logger.warning("_transcribe_audio_gemini: no downloadUrl in msg_data")
+        return ""
+
+    api_key = settings.gemini_api_key
+    if not api_key:
+        logger.warning("_transcribe_audio_gemini: no gemini_api_key configured")
+        return ""
+
+    # 1. Download the audio file
+    try:
+        with httpx.Client(timeout=30) as client:
+            audio_resp = client.get(download_url)
+            audio_resp.raise_for_status()
+            audio_bytes = audio_resp.content
+    except Exception as exc:
+        logger.error("_transcribe_audio_gemini: download failed: %s", exc)
+        return ""
+
+    # 2. Base64-encode
+    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+    # 3. Send to Gemini with inline audio data
+    gemini_url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.0-flash:generateContent?key={api_key}"
+    )
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": clean_mime,
+                            "data": audio_b64,
+                        }
+                    },
+                    {
+                        "text": (
+                            "תמלל את הודעת הקול הזו לעברית בדיוק כפי שנאמרה. "
+                            "החזר רק את הטקסט המתומלל, ללא הסברים נוספים."
+                        )
+                    },
+                ]
+            }
+        ],
+        "generationConfig": {"maxOutputTokens": 500, "temperature": 0.0},
+    }
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(gemini_url, json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+            text = (
+                result.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "")
+                .strip()
+            )
+            return text
+    except Exception as exc:
+        logger.error("_transcribe_audio_gemini: Gemini call failed: %s", exc)
+        return ""
+
 
 def _find_tech_by_phone_local(db, phone: str):
     """Find technician by last 9 digits of phone number."""
