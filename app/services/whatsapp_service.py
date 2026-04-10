@@ -65,14 +65,17 @@ def _send_message(phone: str, text: str, quoted_message_id: str = "") -> Optiona
         payload["quotedMessageId"] = quoted_message_id
 
     url = f"{_BASE_URL}/waInstance{instance_id}/sendMessage/{api_token}"
+    logger.warning("📤 Sending to %s (chatId=%s)", phone, chat_id)
     try:
         resp = httpx.post(url, json=payload, timeout=8)
         if resp.status_code == 200:
             msg_id = resp.json().get("idMessage")
             if msg_id:
-                logger.info("WhatsApp sent to %s (msgId=%s)", phone, msg_id)
+                logger.warning("✅ Sent OK to %s (msgId=%s)", phone, msg_id)
                 return msg_id
-        logger.warning("Green API error %s: %s", resp.status_code, resp.text[:200])
+            logger.warning("⚠️ Green API 200 but no idMessage: %s", resp.text[:200])
+        else:
+            logger.warning("❌ Green API error %s: %s", resp.status_code, resp.text[:200])
     except Exception as exc:
         logger.error("WhatsApp send error: %s", exc)
     return None
