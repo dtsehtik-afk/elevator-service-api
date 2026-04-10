@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models.assignment import Assignment
 from app.models.elevator import Elevator
-from app.models.maintenance import MaintenanceRecord
+from app.models.maintenance import MaintenanceSchedule as MaintenanceRecord
 from app.models.service_call import ServiceCall
 from app.models.technician import Technician
 
