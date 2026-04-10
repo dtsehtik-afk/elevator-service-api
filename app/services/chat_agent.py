@@ -265,7 +265,7 @@ def _get_technician_info(db: Session, name: str) -> dict:
     return {
         "שם": tech.name,
         "טלפון": tech.phone or "",
-        "התמחות": tech.specialization or "",
+        "התמחות": ", ".join(tech.specializations) if tech.specializations else "",
         "פעיל": tech.is_active,
         "קריאות_פתוחות": open_calls,
         "מיקום_נוכחי": (
