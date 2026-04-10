@@ -284,9 +284,17 @@ def receive_whatsapp(
     msg_data    = payload.messageData
     msg_type    = msg_data.get("typeMessage", "")
 
-    # For outgoing (self-send), use chatId as the phone; for incoming use sender
+    # For outgoing messages: only process self-messages (Denis texting himself).
+    # When chatId == sender it's a self-message (saved messages / own chat).
+    # When chatId != sender it's a system echo sent TO a technician — ignore.
     if webhook_type == "outgoingMessageReceived":
-        phone = sender_data.get("chatId", "").replace("@c.us", "")
+        chat_id = sender_data.get("chatId", "")
+        sender  = sender_data.get("sender", "")
+        if chat_id != sender:
+            logger.warning("🔕 Outgoing echo to %s — ignored", chat_id)
+            return {"status": "ignored_outgoing_echo"}
+        # Self-message: Denis writing to himself → use his own number
+        phone = chat_id.replace("@c.us", "").replace("@s.whatsapp.net", "")
     else:
         phone = sender_data.get("sender", "").replace("@c.us", "").replace("@s.whatsapp.net", "")
 
@@ -328,15 +336,7 @@ def receive_whatsapp(
     if not text:
         return {"status": "empty_text"}
 
-    # Outgoing messages are echoes of what the system sent — skip ALL of them.
-    # The only exception is the self-send scenario (Denis's phone == technician phone)
-    # where very short messages (1/2/כן/לא) are genuine replies.
-    if webhook_type == "outgoingMessageReceived":
-        if len(text) > 10:
-            logger.warning("🔕 Outgoing echo skipped (len=%d): %r", len(text), text[:40])
-            return {"status": "ignored_outgoing_echo"}
-        logger.warning("🔁 Short outgoing self-send, processing: %r", text)
-        # Short text (1/2/ok/etc.) — might be a self-send reply; continue processing
+    # Self-messages (outgoing where chatId==sender) reach here — process normally
 
     logger.info("📩 WhatsApp from %s: %r", phone, text)
 
