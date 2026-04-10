@@ -320,7 +320,7 @@ def receive_whatsapp(
         is_voice = True
         logger.info("🎤 Voice from %s transcribed: %s", phone, text)
     # ── Text message ──────────────────────────────────────────────────────────
-    elif msg_type == "extendedTextMessage":
+    elif msg_type in ("extendedTextMessage", "quotedMessage"):
         text = msg_data.get("extendedTextMessageData", {}).get("text", "").strip()
     else:
         text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
