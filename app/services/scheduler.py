@@ -854,7 +854,7 @@ def _handle_chat_question(db, phone: str, question: str, settings) -> None:
 
     try:
         from app.services.chat_agent import answer_question
-        answer = answer_question(db, question, asker_name)
+        answer = answer_question(db, question, asker_name, phone=phone)
         _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
     except Exception as exc:
         logger.error("Chat agent error: %s", exc)

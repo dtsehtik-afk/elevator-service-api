@@ -371,14 +371,52 @@ _SYSTEM_PROMPT = """אתה מנהל הלוגיסטיקה החכם של חברת 
 - אם אין נתונים — אמור זאת בבירור ובנימוס"""
 
 
-def answer_question(db: Session, question: str, asker_name: str = "טכנאי") -> str:
+def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
     """
-    Answer a free-text Hebrew question about the system using Claude + tool use.
+    Load the last N WhatsApp messages for a phone number and format them
+    as Gemini conversation turns (user/model roles).
+    incoming messages (direction='in') → role 'user'
+    outgoing messages (direction='out') → role 'model'
+    """
+    try:
+        from app.models.whatsapp_message import WhatsAppMessage
+        msgs = (
+            db.query(WhatsAppMessage)
+            .filter(WhatsAppMessage.phone == phone)
+            .order_by(WhatsAppMessage.timestamp.desc())
+            .limit(limit)
+            .all()
+        )
+        msgs = list(reversed(msgs))  # oldest first
+        turns = []
+        for m in msgs:
+            text = m.transcription or m.text
+            if not text:
+                continue
+            role = "user" if m.direction == "in" else "model"
+            turns.append({"role": role, "parts": [{"text": text}]})
+        # Gemini requires alternating roles — merge consecutive same-role turns
+        merged = []
+        for turn in turns:
+            if merged and merged[-1]["role"] == turn["role"]:
+                merged[-1]["parts"][0]["text"] += "\n" + turn["parts"][0]["text"]
+            else:
+                merged.append(turn)
+        return merged
+    except Exception as exc:
+        logger.warning("Could not load conversation history: %s", exc)
+        return []
+
+
+def answer_question(db: Session, question: str, asker_name: str = "טכנאי", phone: str = "") -> str:
+    """
+    Answer a free-text Hebrew question about the system using Gemini + tool use.
 
     Args:
         db:          Database session
         question:    The question text from WhatsApp
         asker_name:  Name of the technician/manager asking
+        phone:       Sender's phone number (used to load conversation history)
 
     Returns:
         Hebrew answer string to send back via WhatsApp
@@ -389,7 +427,16 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי") 
     if not s.gemini_api_key:
         return "❌ שירות השאלות אינו מוגדר (חסר GEMINI_API_KEY)"
 
-    contents = [{"role": "user", "parts": [{"text": f"{asker_name} שואל: {question}"}]}]
+    # Load recent conversation history for continuity
+    history = _load_conversation_history(db, phone) if phone else []
+
+    # Append current question; if history ends with user-role we merge
+    current = {"role": "user", "parts": [{"text": f"{asker_name} שואל: {question}"}]}
+    if history and history[-1]["role"] == "user":
+        history[-1]["parts"][0]["text"] += "\n" + current["parts"][0]["text"]
+        contents = history
+    else:
+        contents = history + [current]
 
     with httpx.Client(timeout=30) as client:
         for _iteration in range(6):
