@@ -274,6 +274,7 @@ def receive_whatsapp(
     Handles: assignment confirmation (natural language or 1/2), location updates, free-text queries.
     """
     webhook_type = payload.typeWebhook
+    logger.info("🔔 Webhook type=%s", webhook_type)
 
     # Accept both incoming (regular) and outgoing (self-send: instance phone == technician phone)
     if webhook_type not in ("incomingMessageReceived", "outgoingMessageReceived"):
@@ -288,6 +289,8 @@ def receive_whatsapp(
         phone = sender_data.get("chatId", "").replace("@c.us", "")
     else:
         phone = sender_data.get("sender", "").replace("@c.us", "").replace("@s.whatsapp.net", "")
+
+    logger.info("🔔 phone=%s  msg_type=%s  direction=%s", phone, msg_type, webhook_type)
 
     if not phone:
         return {"status": "empty"}
@@ -330,8 +333,9 @@ def receive_whatsapp(
     # where very short messages (1/2/כן/לא) are genuine replies.
     if webhook_type == "outgoingMessageReceived":
         if len(text) > 10:
-            # Almost certainly a system notification echo — ignore
+            logger.info("🔕 Outgoing echo skipped (len=%d): %r", len(text), text[:40])
             return {"status": "ignored_outgoing_echo"}
+        logger.info("🔁 Short outgoing self-send, processing: %r", text)
         # Short text (1/2/ok/etc.) — might be a self-send reply; continue processing
 
     logger.info("📩 WhatsApp from %s: %r", phone, text)
