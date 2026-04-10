@@ -42,3 +42,7 @@ export async function getCallAudit(id: string): Promise<AuditLogEntry[]> {
   const { data } = await client.get<AuditLogEntry[]>(`/calls/${id}/audit`)
   return data
 }
+
+export async function autoAssignCall(id: string): Promise<void> {
+  await client.post(`/calls/${id}/auto-assign`)
+}

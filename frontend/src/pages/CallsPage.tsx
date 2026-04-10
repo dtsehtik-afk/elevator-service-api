@@ -7,7 +7,7 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listCalls, createCall, updateCall, getCallDetails } from '../api/calls'
+import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall } from '../api/calls'
 import { listElevators } from '../api/elevators'
 import { useAuthStore } from '../stores/authStore'
 import {
@@ -110,6 +110,17 @@ export default function CallsPage() {
       closeUpdate()
     },
     onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
+  })
+
+  const reassignMutation = useMutation({
+    mutationFn: (id: string) => autoAssignCall(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['call-detail'] })
+      notifications.show({ message: 'הקריאה הועברה לטכנאי הבא', color: 'blue' })
+      closeDetail()
+    },
+    onError: () => notifications.show({ message: 'לא נמצא טכנאי פנוי', color: 'red' }),
   })
 
   function openDetailModal(call: ServiceCall) {
@@ -353,6 +364,16 @@ export default function CallsPage() {
 
             <Group justify="flex-end" mt="md">
               <Button variant="default" onClick={closeDetail}>סגור</Button>
+              {detail && ['OPEN', 'ASSIGNED'].includes(detail.status) && (
+                <Button
+                  variant="light"
+                  color="orange"
+                  loading={reassignMutation.isPending}
+                  onClick={() => detail && reassignMutation.mutate(detail.id)}
+                >
+                  🔄 העבר לטכנאי הבא
+                </Button>
+              )}
               <Button onClick={() => {
                 closeDetail()
                 openUpdateModal(detail)
