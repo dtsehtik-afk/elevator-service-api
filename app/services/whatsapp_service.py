@@ -236,6 +236,14 @@ def notify_rescue_emergency(
     return _send_message(phone, message)
 
 
+def notify_dispatcher(text: str) -> bool:
+    """Send a notification to the dispatcher/manager WhatsApp. No-op if not configured."""
+    dispatcher = settings.dispatcher_whatsapp
+    if not dispatcher:
+        return False
+    return bool(_send_message(dispatcher, text))
+
+
 def notify_dispatcher_unassigned(phone: str, address: str, city: str, fault_type: str) -> bool:
     """Notify the dispatcher that no technician could be assigned."""
     fault = _FAULT_LABEL.get(fault_type, fault_type)

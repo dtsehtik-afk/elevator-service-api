@@ -6,8 +6,9 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listTechnicians, createTechnician, updateTechnician } from '../api/technicians'
+import { listTechnicians, createTechnician, updateTechnician, setOnCallTechnician } from '../api/technicians'
 import { Technician } from '../types'
+import { useAuthStore } from '../stores/authStore'
 
 const ROLE_LABELS: Record<string, string> = { ADMIN: 'מנהל', TECHNICIAN: 'טכנאי', DISPATCHER: 'מוקד' }
 const ROLE_COLORS: Record<string, string> = { ADMIN: 'purple', TECHNICIAN: 'blue', DISPATCHER: 'teal' }
@@ -19,6 +20,7 @@ const EMPTY_NEW = {
 
 export default function TechniciansPage() {
   const qc = useQueryClient()
+  const userRole = useAuthStore((s) => s.userRole)
   const [addOpened, { open: openAdd, close: closeAdd }] = useDisclosure()
   const [editOpened, { open: openEdit, close: closeEdit }] = useDisclosure()
   const [selected, setSelected] = useState<Technician | null>(null)
@@ -87,6 +89,18 @@ export default function TechniciansPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['technicians'] }),
   })
 
+  const onCallMutation = useMutation({
+    mutationFn: ({ id, isOnCall }: { id: string; isOnCall: boolean }) =>
+      setOnCallTechnician(id, isOnCall),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['technicians'] })
+      notifications.show({ message: 'תורן עודכן בהצלחה', color: 'teal' })
+    },
+    onError: () => {
+      notifications.show({ message: 'שגיאה בעדכון תורן', color: 'red' })
+    },
+  })
+
   const openEditModal = (tech: Technician) => {
     setSelected(tech)
     setEditForm({
@@ -121,7 +135,10 @@ export default function TechniciansPage() {
                   <Text fw={700}>{tech.is_available ? '🟢' : '🔴'}</Text>
                   <Text fw={600}>{tech.name}</Text>
                 </Group>
-                <Badge color={ROLE_COLORS[tech.role]} size="sm">{ROLE_LABELS[tech.role]}</Badge>
+                <Group gap="xs">
+                  {tech.is_on_call && <Badge color="teal" size="sm">🌙 תורן</Badge>}
+                  <Badge color={ROLE_COLORS[tech.role]} size="sm">{ROLE_LABELS[tech.role]}</Badge>
+                </Group>
               </Group>
 
               <Stack gap={4}>
@@ -143,9 +160,22 @@ export default function TechniciansPage() {
                   onChange={e => toggleAvailMutation.mutate({ id: tech.id, is_available: e.target.checked })}
                   disabled={!tech.is_active}
                 />
-                <Button size="xs" variant="light" onClick={() => openEditModal(tech)}>
-                  ✏️ עריכה
-                </Button>
+                <Group gap="xs">
+                  {userRole === 'ADMIN' && !tech.is_on_call && (
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="teal"
+                      loading={onCallMutation.isPending && onCallMutation.variables?.id === tech.id}
+                      onClick={() => onCallMutation.mutate({ id: tech.id, isOnCall: true })}
+                    >
+                      🌙 הגדר כתורן
+                    </Button>
+                  )}
+                  <Button size="xs" variant="light" onClick={() => openEditModal(tech)}>
+                    ✏️ עריכה
+                  </Button>
+                </Group>
               </Group>
 
               {!tech.is_active && <Badge color="gray" size="sm" mt="xs">לא פעיל</Badge>}

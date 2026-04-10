@@ -3,7 +3,7 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, require_admin
@@ -112,6 +112,32 @@ def update_location(
     tech = technician_service.update_location(
         db, current_user.id, data.latitude, data.longitude
     )
+    return tech
+
+
+@router.patch(
+    "/{technician_id}/on-call",
+    response_model=TechnicianResponse,
+    summary="Set on-call technician",
+    description="Designate a single technician as on-call. ADMIN only.",
+)
+def set_on_call(
+    technician_id: uuid.UUID,
+    payload: dict = Body(default={}),
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    """Clear is_on_call on all technicians, then set it on the target one."""
+    # Clear is_on_call on all technicians first
+    db.query(Technician).update({Technician.is_on_call: False})
+    # Set on the target
+    tech = db.query(Technician).filter(Technician.id == technician_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    if payload.get("is_on_call", True):
+        tech.is_on_call = True
+    db.commit()
+    db.refresh(tech)
     return tech
 
 

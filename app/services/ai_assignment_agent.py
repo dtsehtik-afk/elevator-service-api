@@ -30,6 +30,7 @@ from app.models.elevator import Elevator
 from app.models.service_call import ServiceCall
 from app.models.technician import Technician
 from app.services import maps_service, whatsapp_service
+from app.services.working_hours import is_working_hours
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +126,19 @@ def rank_technicians(
     elev_lat, elev_lng = maps_service.ensure_elevator_coords(db, elevator)
     required_spec = _FAULT_SPEC.get(fault_type)
 
-    candidates = (
-        db.query(Technician)
-        .filter(Technician.is_active == True, Technician.is_available == True)  # noqa: E712
-        .all()
-    )
+    if is_working_hours():
+        candidates = (
+            db.query(Technician)
+            .filter(Technician.is_active == True, Technician.is_available == True)  # noqa: E712
+            .all()
+        )
+    else:
+        # Outside working hours — only the on-call technician
+        candidates = (
+            db.query(Technician)
+            .filter(Technician.is_active == True, Technician.is_on_call == True)  # noqa: E712
+            .all()
+        )
 
     scored: list[CandidateScore] = []
     for tech in candidates:
@@ -216,6 +225,10 @@ def assign_with_confirmation(
     db.add(audit)
     db.commit()
     db.refresh(assignment)
+
+    # Notify dispatcher about assignment
+    address = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+    whatsapp_service.notify_dispatcher(f"📋 קריאה שובצה ל*{tech.name}* — {address}\nממתין לאישור")
 
     # Send WhatsApp notification
     phone = tech.whatsapp_number or tech.phone
@@ -318,6 +331,7 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
 
     # Confirmation message back to technician
     addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+    whatsapp_service.notify_dispatcher(f"✅ *{tech.name}* אישר קבלת הקריאה ב{addr}")
     maps_url = (
         f"https://maps.google.com/?q={elevator.latitude},{elevator.longitude}"
         if elevator and elevator.latitude else
@@ -373,6 +387,9 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
 
     call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
     if call:
+        _rej_elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        _rej_addr = f"{_rej_elevator.address}, {_rej_elevator.city}" if _rej_elevator else "כתובת לא ידועה"
+        whatsapp_service.notify_dispatcher(f"↩️ *{tech.name}* דחה את הקריאה ב{_rej_addr} — מועברת הלאה")
         audit = AuditLog(
             service_call_id=call.id,
             changed_by=tech.email or tech.name,

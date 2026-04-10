@@ -72,6 +72,7 @@ export interface Technician {
   current_longitude: number | null
   is_available: boolean
   is_active: boolean
+  is_on_call: boolean
   max_daily_calls: number
   area_codes: string[]
   created_at: string

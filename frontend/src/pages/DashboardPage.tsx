@@ -32,6 +32,7 @@ export default function DashboardPage() {
   const openCalls = calls.filter(c => ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(c.status))
   const criticalCalls = calls.filter(c => c.priority === 'CRITICAL' && c.status !== 'CLOSED')
   const availableTechs = technicians.filter(t => t.is_available && t.is_active)
+  const onCallTech = technicians.find(t => t.is_on_call)
   const upcomingMaintenance = maintenance
     .filter(m => m.status === 'SCHEDULED' && isSoon(m.scheduled_date, 14))
     .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))
@@ -56,6 +57,14 @@ export default function DashboardPage() {
         </Grid.Col>
         <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
           <StatCard label="תחזוקה בפיגור" value={overdueMaintenance} icon="⚠️" color="yellow" />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
+          <StatCard
+            label="תורן"
+            value={onCallTech ? `🌙 ${onCallTech.name}` : 'אין תורן'}
+            icon="🌙"
+            color="teal"
+          />
         </Grid.Col>
       </Grid>
 

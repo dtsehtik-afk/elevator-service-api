@@ -210,6 +210,7 @@ def _handle_technician_report(db, phone: str, text: str):
     )
 
     closed = 0
+    closed_call_info = []  # list of (tech_name, address, notes) for dispatcher notifications
     for assignment in assignments:
         call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
         if not call or call.status not in ("IN_PROGRESS", "ASSIGNED", "OPEN"):
@@ -231,7 +232,17 @@ def _handle_technician_report(db, phone: str, text: str):
         db.add(audit)
         closed += 1
 
+        from app.models.elevator import Elevator as _Elevator
+        _elev = db.query(_Elevator).filter(_Elevator.id == call.elevator_id).first()
+        _addr = f"{_elev.address}, {_elev.city}" if _elev else "כתובת לא ידועה"
+        closed_call_info.append(_addr)
+
     db.commit()
+
+    # Notify dispatcher for each closed call
+    from app.services.whatsapp_service import notify_dispatcher as _notify_dispatcher
+    for _addr in closed_call_info:
+        _notify_dispatcher(f"✔️ קריאה נסגרה ע\"י *{tech.name}*\n📍 {_addr}\n📝 {notes}")
 
     if closed == 0:
         _send_message(
@@ -680,6 +691,11 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
 
     if not tech and not is_dispatcher:
         logger.warning("📵 Message from unregistered number %s — ignored", phone)
+        return
+
+    if is_dispatcher:
+        from app.services.dispatcher_commands import handle_dispatcher_command
+        handle_dispatcher_command(db, phone, text, settings)
         return
 
     try:

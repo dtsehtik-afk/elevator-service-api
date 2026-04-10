@@ -72,6 +72,7 @@ class Technician(Base):
     current_longitude: Mapped[float] = mapped_column(Float, nullable=True)
 
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_on_call: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     max_daily_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
 

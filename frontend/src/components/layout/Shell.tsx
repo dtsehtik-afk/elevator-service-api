@@ -16,11 +16,15 @@ const NAV_ITEMS = [
   { label: 'תחזוקה', path: '/maintenance', icon: '📅' },
 ]
 
+const ADMIN_NAV_ITEMS = [
+  { label: 'שיחות', path: '/conversations', icon: '💬' },
+]
+
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [opened, { toggle }] = useDisclosure()
   const navigate = useNavigate()
   const { pathname } = useLocation()
-  const { userName, clear } = useAuthStore()
+  const { userName, userRole, clear } = useAuthStore()
 
   function logout() {
     clear()
@@ -59,6 +63,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <AppShell.Navbar p="xs">
         <Box mt="xs">
           {NAV_ITEMS.map((item) => (
+            <NavLink
+              key={item.path}
+              label={item.label}
+              leftSection={<span style={{ fontSize: rem(18) }}>{item.icon}</span>}
+              active={pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path))}
+              onClick={() => navigate(item.path)}
+              mb={4}
+              style={{ borderRadius: 8 }}
+            />
+          ))}
+          {userRole === 'ADMIN' && ADMIN_NAV_ITEMS.map((item) => (
             <NavLink
               key={item.path}
               label={item.label}

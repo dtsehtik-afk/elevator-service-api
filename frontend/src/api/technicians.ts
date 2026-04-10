@@ -16,6 +16,11 @@ export async function updateTechnician(id: string, payload: Partial<Technician>)
   return data
 }
 
+export async function setOnCallTechnician(id: string, isOnCall: boolean): Promise<Technician> {
+  const { data } = await client.patch<Technician>(`/technicians/${id}/on-call`, { is_on_call: isOnCall })
+  return data
+}
+
 export async function createTechnician(payload: {
   name: string
   email: string

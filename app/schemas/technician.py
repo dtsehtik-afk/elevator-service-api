@@ -30,6 +30,7 @@ class TechnicianUpdate(BaseModel):
     area_codes: Optional[List[str]] = None
     max_daily_calls: Optional[int] = Field(None, ge=1, le=20)
     is_available: Optional[bool] = None
+    is_on_call: Optional[bool] = None
     is_active: Optional[bool] = None
 
 
@@ -51,6 +52,7 @@ class TechnicianResponse(BaseModel):
     current_latitude: Optional[float]
     current_longitude: Optional[float]
     is_available: bool
+    is_on_call: bool = False
     is_active: bool
     max_daily_calls: int
     area_codes: List[str]

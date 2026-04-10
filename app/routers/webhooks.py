@@ -320,13 +320,16 @@ def receive_whatsapp(
     # ── Voice message — transcribe with Gemini ───────────────────────────────
     is_voice = False
     if msg_type == "audioMessage":
-        text = _transcribe_audio_gemini(msg_data)
-        if not text:
+        transcribed_text = _transcribe_audio_gemini(msg_data)
+        if not transcribed_text:
             from app.services.whatsapp_service import _send_message
             _send_message(phone, "⚠️ לא הצלחתי לתמלל את ההודעה הקולית. אנא שלח הודעת טקסט.")
+            _log_message(db, phone, "in", msg_type, None, None)
             return {"status": "audio_transcription_failed"}
         is_voice = True
+        text = transcribed_text
         logger.info("🎤 Voice from %s transcribed: %s", phone, text)
+        _log_message(db, phone, "in", msg_type, None, transcription=text)
     # ── Text message ──────────────────────────────────────────────────────────
     elif msg_type in ("extendedTextMessage", "quotedMessage"):
         text = msg_data.get("extendedTextMessageData", {}).get("text", "").strip()
@@ -335,6 +338,10 @@ def receive_whatsapp(
 
     if not text:
         return {"status": "empty_text"}
+
+    # Log non-voice incoming messages
+    if not is_voice:
+        _log_message(db, phone, "in", msg_type, text)
 
     # Self-messages (outgoing where chatId==sender) reach here — process normally
 
@@ -441,6 +448,16 @@ def _transcribe_audio_gemini(msg_data: dict) -> str:
     except Exception as exc:
         logger.error("_transcribe_audio_gemini: Gemini call failed: %s", exc)
         return ""
+
+
+def _log_message(db, phone: str, direction: str, msg_type: str, text: str | None, transcription: str | None = None):
+    try:
+        from app.models.whatsapp_message import WhatsAppMessage
+        entry = WhatsAppMessage(phone=phone, direction=direction, msg_type=msg_type, text=text, transcription=transcription)
+        db.add(entry)
+        db.commit()
+    except Exception as exc:
+        logger.error("Failed to log WhatsApp message: %s", exc)
 
 
 def _find_tech_by_phone_local(db, phone: str):
