@@ -436,7 +436,7 @@ def _poll_whatsapp_replies():
                 httpx.delete(f"{delete_url}/{receipt_id}", timeout=5)
 
         except Exception as exc:
-            logger.debug("WhatsApp poll error: %s", exc)
+            logger.warning("WhatsApp poll error: %s", exc)
             break
 
 
