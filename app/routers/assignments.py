@@ -42,21 +42,25 @@ def assign_call(
     response_model=AssignmentResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Auto assignment",
-    description="Automatically assign the best available technician. Requires ADMIN or DISPATCHER.",
+    description="Automatically assign the best available technician with WhatsApp confirmation. Requires ADMIN or DISPATCHER.",
 )
 def auto_assign(
     call_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: Technician = Depends(require_dispatcher_or_admin),
 ):
-    """Auto-assign the best available technician using the scoring algorithm."""
-    try:
-        assignment = auto_assign_call(db, call_id, current_user.email)
-        if not assignment:
-            raise HTTPException(
-                status_code=503,
-                detail="No available technician found. Admin has been notified.",
-            )
-        return assignment
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    """Auto-assign the best available technician — sends WhatsApp and awaits confirmation."""
+    from app.models.service_call import ServiceCall
+    from app.services.ai_assignment_agent import assign_with_confirmation
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Service call not found")
+
+    assignment = assign_with_confirmation(db, call, needs_confirmation=True)
+    if not assignment:
+        raise HTTPException(
+            status_code=503,
+            detail="No available technician found.",
+        )
+    return assignment
