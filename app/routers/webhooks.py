@@ -330,8 +330,13 @@ def receive_whatsapp(
         return {"status": "location_empty"}
 
     # ── Voice message — transcribe with Gemini ───────────────────────────────
+    # Only transcribe for registered system users — skip unknown numbers silently
     is_voice = False
     if msg_type == "audioMessage":
+        known_sender = _find_tech_by_phone_local(db, phone)
+        if not known_sender:
+            logger.warning("🎤 Audio from unregistered %s — skipping transcription", phone)
+            return {"status": "ignored_unknown_audio"}
         transcribed_text = _transcribe_audio_gemini(msg_data)
         if not transcribed_text:
             from app.services.whatsapp_service import _send_message
