@@ -512,8 +512,8 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
                 name = fn_call["name"]
                 args = fn_call.get("args", {})
                 logger.warning("🔧 Chat agent calling tool: %s(%s)", name, args)
-                logger.warning("🔧 Tool result: %s", str(result)[:300])
                 result = _run_tool(db, name, args)
+                logger.warning("🔧 Tool result: %s", str(result)[:300])
                 fn_responses.append({
                     "functionResponse": {
                         "name": name,
