@@ -305,16 +305,28 @@ def receive_whatsapp(
 
     # ── Location message ──────────────────────────────────────────────────────
     if msg_type in ("locationMessage", "liveLocationMessage"):
-        loc = msg_data.get("locationMessageData") or msg_data.get("liveLocationMessageData", {})
+        loc = (
+            msg_data.get("locationMessageData")
+            or msg_data.get("liveLocationMessageData")
+            or {}
+        )
         lat, lng = loc.get("latitude"), loc.get("longitude")
+        logger.warning("📍 Location msg from %s | type=%s | lat=%s lng=%s | raw_loc=%s",
+                       phone, msg_type, lat, lng, loc)
         if lat is not None and lng is not None:
             tech = _find_tech_by_phone_local(db, phone)
             if tech:
                 tech.current_latitude  = float(lat)
                 tech.current_longitude = float(lng)
                 db.commit()
-                logger.info("📍 Location updated for %s", tech.name)
+                logger.warning("📍 Location saved for %s: %.4f, %.4f", tech.name, float(lat), float(lng))
+                from app.services.whatsapp_service import _send_message
+                _send_message(phone, f"📍 המיקום שלך התעדכן בהצלחה, {tech.name}.")
                 return {"status": "location_updated"}
+            else:
+                logger.warning("📍 Location received but no tech found for phone=%s", phone)
+        else:
+            logger.warning("📍 Location msg with no coordinates from %s | full msg_data=%s", phone, msg_data)
         return {"status": "location_empty"}
 
     # ── Voice message — transcribe with Gemini ───────────────────────────────
