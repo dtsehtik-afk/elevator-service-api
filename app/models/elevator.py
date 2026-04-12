@@ -55,6 +55,7 @@ class Elevator(Base):
     manufacturer: Mapped[str] = mapped_column(String(100), nullable=True)
     installation_date: Mapped[date] = mapped_column(Date, nullable=True)
     serial_number: Mapped[str] = mapped_column(String(100), nullable=True, unique=True)
+    contact_phone: Mapped[str] = mapped_column(String(30), nullable=True)
     last_service_date: Mapped[date] = mapped_column(Date, nullable=True)
     next_service_date: Mapped[date] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(

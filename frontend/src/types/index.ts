@@ -8,6 +8,7 @@ export interface Elevator {
   manufacturer: string | null
   installation_date: string | null
   serial_number: string | null
+  contact_phone: string | null
   last_service_date: string | null
   next_service_date: string | null
   status: 'ACTIVE' | 'INACTIVE' | 'UNDER_REPAIR'

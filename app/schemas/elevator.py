@@ -17,6 +17,7 @@ class ElevatorBase(BaseModel):
     manufacturer: Optional[str] = None
     installation_date: Optional[date] = None
     serial_number: Optional[str] = None
+    contact_phone: Optional[str] = None
     last_service_date: Optional[date] = None
     next_service_date: Optional[date] = None
     status: str = Field("ACTIVE", pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
@@ -37,6 +38,7 @@ class ElevatorUpdate(BaseModel):
     manufacturer: Optional[str] = None
     installation_date: Optional[date] = None
     serial_number: Optional[str] = None
+    contact_phone: Optional[str] = None
     last_service_date: Optional[date] = None
     next_service_date: Optional[date] = None
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
@@ -53,6 +55,7 @@ class ElevatorResponse(BaseModel):
     manufacturer: Optional[str] = None
     installation_date: Optional[date] = None
     serial_number: Optional[str] = None
+    contact_phone: Optional[str] = None
     last_service_date: Optional[date] = None
     next_service_date: Optional[date] = None
     status: str
