@@ -348,8 +348,8 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
         f"────────────────────\n"
         f"📍 {addr}\n"
         f"🚗 זמן נסיעה: ~{assignment.travel_minutes or '?'} דקות\n"
-        f"🗺 {maps_url}\n"
-        f"🚘 {waze_url}\n"
+        f"🗺 גוגל מפות:\n{maps_url}\n"
+        f"🚘 Waze:\n{waze_url}\n"
         f"────────────────────\n"
         f"בסיום הטיפול שלח: *דוח* + תיאור קצר"
     )
@@ -505,8 +505,8 @@ def confirm_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Opt
         f"✅ *קיבלת את הקריאה!*\n"
         f"📍 {addr}\n"
         f"🚗 ~{assignment.travel_minutes or '?'} דקות\n"
-        f"🗺 {maps_url}\n"
-        f"🚘 {waze_url}\n"
+        f"🗺 גוגל מפות:\n{maps_url}\n"
+        f"🚘 Waze:\n{waze_url}\n"
         f"בסיום שלח: *דוח* + תיאור קצר"
     )
     logger.info("✅ %s confirmed assignment %s", tech.name, assignment_id)
