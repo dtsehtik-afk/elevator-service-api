@@ -83,6 +83,13 @@ _GEMINI_TOOLS = [{
                 "near_address": {"type": "STRING", "description": "כתובת לחפש טכנאי קרוב (אופציונלי)"},
             }, "required": []},
         },
+        {
+            "name": "search_by_phone",
+            "description": "חפש מעליות לפי מספר טלפון של המתקשר או חברת הניהול.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "phone": {"type": "STRING", "description": "מספר טלפון לחיפוש"},
+            }, "required": ["phone"]},
+        },
     ]
 }]
 
@@ -338,6 +345,34 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
     return {"טכנאים": results}
 
 
+def _search_by_phone(db: Session, phone: str) -> list[dict]:
+    """Find elevators associated with a given caller phone number."""
+    from app.models.elevator import Elevator
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    last9 = digits[-9:] if len(digits) >= 9 else digits
+    if not last9:
+        return [{"error": "מספר טלפון לא תקין"}]
+
+    all_elevs = db.query(Elevator).all()
+    results = []
+    for e in all_elevs:
+        for cp in (e.caller_phones or []):
+            cp_d = "".join(c for c in cp if c.isdigit())
+            if cp_d[-9:] == last9:
+                results.append({
+                    "id": str(e.id),
+                    "כתובת": f"{e.address}, {e.city}",
+                    "בניין": e.building_name or "",
+                    "סטטוס": e.status,
+                })
+                break
+    if not results:
+        return [{"תוצאה": f"לא נמצאו מעליות עם מספר {phone}"}]
+    return results
+
+
 def _get_system_summary(db: Session) -> dict:
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -381,6 +416,8 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
         return _get_system_summary(db)
     elif tool_name == "get_technician_location":
         return _get_technician_location(db, tool_input.get("technician_name"), tool_input.get("near_address"))
+    elif tool_name == "search_by_phone":
+        return _search_by_phone(db, tool_input.get("phone", ""))
     else:
         return {"error": f"כלי לא מוכר: {tool_name}"}
 

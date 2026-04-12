@@ -240,14 +240,41 @@ def notify_rescue_emergency(
     return _send_message(phone, message)
 
 
+def _get_admin_phones_from_db() -> list[str]:
+    """Get WhatsApp/phone numbers of all active ADMIN technicians from DB."""
+    try:
+        from app.database import SessionLocal
+        from app.models.technician import Technician
+        db = SessionLocal()
+        try:
+            admins = db.query(Technician).filter(
+                Technician.role == "ADMIN",
+                Technician.is_active == True,  # noqa: E712
+            ).all()
+            return [a.whatsapp_number or a.phone for a in admins if (a.whatsapp_number or a.phone)]
+        finally:
+            db.close()
+    except Exception:
+        return []
+
+
 def notify_dispatcher(text: str) -> bool:
-    """Send notification to ALL configured dispatcher/manager numbers."""
-    dispatcher_str = settings.dispatcher_whatsapp
-    if not dispatcher_str:
+    """Send notification to ALL configured dispatcher/manager numbers + all ADMIN technicians in DB."""
+    config_phones = [n.strip() for n in (settings.dispatcher_whatsapp or "").split(",") if n.strip()]
+    db_phones = _get_admin_phones_from_db()
+    # Merge and deduplicate (normalize to last-9-digits key)
+    seen: set[str] = set()
+    all_phones: list[str] = []
+    for p in config_phones + db_phones:
+        digits = "".join(c for c in p if c.isdigit())
+        key = digits[-9:] if len(digits) >= 9 else digits
+        if key and key not in seen:
+            seen.add(key)
+            all_phones.append(p)
+    if not all_phones:
         return False
-    numbers = [n.strip() for n in dispatcher_str.split(",") if n.strip()]
     success = False
-    for number in numbers:
+    for number in all_phones:
         if _send_message(number, text):
             success = True
     return success

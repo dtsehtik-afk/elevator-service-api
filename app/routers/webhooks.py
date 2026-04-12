@@ -173,6 +173,10 @@ async def receive_call(
     if match.elevator:
         enriched = enrich_elevator(db, match.elevator, parsed)
 
+    # 3b. Save caller phone to elevator for future matching (if not already saved)
+    if match.match_status == "MATCHED" and match.elevator and parsed.phone:
+        _save_caller_phone(match.elevator, parsed.phone, db)
+
     # 4. Create service call
     service_call = None
     if match.match_status == "MATCHED" and match.elevator:
@@ -476,6 +480,29 @@ def _log_message(db, phone: str, direction: str, msg_type: str, text: str | None
         db.commit()
     except Exception as exc:
         logger.error("Failed to log WhatsApp message: %s", exc)
+
+
+def _save_caller_phone(elevator, phone: str, db) -> None:
+    """Add caller phone to elevator.caller_phones if not already present."""
+    try:
+        digits = "".join(c for c in phone if c.isdigit())
+        if digits.startswith("972"):
+            digits = "0" + digits[3:]
+        normalized = digits[-10:] if len(digits) >= 10 else digits
+        if not normalized:
+            return
+        existing = list(elevator.caller_phones or [])
+        # Check if already saved (last-9 match)
+        for p in existing:
+            p_digits = "".join(c for c in p if c.isdigit())
+            if p_digits[-9:] == normalized[-9:]:
+                return  # already exists
+        existing.append(normalized)
+        elevator.caller_phones = existing
+        db.commit()
+        logger.warning("📞 Saved caller phone %s to elevator %s", normalized, elevator.id)
+    except Exception as exc:
+        logger.error("Failed to save caller phone: %s", exc)
 
 
 def _find_tech_by_phone_local(db, phone: str):

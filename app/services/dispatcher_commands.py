@@ -11,7 +11,7 @@ from app.services.whatsapp_service import _send_message, notify_dispatcher
 logger = logging.getLogger(__name__)
 
 _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעליות. החזר JSON בלבד:
-{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת"}}
+{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|FIND_BY_PHONE|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת", "phone": "מספר טלפון אם קיים"}}
 
 דוגמאות:
 "סגור קריאה ברחוב הרצל 5" → CLOSE_CALL
@@ -24,6 +24,7 @@ _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעל�
 "דוח יומי" → DAILY_REPORT
 "דוח שבועי" → WEEKLY_REPORT
 "דוח חודשי" → MONTHLY_REPORT
+"איזו מעלית שייכת למספר 05XXXXXXXX?" → FIND_BY_PHONE (address contains the phone)
 
 חשוב מאוד — שאלות על מיקום טכנאים, קרבה לאזור, היכן נמצא טכנאי — תמיד UNKNOWN (לא STATUS_QUERY):
 "יש לנו מישהו באזור עפולה?" → UNKNOWN
@@ -44,7 +45,7 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
     api_key = getattr(settings, "gemini_api_key", "")
 
     # Parse command with Gemini
-    command, address, tech_name = "UNKNOWN", "", ""
+    command, address, tech_name, phone_number = "UNKNOWN", "", "", ""
     if api_key:
         try:
             prompt = _COMMAND_PROMPT.format(text=text)
@@ -59,6 +60,7 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
             command = parsed.get("command", "UNKNOWN")
             address = parsed.get("address", "")
             tech_name = parsed.get("tech_name", "")
+            phone_number = parsed.get("phone", "")
         except Exception as exc:
             logger.error("Dispatcher command parse failed: %s", exc)
 
@@ -78,6 +80,8 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
     elif command in ("DAILY_REPORT", "WEEKLY_REPORT", "MONTHLY_REPORT"):
         days = 1 if command == "DAILY_REPORT" else 7 if command == "WEEKLY_REPORT" else 30
         _cmd_daily_report(db, phone, days)
+    elif command == "FIND_BY_PHONE":
+        _cmd_find_by_phone(db, phone, phone_number)
     else:
         # Free question — route to chat agent
         from app.services.scheduler import _handle_chat_question
@@ -349,3 +353,33 @@ def _cmd_daily_report(db, phone: str, days: int = 1) -> None:
         f"🔴 פתוחות כרגע: *{open_count}*\n"
         f"🔵 בטיפול: *{in_progress}*"
     )
+
+
+def _cmd_find_by_phone(db, dispatcher_phone: str, search_phone: str) -> None:
+    """Find elevators associated with a caller phone number."""
+    from app.models.elevator import Elevator
+
+    if not search_phone:
+        _send_message(dispatcher_phone, "❌ לא צוין מספר טלפון לחיפוש.")
+        return
+
+    digits = "".join(c for c in search_phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    last9 = digits[-9:] if len(digits) >= 9 else digits
+
+    all_elevs = db.query(Elevator).all()
+    matches = []
+    for e in all_elevs:
+        for cp in (e.caller_phones or []):
+            cp_d = "".join(c for c in cp if c.isdigit())
+            if cp_d[-9:] == last9:
+                matches.append(f"• {e.address}, {e.city}" + (f" ({e.building_name})" if e.building_name else ""))
+                break
+
+    if not matches:
+        _send_message(dispatcher_phone, f"❌ לא נמצאו מעליות עם מספר {search_phone}")
+        return
+
+    lines = "\n".join(matches)
+    _send_message(dispatcher_phone, f"📞 מעליות עם מספר *{search_phone}*:\n{lines}")

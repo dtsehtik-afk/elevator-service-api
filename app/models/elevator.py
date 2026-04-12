@@ -1,13 +1,42 @@
 """Elevator model — represents a physical elevator unit."""
 
+import json as _json
 import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import ARRAY, JSON, TypeDecorator, Uuid
 
 from app.database import Base
+
+
+class _FlexArray(TypeDecorator):
+    """Stores as native ARRAY on PostgreSQL, JSON array on SQLite."""
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(ARRAY(String))
+        return dialect.type_descriptor(JSON())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return []
+        if dialect.name == "postgresql":
+            return value
+        return value if isinstance(value, list) else list(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        try:
+            return _json.loads(value)
+        except (TypeError, ValueError):
+            return []
 
 
 class Elevator(Base):
@@ -35,6 +64,8 @@ class Elevator(Base):
     # Geocoded coordinates (lazily populated on first use)
     latitude: Mapped[float] = mapped_column(Float, nullable=True)
     longitude: Mapped[float] = mapped_column(Float, nullable=True)
+    # Known caller phone numbers for this elevator (auto-populated from incoming calls)
+    caller_phones: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

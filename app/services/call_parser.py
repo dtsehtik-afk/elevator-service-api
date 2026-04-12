@@ -169,9 +169,12 @@ _PARTIAL_THRESHOLD = 0.30   # above this → PARTIAL (manual review needed)
 
 def find_elevator(db: Session, parsed: ParsedCall) -> MatchResult:
     """
-    Fuzzy-match an elevator using city + street from the parsed call.
+    Fuzzy-match an elevator using city + street + caller phone from the parsed call.
 
-    Returns a MatchResult with the best candidate and a confidence score.
+    Phone matching: if caller phone is known, pre-filter to elevators that have
+    been called from that phone before. This greatly narrows the candidate set
+    for management companies with hundreds of elevators.
+
     Score thresholds:
       ≥ 0.55 → MATCHED   (auto-create service call)
       ≥ 0.30 → PARTIAL   (suggest to secretary for review)
@@ -181,13 +184,32 @@ def find_elevator(db: Session, parsed: ParsedCall) -> MatchResult:
         return MatchResult(elevator=None, score=0.0, match_status="UNMATCHED",
                            match_notes="לא סופקה כתובת בקריאה")
 
-    # Pre-filter by city to keep the candidate set small
+    # Normalize caller phone to last-9-digits for matching
+    phone_last9 = ""
+    if parsed.phone:
+        digits = "".join(c for c in parsed.phone if c.isdigit())
+        if digits.startswith("972"):
+            digits = "0" + digits[3:]
+        phone_last9 = digits[-9:] if len(digits) >= 9 else digits
+
+    # Phase 1: phone-filtered candidates (exact phone match)
+    phone_matched_ids: set = set()
+    if phone_last9:
+        all_elevs = db.query(Elevator).all()
+        for e in all_elevs:
+            for cp in (e.caller_phones or []):
+                cp_digits = "".join(c for c in cp if c.isdigit())
+                if cp_digits.startswith("972"):
+                    cp_digits = "0" + cp_digits[3:]
+                if cp_digits[-9:] == phone_last9:
+                    phone_matched_ids.add(e.id)
+                    break
+
+    # Phase 2: city-filtered candidates
     query = db.query(Elevator)
     if parsed.city:
         query = query.filter(Elevator.city.ilike(f"%{parsed.city}%"))
     candidates = query.all()
-
-    # Fall back to all elevators if city filter yielded nothing
     if not candidates:
         candidates = db.query(Elevator).all()
 
@@ -195,23 +217,38 @@ def find_elevator(db: Session, parsed: ParsedCall) -> MatchResult:
         return MatchResult(elevator=None, score=0.0, match_status="UNMATCHED",
                            match_notes="אין מעליות במסד הנתונים")
 
-    scored = [(e, _score_elevator(e, parsed)) for e in candidates]
+    # If phone matches exist AND we have city candidates → intersect; else use phone set as priority
+    if phone_matched_ids:
+        phone_candidates = [e for e in candidates if e.id in phone_matched_ids]
+        if not phone_candidates:
+            # Phone matches exist but not in this city → try phone-matched across all elevators
+            phone_candidates = db.query(Elevator).filter(Elevator.id.in_(phone_matched_ids)).all()
+        if phone_candidates:
+            candidates = phone_candidates  # narrowed set
+
+    def score(e: Elevator) -> float:
+        base = _score_elevator(e, parsed)
+        bonus = 0.25 if e.id in phone_matched_ids else 0.0
+        return min(base + bonus, 1.0)
+
+    scored = [(e, score(e)) for e in candidates]
     scored.sort(key=lambda x: x[1], reverse=True)
     best_elevator, best_score = scored[0]
+    phone_note = " + טלפון מזוהה" if best_elevator.id in phone_matched_ids else ""
 
     if best_score >= _MATCH_THRESHOLD:
         return MatchResult(
             elevator=best_elevator,
             score=round(best_score, 3),
             match_status="MATCHED",
-            match_notes=f"התאמה אוטומטית ({best_score:.0%})",
+            match_notes=f"התאמה אוטומטית ({best_score:.0%}){phone_note}",
         )
     elif best_score >= _PARTIAL_THRESHOLD:
         return MatchResult(
             elevator=best_elevator,
             score=round(best_score, 3),
             match_status="PARTIAL",
-            match_notes=f"התאמה חלקית ({best_score:.0%}) — דורש אישור",
+            match_notes=f"התאמה חלקית ({best_score:.0%}){phone_note} — דורש אישור",
         )
     else:
         return MatchResult(
