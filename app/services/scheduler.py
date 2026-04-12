@@ -159,9 +159,10 @@ def _send_morning_location_requests():
                 + (f"{personal}\n\n" if personal else "\n")
                 +
                 f"────────────────────\n"
-                f"לתיאום קריאות חכם לפי מיקום, אנא שתף *מיקום חי ל-8 שעות* בצ׳אט זה.\n\n"
-                f"איך משתפים:\n"
-                f"📎 ← מיקום ← שתף מיקום חי ← 8 שעות\n\n"
+                f"────────────────────\n"
+                f"📍 *לשיתוף מיקום חי* — פתח את הקישור ואפשר גישה למיקום:\n"
+                f"{base_url}/webhooks/track/{tech.id}\n\n"
+                f"השאר את הדף פתוח — המיקום יתעדכן אוטומטית כל 5 דקות.\n\n"
                 f"🔗 *פורטל הטכנאי שלך*:\n{portal_link}\n\n"
                 f"תודה ובהצלחה! 🙏"
             )
@@ -1077,6 +1078,53 @@ def _poll_email_calls():
         db.close()
 
 
+def _check_location_reminders():
+    """
+    Every 5 minutes during working hours: if a technician opened the tracking page
+    today (last_location_at is set today) but hasn't updated in 20+ minutes,
+    send them a WhatsApp reminder to reopen the tracking link.
+    """
+    from app.database import SessionLocal
+    from app.models.technician import Technician
+    from app.services.whatsapp_service import _send_message
+    from app.services.working_hours import is_working_hours
+    from app.config import get_settings
+    from datetime import datetime, timezone, timedelta
+
+    if not is_working_hours():
+        return
+
+    db = SessionLocal()
+    try:
+        s = get_settings()
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = now - timedelta(minutes=20)
+
+        techs = db.query(Technician).filter(
+            Technician.is_active == True,          # noqa: E712
+            Technician.role == "TECHNICIAN",
+            Technician.last_location_at != None,   # noqa: E711  — has used tracking today or before
+            Technician.last_location_at >= today_start,  # opened today
+            Technician.last_location_at <= cutoff,       # but not in last 20 min
+        ).all()
+
+        for tech in techs:
+            phone = tech.whatsapp_number or tech.phone
+            if not phone:
+                continue
+            tracking_url = f"{s.app_base_url}/webhooks/track/{tech.id}"
+            _send_message(phone,
+                f"📍 {tech.name}, המיקום שלך הפסיק להתעדכן.\n"
+                f"פתח שוב את הקישור כדי להמשיך:\n{tracking_url}"
+            )
+            logger.warning("📍 Location reminder sent to %s", tech.name)
+    except Exception as exc:
+        logger.error("Location reminder job failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -1089,6 +1137,7 @@ def start_scheduler():
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
+    _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)
     _scheduler.start()
     logger.info("Background scheduler started (timezone: Asia/Jerusalem)")
 

@@ -26,9 +26,14 @@ export default function TechniciansPage() {
   const [selected, setSelected] = useState<Technician | null>(null)
 
   const [newForm, setNewForm] = useState(EMPTY_NEW)
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState<{
+    name: string; phone: string; whatsapp_number: string; role: string;
+    max_daily_calls: number; is_active: boolean;
+    base_latitude: number | null; base_longitude: number | null;
+  }>({
     name: '', phone: '', whatsapp_number: '', role: 'TECHNICIAN',
     max_daily_calls: 8, is_active: true,
+    base_latitude: null, base_longitude: null,
   })
 
   const { data: technicians = [] } = useQuery({
@@ -110,6 +115,8 @@ export default function TechniciansPage() {
       role: tech.role,
       max_daily_calls: tech.max_daily_calls,
       is_active: tech.is_active,
+      base_latitude: tech.base_latitude,
+      base_longitude: tech.base_longitude,
     })
     openEdit()
   }
@@ -146,8 +153,12 @@ export default function TechniciansPage() {
                 {tech.whatsapp_number && <Text size="sm" c="dimmed">💬 {tech.whatsapp_number}</Text>}
                 <Text size="sm" c="dimmed">✉️ {tech.email}</Text>
                 <Text size="sm" c="dimmed">📋 עד {tech.max_daily_calls} קריאות/יום</Text>
-                {tech.current_latitude && (
+                {tech.current_latitude ? (
                   <Text size="sm" c="teal">📍 מיקום חי פעיל</Text>
+                ) : tech.base_latitude ? (
+                  <Text size="sm" c="dimmed">📍 מיקום בסיס מוגדר</Text>
+                ) : (
+                  <Text size="sm" c="red">📍 אין מיקום</Text>
                 )}
               </Stack>
 
@@ -260,6 +271,28 @@ export default function TechniciansPage() {
           <Switch label="טכנאי פעיל"
             checked={editForm.is_active}
             onChange={e => setEditForm(s => ({ ...s, is_active: e.target.checked }))} />
+          <Divider label="📍 מיקום בסיס (ברירת מחדל כשאין מיקום חי)" labelPosition="center" />
+          <Group grow>
+            <NumberInput
+              label="קו רוחב (Latitude)"
+              placeholder="32.6038"
+              decimalScale={6}
+              dir="ltr"
+              value={editForm.base_latitude ?? ''}
+              onChange={v => setEditForm(s => ({ ...s, base_latitude: v === '' ? null : Number(v) }))}
+            />
+            <NumberInput
+              label="קו אורך (Longitude)"
+              placeholder="35.2897"
+              decimalScale={6}
+              dir="ltr"
+              value={editForm.base_longitude ?? ''}
+              onChange={v => setEditForm(s => ({ ...s, base_longitude: v === '' ? null : Number(v) }))}
+            />
+          </Group>
+          <Text size="xs" c="dimmed">
+            💡 מצא קואורדינטות ב-Google Maps: לחץ ימני על המיקום ← העתק קואורדינטות
+          </Text>
           <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={closeEdit}>ביטול</Button>
             <Button

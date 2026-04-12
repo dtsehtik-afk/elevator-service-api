@@ -70,6 +70,9 @@ export interface Technician {
   specializations: string[]
   current_latitude: number | null
   current_longitude: number | null
+  last_location_at: string | null
+  base_latitude: number | null
+  base_longitude: number | null
   is_available: boolean
   is_active: boolean
   is_on_call: boolean

@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import ARRAY, JSON, TypeDecorator, Uuid
 
@@ -70,6 +70,8 @@ class Technician(Base):
     # Live GPS location (updated by technician's phone)
     current_latitude: Mapped[float] = mapped_column(Float, nullable=True)
     current_longitude: Mapped[float] = mapped_column(Float, nullable=True)
+    # Timestamp of last successful live location update (for reminder logic)
+    last_location_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_on_call: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

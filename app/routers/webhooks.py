@@ -497,6 +497,106 @@ class LocationUpdate(BaseModel):
     longitude: float
 
 
+@router.get(
+    "/track/{tech_id}",
+    summary="Live location tracking page for technician (opens in mobile browser)",
+)
+def location_tracking_page(tech_id: str):
+    """
+    Serve a simple mobile HTML page that streams the technician's GPS to the server.
+    The technician opens this link on their phone and allows location access.
+    """
+    from fastapi.responses import HTMLResponse
+    base_url = settings.app_base_url
+    html = f"""<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>מיקום חי — אקורד מעליות</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: Arial, sans-serif; background: #f0f4f8; min-height: 100vh;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }}
+  h1 {{ font-size: 28px; color: #1a1a2e; margin-bottom: 4px; }}
+  h2 {{ font-size: 16px; color: #666; margin-bottom: 32px; font-weight: normal; }}
+  .card {{ background: white; border-radius: 16px; padding: 28px 24px;
+           width: 100%; max-width: 340px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }}
+  .dot {{ display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+          margin-left: 8px; vertical-align: middle; }}
+  .dot.green {{ background: #22c55e; animation: pulse 1.5s infinite; }}
+  .dot.yellow {{ background: #f59e0b; }}
+  .dot.red {{ background: #ef4444; }}
+  @keyframes pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.3; }} }}
+  .status-text {{ font-size: 18px; font-weight: bold; margin: 16px 0 8px; }}
+  .sub-text {{ font-size: 13px; color: #888; line-height: 1.6; }}
+  .time {{ font-size: 13px; color: #555; margin-top: 12px; }}
+  .logo {{ font-size: 48px; margin-bottom: 8px; }}
+</style>
+</head>
+<body>
+<div class="logo">📍</div>
+<h1>מיקום חי</h1>
+<h2>אקורד מעליות</h2>
+<div class="card">
+  <div id="dot" class="dot yellow"></div>
+  <div id="status" class="status-text">ממתין לאישור מיקום…</div>
+  <div id="sub" class="sub-text">אנא אפשר גישה למיקום כאשר הדפדפן ישאל</div>
+  <div id="time" class="time"></div>
+</div>
+<p style="margin-top:20px;font-size:12px;color:#aaa;text-align:center;">השאר דף זה פתוח — המיקום מתעדכן כל 5 דקות</p>
+<script>
+const TECH_ID = "{tech_id}";
+const BASE_URL = "{base_url}";
+const INTERVAL_MS = 5 * 60 * 1000;
+
+function setStatus(type, msg, sub) {{
+  const dotEl = document.getElementById('dot');
+  dotEl.className = 'dot ' + type;
+  document.getElementById('status').textContent = msg;
+  if (sub) document.getElementById('sub').textContent = sub;
+}}
+
+function sendLocation(lat, lng) {{
+  fetch(BASE_URL + '/webhooks/location/' + TECH_ID, {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{latitude: lat, longitude: lng}})
+  }}).then(r => {{
+    if (r.ok) {{
+      const t = new Date().toLocaleTimeString('he-IL', {{hour:'2-digit', minute:'2-digit'}});
+      setStatus('green', '✅ מיקום פעיל', 'מתעדכן כל 5 דקות');
+      document.getElementById('time').textContent = 'עדכון אחרון: ' + t;
+    }} else {{
+      setStatus('red', '⚠️ שגיאת שרת', 'מנסה שוב בקרוב…');
+    }}
+  }}).catch(() => setStatus('red', '⚠️ אין חיבור', 'בדוק את החיבור לאינטרנט'));
+}}
+
+function grab() {{
+  navigator.geolocation.getCurrentPosition(
+    p => sendLocation(p.coords.latitude, p.coords.longitude),
+    e => setStatus('red', '❌ מיקום נדחה', 'אנא אפשר גישה למיקום בהגדרות הדפדפן'),
+    {{enableHighAccuracy: true, timeout: 15000}}
+  );
+}}
+
+if (!navigator.geolocation) {{
+  setStatus('red', '❌ GPS לא נתמך', 'נסה דפדפן אחר');
+}} else {{
+  grab();
+  setInterval(grab, INTERVAL_MS);
+}}
+
+if ('wakeLock' in navigator) {{
+  navigator.wakeLock.request('screen').catch(() => {{}});
+}}
+</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
 @router.post(
     "/location/{technician_id}",
     status_code=status.HTTP_200_OK,
@@ -509,6 +609,7 @@ def update_location(
 ):
     """Called from the technician's phone to update their live GPS position."""
     from app.models.technician import Technician
+    from datetime import datetime, timezone
     import uuid as _uuid
     tech = db.query(Technician).filter(
         Technician.id == _uuid.UUID(technician_id)
@@ -517,7 +618,9 @@ def update_location(
         raise HTTPException(status_code=404, detail="Technician not found")
     tech.current_latitude  = payload.latitude
     tech.current_longitude = payload.longitude
+    tech.last_location_at  = datetime.now(timezone.utc)
     db.commit()
+    logger.warning("📍 Live location updated for %s: %.4f, %.4f", tech.name, payload.latitude, payload.longitude)
     return {"status": "ok", "name": tech.name}
 
 

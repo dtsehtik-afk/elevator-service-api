@@ -32,6 +32,8 @@ class TechnicianUpdate(BaseModel):
     is_available: Optional[bool] = None
     is_on_call: Optional[bool] = None
     is_active: Optional[bool] = None
+    base_latitude: Optional[float] = Field(None, ge=-90, le=90)
+    base_longitude: Optional[float] = Field(None, ge=-180, le=180)
 
 
 class LocationUpdate(BaseModel):
@@ -51,6 +53,9 @@ class TechnicianResponse(BaseModel):
     specializations: List[str]
     current_latitude: Optional[float]
     current_longitude: Optional[float]
+    last_location_at: Optional[datetime] = None
+    base_latitude: Optional[float] = None
+    base_longitude: Optional[float] = None
     is_available: bool
     is_on_call: bool = False
     is_active: bool
