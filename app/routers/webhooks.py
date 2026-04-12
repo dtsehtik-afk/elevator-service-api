@@ -550,20 +550,27 @@ def location_tracking_page(tech_id: str):
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: Arial, sans-serif; background: #f0f4f8; min-height: 100vh;
           display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }}
-  h1 {{ font-size: 28px; color: #1a1a2e; margin-bottom: 4px; }}
-  h2 {{ font-size: 16px; color: #666; margin-bottom: 32px; font-weight: normal; }}
-  .card {{ background: white; border-radius: 16px; padding: 28px 24px;
+  h1 {{ font-size: 26px; color: #1a1a2e; margin-bottom: 4px; }}
+  h2 {{ font-size: 15px; color: #666; margin-bottom: 24px; font-weight: normal; }}
+  .card {{ background: white; border-radius: 16px; padding: 24px 20px;
            width: 100%; max-width: 340px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }}
   .dot {{ display: inline-block; width: 14px; height: 14px; border-radius: 50%;
           margin-left: 8px; vertical-align: middle; }}
   .dot.green {{ background: #22c55e; animation: pulse 1.5s infinite; }}
-  .dot.yellow {{ background: #f59e0b; }}
+  .dot.yellow {{ background: #f59e0b; animation: pulse 1.5s infinite; }}
   .dot.red {{ background: #ef4444; }}
   @keyframes pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.3; }} }}
-  .status-text {{ font-size: 18px; font-weight: bold; margin: 16px 0 8px; }}
-  .sub-text {{ font-size: 13px; color: #888; line-height: 1.6; }}
-  .time {{ font-size: 13px; color: #555; margin-top: 12px; }}
-  .logo {{ font-size: 48px; margin-bottom: 8px; }}
+  .status-text {{ font-size: 17px; font-weight: bold; margin: 14px 0 6px; }}
+  .sub-text {{ font-size: 13px; color: #666; line-height: 1.7; }}
+  .time {{ font-size: 12px; color: #999; margin-top: 10px; }}
+  .logo {{ font-size: 44px; margin-bottom: 6px; }}
+  .btn {{ display: inline-block; margin-top: 16px; padding: 10px 24px;
+          background: #3b82f6; color: white; border: none; border-radius: 10px;
+          font-size: 15px; cursor: pointer; width: 100%; }}
+  .btn:active {{ background: #2563eb; }}
+  .steps {{ background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+            padding: 12px 14px; margin-top: 14px; text-align: right; font-size: 12px;
+            color: #92400e; line-height: 1.9; display: none; }}
 </style>
 </head>
 <body>
@@ -575,18 +582,31 @@ def location_tracking_page(tech_id: str):
   <div id="status" class="status-text">ממתין לאישור מיקום…</div>
   <div id="sub" class="sub-text">אנא אפשר גישה למיקום כאשר הדפדפן ישאל</div>
   <div id="time" class="time"></div>
+  <button id="retryBtn" class="btn" onclick="grab()" style="display:none">🔄 נסה שוב</button>
+  <div id="steps" class="steps"></div>
 </div>
-<p style="margin-top:20px;font-size:12px;color:#aaa;text-align:center;">השאר דף זה פתוח — המיקום מתעדכן כל 5 דקות</p>
+<p style="margin-top:18px;font-size:11px;color:#bbb;text-align:center;">השאר דף זה פתוח — המיקום מתעדכן כל 5 דקות</p>
 <script>
 const TECH_ID = "{tech_id}";
 const BASE_URL = "{base_url}";
 const INTERVAL_MS = 5 * 60 * 1000;
+let timer = null;
 
 function setStatus(type, msg, sub) {{
-  const dotEl = document.getElementById('dot');
-  dotEl.className = 'dot ' + type;
+  document.getElementById('dot').className = 'dot ' + type;
   document.getElementById('status').textContent = msg;
-  if (sub) document.getElementById('sub').textContent = sub;
+  if (sub !== undefined) document.getElementById('sub').textContent = sub;
+}}
+
+function showRetry(stepsHtml) {{
+  document.getElementById('retryBtn').style.display = 'block';
+  const el = document.getElementById('steps');
+  if (stepsHtml) {{ el.innerHTML = stepsHtml; el.style.display = 'block'; }}
+}}
+
+function hideRetry() {{
+  document.getElementById('retryBtn').style.display = 'none';
+  document.getElementById('steps').style.display = 'none';
 }}
 
 function sendLocation(lat, lng) {{
@@ -599,25 +619,55 @@ function sendLocation(lat, lng) {{
       const t = new Date().toLocaleTimeString('he-IL', {{hour:'2-digit', minute:'2-digit'}});
       setStatus('green', '✅ מיקום פעיל', 'מתעדכן כל 5 דקות');
       document.getElementById('time').textContent = 'עדכון אחרון: ' + t;
+      hideRetry();
     }} else {{
       setStatus('red', '⚠️ שגיאת שרת', 'מנסה שוב בקרוב…');
     }}
-  }}).catch(() => setStatus('red', '⚠️ אין חיבור', 'בדוק את החיבור לאינטרנט'));
+  }}).catch(() => setStatus('red', '⚠️ אין חיבור לשרת', 'בדוק חיבור לאינטרנט'));
 }}
 
 function grab() {{
+  setStatus('yellow', 'מאתר מיקום…', '');
+  hideRetry();
   navigator.geolocation.getCurrentPosition(
     p => sendLocation(p.coords.latitude, p.coords.longitude),
-    e => setStatus('red', '❌ מיקום נדחה', 'אנא אפשר גישה למיקום בהגדרות הדפדפן'),
+    e => {{
+      if (e.code === 1) {{
+        // PERMISSION_DENIED
+        const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent);
+        const isInsecure = location.protocol !== 'https:';
+        if (isInsecure && isChrome) {{
+          setStatus('red', '🔒 נדרש HTTPS', '');
+          showRetry(`<b>Chrome חוסם מיקום על HTTP.</b><br>פתרונות:<br>
+            1️⃣ פתח בדפדפן <b>Firefox</b> במקום Chrome<br>
+            2️⃣ או בשורת הכתובת הקלד:<br><code>chrome://flags</code><br>
+            חפש: <i>Insecure origins treated as secure</i><br>
+            הוסף: <code>http://{settings.app_base_url.replace("http://","")}</code>`);
+        }} else {{
+          setStatus('red', '❌ גישה למיקום נדחתה', '');
+          showRetry(`כדי לאפשר מיקום:<br>
+            1️⃣ לחץ על סמל המנעול/מידע בשורת הכתובת<br>
+            2️⃣ בחר <b>הרשאות אתר</b><br>
+            3️⃣ הגדר <b>מיקום → אפשר</b><br>
+            4️⃣ לחץ <b>נסה שוב</b>`);
+        }}
+      }} else if (e.code === 2) {{
+        setStatus('red', '📡 GPS לא זמין', 'ודא שה-GPS מופעל בהגדרות הטלפון');
+        showRetry('');
+      }} else {{
+        setStatus('red', '⏱ timeout', 'המיקום לוקח זמן רב — נסה שוב');
+        showRetry('');
+      }}
+    }},
     {{enableHighAccuracy: true, timeout: 15000}}
   );
 }}
 
 if (!navigator.geolocation) {{
-  setStatus('red', '❌ GPS לא נתמך', 'נסה דפדפן אחר');
+  setStatus('red', '❌ GPS לא נתמך', 'נסה לפתוח בדפדפן Chrome או Firefox');
 }} else {{
   grab();
-  setInterval(grab, INTERVAL_MS);
+  timer = setInterval(grab, INTERVAL_MS);
 }}
 
 if ('wakeLock' in navigator) {{
