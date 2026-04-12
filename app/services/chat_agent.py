@@ -316,20 +316,25 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
     for t in techs:
         if technician_name and technician_name.lower() not in t.name.lower():
             continue
-        if t.current_latitude and t.current_longitude:
+        # Prefer live location, fall back to base location
+        lat = t.current_latitude or t.base_latitude
+        lng = t.current_longitude or t.base_longitude
+        is_live = bool(t.current_latitude and t.current_longitude)
+        if lat and lng:
             results.append({
                 "שם": t.name,
-                "קו_רוחב": t.current_latitude,
-                "קו_אורך": t.current_longitude,
-                "קישור_מפה": f"https://maps.google.com/?q={t.current_latitude},{t.current_longitude}",
+                "קו_רוחב": lat,
+                "קו_אורך": lng,
+                "סוג_מיקום": "חי" if is_live else "מיקום_בסיס",
+                "קישור_מפה": f"https://maps.google.com/?q={lat},{lng}",
                 "זמין": t.is_available,
             })
         else:
             if not technician_name:
                 continue  # Skip techs with no location when doing general query
-            results.append({"שם": t.name, "מיקום": "לא זמין — לא שיתף מיקום"})
+            results.append({"שם": t.name, "מיקום": "לא הוגדר מיקום"})
     if not results:
-        return {"תוצאה": "לא נמצא מיקום זמין"}
+        return {"תוצאה": "לא נמצא מיקום זמין — ודא שהוגדר מיקום בסיס לטכנאים בדשבורד"}
     return {"טכנאים": results}
 
 
