@@ -11,13 +11,18 @@ from app.services.whatsapp_service import _send_message, notify_dispatcher
 logger = logging.getLogger(__name__)
 
 _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעליות. החזר JSON בלבד:
-{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים"}}
+{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת"}}
 
 דוגמאות:
 "סגור קריאה ברחוב הרצל 5" → CLOSE_CALL
 "שבץ תומר לקריאה ברחוב ביאליק" → ASSIGN_TECH
 "מה הסטטוס" → STATUS_QUERY
 "בוקר טוב" → UNKNOWN
+"העבר קריאה ברחוב X לתומר" → REASSIGN_CALL (tech_name, address)
+"הקריאה בכתובת X שייכת לכתובת Y" → UPDATE_ADDRESS (address=X, new_address=Y)
+"דוח יומי" → DAILY_REPORT
+"דוח שבועי" → WEEKLY_REPORT
+"דוח חודשי" → MONTHLY_REPORT
 
 הודעה: {text}"""
 
@@ -58,6 +63,14 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
         _cmd_close_call(db, phone, address, text)
     elif command == "ASSIGN_TECH":
         _cmd_assign_tech(db, phone, address, tech_name)
+    elif command == "REASSIGN_CALL":
+        _cmd_reassign_call(db, phone, address, tech_name)
+    elif command == "UPDATE_ADDRESS":
+        new_addr = parsed.get("new_address", "")
+        _cmd_update_address(db, phone, address, new_addr)
+    elif command in ("DAILY_REPORT", "WEEKLY_REPORT", "MONTHLY_REPORT"):
+        days = 1 if command == "DAILY_REPORT" else 7 if command == "WEEKLY_REPORT" else 30
+        _cmd_daily_report(db, phone, days)
     else:
         # Free question — route to chat agent
         from app.services.scheduler import _handle_chat_question
@@ -194,3 +207,138 @@ def _cmd_assign_tech(db, phone: str, address: str, tech_name: str) -> None:
 
     _send_message(phone, f"✅ *{tech.name}* שובץ לקריאה ב*{addr}* — ממתין לאישורו.")
     notify_dispatcher(f"📋 קריאה שובצה ל*{tech.name}* — {addr} (ע\"י מנהל)")
+
+
+def _cmd_reassign_call(db, phone: str, address: str, tech_name: str) -> None:
+    """Reassign a call from one technician to another."""
+    from app.models.technician import Technician
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.elevator import Elevator
+
+    if not tech_name:
+        _send_message(phone, "❌ לא צוין שם טכנאי להעברה.")
+        return
+
+    tech = db.query(Technician).filter(Technician.name.ilike(f"%{tech_name}%")).first()
+    if not tech:
+        _send_message(phone, f"❌ לא נמצא טכנאי בשם: *{tech_name}*")
+        return
+
+    call = _find_call_by_address(db, address)
+    if not call:
+        _send_message(phone, f"❌ לא נמצאה קריאה פתוחה בכתובת: *{address or 'לא צוינה'}*")
+        return
+
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+
+    # Cancel existing confirmed/pending assignments
+    for a in db.query(Assignment).filter(
+        Assignment.service_call_id == call.id,
+        Assignment.status.in_(["PENDING_CONFIRMATION", "CONFIRMED"])
+    ).all():
+        a.status = "CANCELLED"
+
+    # Create new PENDING_CONFIRMATION assignment for the new tech
+    assignment = Assignment(
+        service_call_id=call.id,
+        technician_id=tech.id,
+        assignment_type="MANUAL",
+        status="PENDING_CONFIRMATION",
+        notes=f"הועבר ע\"י מנהל",
+    )
+    db.add(assignment)
+    call.status = "ASSIGNED"
+
+    audit = AuditLog(service_call_id=call.id, changed_by="dispatcher", old_status=call.status, new_status="ASSIGNED",
+                     notes=f"הועבר ל{tech.name} ע\"י מנהל")
+    db.add(audit)
+    db.commit()
+
+    # Notify new tech
+    tech_phone = tech.whatsapp_number or tech.phone
+    if tech_phone:
+        _send_message(tech_phone,
+            f"🔧 *קריאה חדשה הועברה אליך*\n📍 {addr}\n\nאשר קבלה:\n1️⃣ אישור\n2️⃣ דחייה"
+        )
+
+    _send_message(phone, f"✅ הקריאה ב*{addr}* הועברה ל*{tech.name}* — ממתין לאישורו.")
+    logger.warning("🔄 Dispatcher reassigned call %s to %s", call.id, tech.name)
+
+
+def _cmd_update_address(db, phone: str, old_address: str, new_address: str) -> None:
+    """Update the elevator linked to a service call (wrong elevator was matched)."""
+    from app.models.elevator import Elevator
+    from app.models.assignment import Assignment
+
+    if not new_address:
+        _send_message(phone, "❌ לא צוינה כתובת חדשה.")
+        return
+
+    call = _find_call_by_address(db, old_address)
+    if not call:
+        _send_message(phone, f"❌ לא נמצאה קריאה פתוחה בכתובת: *{old_address or 'לא צוינה'}*")
+        return
+
+    # Find elevator by new address
+    new_elev = (
+        db.query(Elevator)
+        .filter(
+            Elevator.address.ilike(f"%{new_address}%") |
+            Elevator.city.ilike(f"%{new_address}%")
+        )
+        .first()
+    )
+    if not new_elev:
+        _send_message(phone, f"❌ לא נמצאה מעלית בכתובת: *{new_address}*")
+        return
+
+    old_elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    old_addr = f"{old_elev.address}, {old_elev.city}" if old_elev else "כתובת לא ידועה"
+    new_addr = f"{new_elev.address}, {new_elev.city}"
+
+    # Update call elevator
+    call.elevator_id = new_elev.id
+    db.commit()
+
+    # Notify assigned technician of address change
+    assignment = db.query(Assignment).filter(
+        Assignment.service_call_id == call.id,
+        Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"])
+    ).first()
+    if assignment:
+        from app.models.technician import Technician
+        tech = db.query(Technician).filter(Technician.id == assignment.technician_id).first()
+        if tech:
+            tech_phone = tech.whatsapp_number or tech.phone
+            _send_message(tech_phone,
+                f"⚠️ *עדכון כתובת לקריאה שלך*\n"
+                f"הכתובת עודכנה:\n"
+                f"מ: {old_addr}\n"
+                f"ל: *{new_addr}*"
+            )
+
+    _send_message(phone, f"✅ הקריאה עודכנה מ*{old_addr}* ל*{new_addr}*.")
+    logger.warning("📍 Dispatcher updated call %s address from %s to %s", call.id, old_addr, new_addr)
+
+
+def _cmd_daily_report(db, phone: str, days: int = 1) -> None:
+    """Send a summary report for the last N days."""
+    from app.models.service_call import ServiceCall
+    from datetime import datetime, timezone, timedelta
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    resolved = db.query(ServiceCall).filter(
+        ServiceCall.status == "RESOLVED",
+        ServiceCall.resolved_at >= since
+    ).count()
+    open_count = db.query(ServiceCall).filter(ServiceCall.status == "OPEN").count()
+    in_progress = db.query(ServiceCall).filter(ServiceCall.status == "IN_PROGRESS").count()
+
+    period = "יומי" if days == 1 else "שבועי" if days == 7 else "חודשי"
+    _send_message(phone,
+        f"📊 *דוח {period}*\n"
+        f"✅ טופלו: *{resolved}*\n"
+        f"🔴 פתוחות כרגע: *{open_count}*\n"
+        f"🔵 בטיפול: *{in_progress}*"
+    )

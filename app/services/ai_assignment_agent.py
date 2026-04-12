@@ -335,7 +335,12 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
     maps_url = (
         f"https://maps.google.com/?q={elevator.latitude},{elevator.longitude}"
         if elevator and elevator.latitude else
-        f"https://maps.google.com/?q={elevator.address}+{elevator.city}+ישראל"
+        f"https://maps.google.com/?q={elevator.address}+{elevator.city}"
+    )
+    waze_url = (
+        f"https://waze.com/ul?ll={elevator.latitude},{elevator.longitude}"
+        if elevator and elevator.latitude else
+        f"https://waze.com/ul?q={elevator.address}+{elevator.city}"
     )
     _send_message(
         phone_out,
@@ -343,7 +348,8 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
         f"────────────────────\n"
         f"📍 {addr}\n"
         f"🚗 זמן נסיעה: ~{assignment.travel_minutes or '?'} דקות\n"
-        f"🔗 {maps_url}\n"
+        f"🗺 {maps_url}\n"
+        f"🚘 {waze_url}\n"
         f"────────────────────\n"
         f"בסיום הטיפול שלח: *דוח* + תיאור קצר"
     )
@@ -487,7 +493,11 @@ def confirm_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Opt
 
     addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
     maps_url = (
-        f"https://maps.google.com/?q={elevator.address}+{elevator.city}+ישראל"
+        f"https://maps.google.com/?q={elevator.address}+{elevator.city}"
+        if elevator else ""
+    )
+    waze_url = (
+        f"https://waze.com/ul?q={elevator.address}+{elevator.city}"
         if elevator else ""
     )
     phone_out = tech.whatsapp_number or tech.phone
@@ -495,7 +505,8 @@ def confirm_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Opt
         f"✅ *קיבלת את הקריאה!*\n"
         f"📍 {addr}\n"
         f"🚗 ~{assignment.travel_minutes or '?'} דקות\n"
-        f"🔗 {maps_url}\n"
+        f"🗺 {maps_url}\n"
+        f"🚘 {waze_url}\n"
         f"בסיום שלח: *דוח* + תיאור קצר"
     )
     logger.info("✅ %s confirmed assignment %s", tech.name, assignment_id)

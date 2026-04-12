@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     greenapi_instance_id: str = ""
     greenapi_api_token: str = ""
 
-    # Dispatcher WhatsApp (for unassigned-call alerts)
-    dispatcher_whatsapp: str = ""
+    # Dispatcher WhatsApp (for unassigned-call alerts) — comma-separated list of manager WhatsApp numbers
+    dispatcher_whatsapp: str = ""  # comma-separated list of manager WhatsApp numbers
 
     # Public base URL for technician portal links (e.g. http://192.168.1.100:8000)
     app_base_url: str = "http://localhost:8000"

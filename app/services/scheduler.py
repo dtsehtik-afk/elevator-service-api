@@ -644,7 +644,7 @@ def _handle_self_assign(db, phone: str, text: str) -> None:
     logger.info("✋ %s self-assigned call %s at %s", tech.name, matched_call.id, addr)
 
 
-def _handle_free_text(db, phone: str, text: str, settings) -> None:
+def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = False) -> None:
     """
     Route ANY free-text message from a technician through Gemini for intent detection.
     Always sends a reply — never silently ignores a message.
@@ -652,6 +652,9 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
       - TAKE     → self-assign an open call
       - QUESTION → answer via chat agent
       - IGNORE   → echo the message back and ask for clarification
+
+    Args:
+        is_reply: True when the message is a quoted/reply message — passes with_history to chat agent.
     """
     import urllib.request
     from app.models.technician import Technician
@@ -686,8 +689,11 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
                     Technician.whatsapp_number.contains(digits[-9:]))
             .first())
 
-    dispatcher_digits = "".join(c for c in (settings.dispatcher_whatsapp or "") if c.isdigit())
-    is_dispatcher = bool(dispatcher_digits and digits[-9:] == dispatcher_digits[-9:])
+    dispatcher_numbers = [n.strip() for n in (settings.dispatcher_whatsapp or "").split(",") if n.strip()]
+    is_dispatcher = any(
+        "".join(c for c in n if c.isdigit())[-9:] == digits[-9:]
+        for n in dispatcher_numbers
+    )
 
     if not tech and not is_dispatcher:
         logger.warning("📵 Message from unregistered number %s — ignored", phone)
@@ -740,7 +746,7 @@ def _handle_free_text(db, phone: str, text: str, settings) -> None:
         elif intent == "TAKE":
             _handle_self_assign(db, phone, extract or text)
         elif intent == "QUESTION":
-            _handle_chat_question(db, phone, text, settings)
+            _handle_chat_question(db, phone, text, settings, with_history=is_reply)
         else:
             # IGNORE — short ack only (ok, thanks, 👍) — brief confirmation
             _send_message(phone, "👍")
@@ -768,8 +774,11 @@ def _handle_chat_question_simple(db, phone: str, question: str, settings) -> Non
             .filter(Technician.phone.contains(digits[-9:]) |
                     Technician.whatsapp_number.contains(digits[-9:]))
             .first())
-    dispatcher_digits = "".join(c for c in (settings.dispatcher_whatsapp or "") if c.isdigit())
-    is_dispatcher = digits[-9:] == dispatcher_digits[-9:]
+    dispatcher_numbers = [n.strip() for n in (settings.dispatcher_whatsapp or "").split(",") if n.strip()]
+    is_dispatcher = any(
+        "".join(c for c in n if c.isdigit())[-9:] == digits[-9:]
+        for n in dispatcher_numbers
+    )
     if not tech and not is_dispatcher:
         return
 
@@ -820,7 +829,7 @@ def _handle_chat_question_simple(db, phone: str, question: str, settings) -> Non
     )
 
 
-def _handle_chat_question(db, phone: str, question: str, settings) -> None:
+def _handle_chat_question(db, phone: str, question: str, settings, with_history: bool = False) -> None:
     """Route a free-text WhatsApp question to the Claude chat agent and reply."""
     from app.models.technician import Technician
     from app.services.whatsapp_service import _send_message
@@ -840,8 +849,11 @@ def _handle_chat_question(db, phone: str, question: str, settings) -> None:
     asker_name = tech.name if tech else "משתמש"
 
     # Only known technicians / managers OR dispatcher number
-    dispatcher_digits = "".join(c for c in (settings.dispatcher_whatsapp or "") if c.isdigit())
-    is_dispatcher = bool(dispatcher_digits and digits[-9:] == dispatcher_digits[-9:])
+    dispatcher_numbers = [n.strip() for n in (settings.dispatcher_whatsapp or "").split(",") if n.strip()]
+    is_dispatcher = any(
+        "".join(c for c in n if c.isdigit())[-9:] == digits[-9:]
+        for n in dispatcher_numbers
+    )
     if not tech and not is_dispatcher:
         logger.warning("Chat question from unknown number %s — ignored", phone)
         return
@@ -854,7 +866,7 @@ def _handle_chat_question(db, phone: str, question: str, settings) -> None:
 
     try:
         from app.services.chat_agent import answer_question
-        answer = answer_question(db, question, asker_name, phone=phone)
+        answer = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
         _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
     except Exception as exc:
         logger.error("Chat agent error: %s", exc)

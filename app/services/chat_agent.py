@@ -75,6 +75,14 @@ _GEMINI_TOOLS = [{
             "description": "מחזיר סיכום כללי של מצב המערכת — קריאות פתוחות, טכנאים פעילים.",
             "parameters": {"type": "OBJECT", "properties": {}, "required": []},
         },
+        {
+            "name": "get_technician_location",
+            "description": "מחזיר את המיקום הנוכחי של טכנאי (אם שיתף מיקום חי). יכול גם למצוא את הטכנאי הקרוב ביותר לאזור מסוים.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "technician_name": {"type": "STRING", "description": "שם הטכנאי (אופציונלי)"},
+                "near_address": {"type": "STRING", "description": "כתובת לחפש טכנאי קרוב (אופציונלי)"},
+            }, "required": []},
+        },
     ]
 }]
 
@@ -302,6 +310,29 @@ def _get_elevator_maintenance(db: Session, elevator_id: str) -> list[dict]:
     ]
 
 
+def _get_technician_location(db: Session, technician_name: str | None = None, near_address: str | None = None) -> dict:
+    techs = db.query(Technician).filter(Technician.is_active == True).all()  # noqa: E712
+    results = []
+    for t in techs:
+        if technician_name and technician_name.lower() not in t.name.lower():
+            continue
+        if t.current_latitude and t.current_longitude:
+            results.append({
+                "שם": t.name,
+                "קו_רוחב": t.current_latitude,
+                "קו_אורך": t.current_longitude,
+                "קישור_מפה": f"https://maps.google.com/?q={t.current_latitude},{t.current_longitude}",
+                "זמין": t.is_available,
+            })
+        else:
+            if not technician_name:
+                continue  # Skip techs with no location when doing general query
+            results.append({"שם": t.name, "מיקום": "לא זמין — לא שיתף מיקום"})
+    if not results:
+        return {"תוצאה": "לא נמצא מיקום זמין"}
+    return {"טכנאים": results}
+
+
 def _get_system_summary(db: Session) -> dict:
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -343,6 +374,8 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
         return _get_elevator_maintenance(db, tool_input["elevator_id"])
     elif tool_name == "get_system_summary":
         return _get_system_summary(db)
+    elif tool_name == "get_technician_location":
+        return _get_technician_location(db, tool_input.get("technician_name"), tool_input.get("near_address"))
     else:
         return {"error": f"כלי לא מוכר: {tool_name}"}
 
@@ -361,14 +394,16 @@ _SYSTEM_PROMPT = """אתה מנהל הלוגיסטיקה החכם של חברת 
 - עומס עבודה וזמינות טכנאים
 - רשומות תחזוקה תקופתית
 - סיכום מצב כולל של המערכת
+- מיקום נוכחי של טכנאים (אם שיתפו מיקום)
 
-כללים:
+כללים חמורים:
 - ענה קצר וענייני — ווצאפ, לא דוח
 - פנה לטכנאי בשמו כשידוע
-- אם נשאלת על מעלית ספציפית — חפש אותה קודם
+- אם נשאלת על מעלית ספציפית — חפש אותה קודם בכלים
 - תאריכים בפורמט DD/MM/YYYY
-- אל תמציא מידע — השתמש רק בנתונים מהכלים
-- אם אין נתונים — אמור זאת בבירור ובנימוס"""
+- אל תמציא מידע בשום מקרה — השתמש רק בנתונים שהכלים מחזירים
+- אם אין לך נתונים או שאינך בטוח — אמור בבירור "אין לי מידע על כך" או "לא מצאתי נתונים"
+- עדיף לא לענות מאשר להמציא"""
 
 
 def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
@@ -408,15 +443,16 @@ def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list
         return []
 
 
-def answer_question(db: Session, question: str, asker_name: str = "טכנאי", phone: str = "") -> str:
+def answer_question(db: Session, question: str, asker_name: str = "טכנאי", phone: str = "", with_history: bool = False) -> str:
     """
     Answer a free-text Hebrew question about the system using Gemini + tool use.
 
     Args:
-        db:          Database session
-        question:    The question text from WhatsApp
-        asker_name:  Name of the technician/manager asking
-        phone:       Sender's phone number (used to load conversation history)
+        db:           Database session
+        question:     The question text from WhatsApp
+        asker_name:   Name of the technician/manager asking
+        phone:        Sender's phone number (used to load conversation history)
+        with_history: Whether to load conversation history (True only for quoted/reply messages)
 
     Returns:
         Hebrew answer string to send back via WhatsApp
@@ -427,8 +463,8 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     if not s.gemini_api_key:
         return "❌ שירות השאלות אינו מוגדר (חסר GEMINI_API_KEY)"
 
-    # Load recent conversation history for continuity
-    history = _load_conversation_history(db, phone) if phone else []
+    # Load recent conversation history only when this is a reply/quoted message
+    history = _load_conversation_history(db, phone) if (phone and with_history) else []
 
     # Append current question; if history ends with user-role we merge
     current = {"role": "user", "parts": [{"text": f"{asker_name} שואל: {question}"}]}
@@ -444,6 +480,7 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
                 "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
                 "tools": _GEMINI_TOOLS,
                 "contents": contents,
+                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600},
             }
             resp = client.post(f"{_GEMINI_URL}?key={s.gemini_api_key}", json=payload)
             resp.raise_for_status()

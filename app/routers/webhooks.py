@@ -360,8 +360,9 @@ def receive_whatsapp(
         return {"status": "processed"}
 
     # Free-text: report / question / self-assign
+    # Pass is_reply=True for quoted messages so the chat agent loads conversation history
     from app.services.scheduler import _handle_free_text
-    _handle_free_text(db, phone, text, settings)
+    _handle_free_text(db, phone, text, settings, is_reply=(msg_type == "quotedMessage"))
     return {"status": "processed"}
 
 

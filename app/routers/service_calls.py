@@ -156,6 +156,24 @@ def update_call(
             raise HTTPException(status_code=403, detail="You can only update your own assigned calls")
 
     updated = service_call_service.update_service_call(db, call_id, data, current_user.email)
+
+    # Cancel any PENDING_CONFIRMATION assignments when call details are edited
+    from app.models.assignment import Assignment
+    from app.services.whatsapp_service import _send_message
+
+    pending = db.query(Assignment).filter(
+        Assignment.service_call_id == call.id,
+        Assignment.status == "PENDING_CONFIRMATION"
+    ).all()
+    for a in pending:
+        a.status = "CANCELLED"
+        tech = db.query(Technician).filter(Technician.id == a.technician_id).first()
+        if tech:
+            tech_phone = tech.whatsapp_number or tech.phone
+            _send_message(tech_phone, f"ℹ️ הקריאה שנשלחה אליך עודכנה ובוטלה. ייתכן שתישלח שוב בקרוב.")
+    if pending:
+        db.commit()
+
     return updated
 
 

@@ -164,7 +164,8 @@ def notify_technician_auto_assigned(
     caller_line  = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
     phone_line   = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
 
-    maps_url = f"https://maps.google.com/?q={address}+{city}+ישראל"
+    maps_url = f"https://maps.google.com/?q={address}+{city}"
+    waze_url = f"https://waze.com/ul?q={address}+{city}"
 
     message = (
         f"📋 *שובצת לקריאת שירות*\n"
@@ -177,7 +178,8 @@ def notify_technician_auto_assigned(
         f"{caller_line}"
         f"{phone_line}"
         f"🚗 *זמן נסיעה משוער:* ~{travel_minutes} דקות\n"
-        f"🔗 {maps_url}\n"
+        f"🗺 {maps_url}\n"
+        f"🚘 {waze_url}\n"
         f"────────────────────\n"
         f"בסיום הטיפול שלח: *דוח* + תיאור קצר"
     )
@@ -206,7 +208,8 @@ def notify_rescue_emergency(
 ) -> bool:
     """Send an urgent rescue alert to a technician (people trapped in elevator)."""
     ts = _now_il()
-    maps_url = f"https://maps.google.com/?q={address}+{city}+ישראל"
+    maps_url = f"https://maps.google.com/?q={address}+{city}"
+    waze_url = f"https://waze.com/ul?q={address}+{city}"
 
     closest_line = ""
     if closest_tech_name:
@@ -228,7 +231,8 @@ def notify_rescue_emergency(
         f"{caller_line}"
         f"{phone_line}"
         f"{closest_line}"
-        f"🔗 {maps_url}\n"
+        f"🗺 {maps_url}\n"
+        f"🚘 {waze_url}\n"
         f"════════════════════\n"
         f"⚡ *נדרשת הגעה מיידית!*\n"
         f"השב *1* לאישור הגעה"
@@ -237,11 +241,16 @@ def notify_rescue_emergency(
 
 
 def notify_dispatcher(text: str) -> bool:
-    """Send a notification to the dispatcher/manager WhatsApp. No-op if not configured."""
-    dispatcher = settings.dispatcher_whatsapp
-    if not dispatcher:
+    """Send notification to ALL configured dispatcher/manager numbers."""
+    dispatcher_str = settings.dispatcher_whatsapp
+    if not dispatcher_str:
         return False
-    return bool(_send_message(dispatcher, text))
+    numbers = [n.strip() for n in dispatcher_str.split(",") if n.strip()]
+    success = False
+    for number in numbers:
+        if _send_message(number, text):
+            success = True
+    return success
 
 
 def notify_dispatcher_unassigned(phone: str, address: str, city: str, fault_type: str) -> bool:
