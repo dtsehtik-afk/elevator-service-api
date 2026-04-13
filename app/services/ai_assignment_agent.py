@@ -544,11 +544,11 @@ def reject_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Opti
     from app.services.whatsapp_service import _send_message
     phone_out = tech.whatsapp_number or tech.phone
     assignment.status = "REJECTED"
-    _send_message(phone_out, "↩️ הקריאה נדחתה — מועברת לטכנאי אחר.")
     call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
     if call:
         elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
         addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+        _send_message(phone_out, f"↩️ הקריאה ב{addr} נדחתה — מועברת לטכנאי אחר.")
         whatsapp_service.notify_dispatcher(f"↩️ *{tech.name}* דחה את הקריאה ב{addr} — מועברת הלאה")
         call.status = "OPEN"
         db.add(AuditLog(
