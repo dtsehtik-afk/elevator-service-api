@@ -407,7 +407,11 @@ def poll_emails(db) -> int:
 
         # Only process emails received today or later — avoids replaying old backlog
         since_str = date.today().strftime("%d-%b-%Y")  # e.g. "31-Mar-2026"
+        _, all_ids = mail.search(None, f'(FROM "{SENDER_FILTER}" SINCE {since_str})')
         _, ids = mail.search(None, f'(UNSEEN FROM "{SENDER_FILTER}" SINCE {since_str})')
+        logger.warning("📧 beepertalk emails today: %d total, %d unread",
+                       len(all_ids[0].split()) if all_ids[0] else 0,
+                       len(ids[0].split()) if ids[0] else 0)
         msg_ids = ids[0].split()
         if not msg_ids:
             mail.logout()
