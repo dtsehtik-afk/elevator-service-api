@@ -51,3 +51,7 @@ export async function setCallMonitoring(id: string, notes: string): Promise<Serv
   const { data } = await client.post<ServiceCall>(`/calls/${id}/monitor`, null, { params: { notes } })
   return data
 }
+
+export async function manualAssignCall(id: string, technicianId: string, notes?: string): Promise<void> {
+  await client.post(`/calls/${id}/assign`, { technician_id: technicianId, notes })
+}

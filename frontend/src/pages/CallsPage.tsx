@@ -7,8 +7,9 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring } from '../api/calls'
+import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall } from '../api/calls'
 import { listElevators } from '../api/elevators'
+import { listTechnicians } from '../api/technicians'
 import { useAuthStore } from '../stores/authStore'
 import {
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -47,6 +48,9 @@ export default function CallsPage() {
   const [detailCall, setDetailCall] = useState<CallDetail | null>(null)
   const [monitorNotes, setMonitorNotes] = useState('')
   const [monitorOpened, { open: openMonitor, close: closeMonitor }] = useDisclosure()
+  const [assignOpened, { open: openAssign, close: closeAssign }] = useDisclosure()
+  const [assignTechId, setAssignTechId] = useState<string | null>(null)
+  const [assignNotes, setAssignNotes] = useState('')
 
   const [newForm, setNewForm] = useState({
     elevator_id: '',
@@ -69,6 +73,11 @@ export default function CallsPage() {
   const { data: elevators = [] } = useQuery({
     queryKey: ['elevators'],
     queryFn: () => listElevators(),
+  })
+
+  const { data: technicians = [] } = useQuery({
+    queryKey: ['technicians'],
+    queryFn: () => listTechnicians(),
   })
 
   const { data: callDetail, isLoading: detailLoading } = useQuery({
@@ -123,6 +132,21 @@ export default function CallsPage() {
       closeDetail()
     },
     onError: () => notifications.show({ message: 'לא נמצא טכנאי פנוי', color: 'red' }),
+  })
+
+  const manualAssignMutation = useMutation({
+    mutationFn: ({ id, techId, notes }: { id: string; techId: string; notes: string }) =>
+      manualAssignCall(id, techId, notes || undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['call-detail'] })
+      notifications.show({ message: '✅ הקריאה שובצה לטכנאי', color: 'green' })
+      closeAssign()
+      closeDetail()
+      setAssignTechId(null)
+      setAssignNotes('')
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשיבוץ', color: 'red' }),
   })
 
   const monitorMutation = useMutation({
@@ -391,6 +415,15 @@ export default function CallsPage() {
               {detail && ['OPEN', 'ASSIGNED'].includes(detail.status) && (
                 <Button
                   variant="light"
+                  color="blue"
+                  onClick={() => { setSelectedCall(detail); openAssign() }}
+                >
+                  👨‍🔧 שבץ טכנאי
+                </Button>
+              )}
+              {detail && ['OPEN', 'ASSIGNED'].includes(detail.status) && (
+                <Button
+                  variant="light"
                   color="orange"
                   loading={reassignMutation.isPending}
                   onClick={() => detail && reassignMutation.mutate(detail.id)}
@@ -483,6 +516,44 @@ export default function CallsPage() {
               onClick={() => selectedCall && monitorMutation.mutate({ id: selectedCall.id, notes: monitorNotes })}
             >
               אשר מעקב
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* ── Manual assign modal ── */}
+      <Modal opened={assignOpened} onClose={closeAssign} title="👨‍🔧 שיבוץ ידני לטכנאי">
+        <Stack gap="sm">
+          <Select
+            label="בחר טכנאי"
+            placeholder="בחר..."
+            data={technicians
+              .filter(t => t.is_active)
+              .map(t => ({ value: t.id, label: `${t.name}${t.is_available ? '' : ' (לא זמין)'}` }))}
+            value={assignTechId}
+            onChange={setAssignTechId}
+            searchable
+          />
+          <Textarea
+            label="הערות (אופציונלי)"
+            placeholder="הערות לשיבוץ..."
+            value={assignNotes}
+            onChange={e => setAssignNotes(e.target.value)}
+            rows={2}
+          />
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={closeAssign}>ביטול</Button>
+            <Button
+              color="blue"
+              disabled={!assignTechId}
+              loading={manualAssignMutation.isPending}
+              onClick={() => selectedCall && assignTechId && manualAssignMutation.mutate({
+                id: selectedCall.id,
+                techId: assignTechId,
+                notes: assignNotes,
+              })}
+            >
+              שבץ
             </Button>
           </Group>
         </Stack>
