@@ -82,6 +82,110 @@ class ReportSubmit(BaseModel):
     quote_needed: bool = False
 
 
+class ReassignElevator(BaseModel):
+    elevator_id: str
+
+
+@router.get("/tech/{tech_id}/elevators", include_in_schema=False)
+def search_elevators(tech_id: str, q: str = "", db: Session = Depends(get_db)):
+    """
+    Return a JSON list of elevators matching the search query (address / city / building name).
+    Used by the portal's reassign-address widget.
+    """
+    import uuid
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician
+
+    # Validate tech
+    try:
+        tid = uuid.UUID(tech_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="לא נמצא")
+    if not db.query(Technician).filter(Technician.id == tid).first():
+        raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
+
+    q = q.strip()
+    if not q or len(q) < 2:
+        return []
+
+    elevators = (
+        db.query(Elevator)
+        .filter(
+            Elevator.address.ilike(f"%{q}%")
+            | Elevator.city.ilike(f"%{q}%")
+            | Elevator.building_name.ilike(f"%{q}%")
+        )
+        .order_by(Elevator.city, Elevator.address)
+        .limit(20)
+        .all()
+    )
+
+    return [
+        {
+            "id": str(e.id),
+            "address": e.address,
+            "city": e.city,
+            "building_name": e.building_name or "",
+        }
+        for e in elevators
+    ]
+
+
+@router.post("/tech/{tech_id}/reassign-elevator", response_class=HTMLResponse, include_in_schema=False)
+def reassign_elevator(tech_id: str, data: ReassignElevator, db: Session = Depends(get_db)):
+    """
+    Reassign the technician's active call to a different elevator (correct address).
+    Updates call.elevator_id, writes an audit log entry, and notifies the dispatcher.
+    """
+    import uuid
+    from datetime import datetime, timezone
+    from app.models.assignment import AuditLog
+    from app.models.elevator import Elevator
+
+    tech, assignment, call = _get_tech_and_call(db, tech_id)
+    if not call:
+        return HTMLResponse(_no_call_page(tech.name))
+
+    try:
+        new_elevator_id = uuid.UUID(data.elevator_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="מזהה מעלית לא תקין")
+
+    new_elevator = db.query(Elevator).filter(Elevator.id == new_elevator_id).first()
+    if not new_elevator:
+        raise HTTPException(status_code=404, detail="מעלית לא נמצאה")
+
+    old_elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    old_addr = f"{old_elevator.address}, {old_elevator.city}" if old_elevator else "לא ידוע"
+    new_addr = f"{new_elevator.address}, {new_elevator.city}"
+
+    call.elevator_id = new_elevator.id
+
+    audit = AuditLog(
+        service_call_id=call.id,
+        changed_by=tech.email or tech.name,
+        old_status=call.status,
+        new_status=call.status,
+        notes=f"כתובת תוקנה מ-'{old_addr}' ל-'{new_addr}' ע\"י {tech.name}",
+    )
+    db.add(audit)
+    db.commit()
+
+    # Notify dispatcher
+    try:
+        from app.services.whatsapp_service import notify_dispatcher
+        notify_dispatcher(
+            f"📍 *תיקון כתובת*\n"
+            f"טכנאי *{tech.name}* עדכן כתובת קריאה:\n"
+            f"מ: {old_addr}\n"
+            f"ל: *{new_addr}*"
+        )
+    except Exception:
+        pass
+
+    return HTMLResponse(_reassign_success_page(tech.name, old_addr, new_addr))
+
+
 @router.post("/tech/{tech_id}/report", response_class=HTMLResponse, include_in_schema=False)
 def submit_report(tech_id: str, data: ReportSubmit, db: Session = Depends(get_db)):
     """Technician submits a repair report — resolves the call."""
@@ -160,6 +264,14 @@ _BASE_STYLE = """
                   border-radius: 8px; padding: 12px; margin-bottom: 12px; cursor: pointer; }
   .checkbox-row input[type=checkbox] { width: 20px; height: 20px; cursor: pointer; }
   .checkbox-row label { font-size: 1rem; font-weight: 600; color: #92400e; cursor: pointer; }
+  .btn-gray { background: #e5e7eb; color: #374151; }
+  .search-input { width: 100%; border: 1px solid #ddd; border-radius: 8px;
+                  padding: 10px 12px; font-size: 1rem; direction: rtl; margin-bottom: 8px; }
+  .elevator-item { display: block; width: 100%; text-align: right; padding: 10px 12px;
+                   background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+                   margin-bottom: 6px; cursor: pointer; font-size: .95rem; }
+  .elevator-item:active { background: #dbeafe; }
+  #reassign-panel { margin-top: 12px; }
 </style>
 """
 
@@ -188,6 +300,18 @@ def _active_call_page(tech_id, tech_name, call_id, address, fault, priority, rep
   <button class="btn btn-green" onclick="submitReport(true)">✅ סיימתי — סגור קריאה</button>
   <button class="btn btn-orange" onclick="submitReport(false)">🔧 עדיין בטיפול — שמור הערה</button>
 </div>
+<div class="card">
+  <button class="btn btn-gray" onclick="toggleReassign()">🏢 כתובת שגויה? שייך מחדש</button>
+  <div id="reassign-panel" style="display:none">
+    <p style="color:#555;font-size:.9rem;margin-bottom:10px">
+      חפש את הכתובת הנכונה לפי רחוב, עיר או שם בניין:
+    </p>
+    <input id="elev-q" class="search-input" type="text"
+           placeholder="לדוגמה: הרצל תל אביב"
+           oninput="if(this.value.length>=2) searchElevators()">
+    <div id="elev-results"></div>
+  </div>
+</div>
 <script>
 function submitReport(resolved) {{
   const notes = document.getElementById('notes').value.trim();
@@ -201,8 +325,64 @@ function submitReport(resolved) {{
     document.open(); document.write(html); document.close();
   }}).catch(() => alert('שגיאה בשליחת הדו"ח, נסה שוב'));
 }}
+
+function toggleReassign() {{
+  const p = document.getElementById('reassign-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') document.getElementById('elev-q').focus();
+}}
+
+let _searchTimer = null;
+function searchElevators() {{
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => {{
+    const q = document.getElementById('elev-q').value.trim();
+    if (q.length < 2) return;
+    fetch('/app/tech/{tech_id}/elevators?q=' + encodeURIComponent(q))
+      .then(r => r.json())
+      .then(items => {{
+        const box = document.getElementById('elev-results');
+        if (!items.length) {{
+          box.innerHTML = '<p style="color:#888;font-size:.9rem;padding:6px 0">לא נמצאו תוצאות</p>';
+          return;
+        }}
+        box.innerHTML = items.map(e => {{
+          const label = e.building_name
+            ? `${{e.address}}, ${{e.city}} (${{e.building_name}})`
+            : `${{e.address}}, ${{e.city}}`;
+          return `<button class="elevator-item"
+                    onclick="confirmReassign('${{e.id}}','${{label.replace(/'/g,"\\'")}}')"
+                  >📍 ${{label}}</button>`;
+        }}).join('');
+      }})
+      .catch(() => {{}});
+  }}, 300);
+}}
+
+function confirmReassign(elevatorId, label) {{
+  if (!confirm('לשייך את הקריאה לכתובת:\\n' + label + '?')) return;
+  fetch('/app/tech/{tech_id}/reassign-elevator', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ elevator_id: elevatorId }})
+  }}).then(r => r.text()).then(html => {{
+    document.open(); document.write(html); document.close();
+  }}).catch(() => alert('שגיאה בעדכון הכתובת, נסה שוב'));
+}}
 </script>
 </body></html>"""
+
+
+def _reassign_success_page(name: str, old_addr: str, new_addr: str):
+    return f"""<!DOCTYPE html><html><head>{_BASE_STYLE}<title>כתובת עודכנה</title></head><body>
+<div class="card success">
+  <div class="emoji">📍</div>
+  <h1>הכתובת עודכנה!</h1>
+  <p style="color:#555;margin-top:8px">הקריאה שויכה מחדש:</p>
+  <p style="color:#888;font-size:.9rem;margin-top:6px;text-decoration:line-through">{old_addr}</p>
+  <p style="color:#16a34a;font-weight:700;margin-top:4px">{new_addr}</p>
+  <p style="color:#555;font-size:.9rem;margin-top:12px">המוקד קיבל עדכון על השינוי.</p>
+</div></body></html>"""
 
 
 def _no_call_page(name):
