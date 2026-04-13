@@ -94,6 +94,12 @@ export default function TechniciansPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['technicians'] }),
   })
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
+      updateTechnician(id, { is_active }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['technicians'] }),
+  })
+
   const onCallMutation = useMutation({
     mutationFn: ({ id, isOnCall }: { id: string; isOnCall: boolean }) =>
       setOnCallTechnician(id, isOnCall),
@@ -165,12 +171,20 @@ export default function TechniciansPage() {
               <Divider my="sm" />
 
               <Group justify="space-between">
-                <Switch
-                  label="זמין"
-                  checked={tech.is_available}
-                  onChange={e => toggleAvailMutation.mutate({ id: tech.id, is_available: e.target.checked })}
-                  disabled={!tech.is_active}
-                />
+                <Group gap="sm">
+                  <Switch
+                    label="זמין"
+                    checked={tech.is_available}
+                    onChange={e => toggleAvailMutation.mutate({ id: tech.id, is_available: e.target.checked })}
+                    disabled={!tech.is_active}
+                  />
+                  <Switch
+                    label="פעיל"
+                    checked={tech.is_active}
+                    color="blue"
+                    onChange={e => toggleActiveMutation.mutate({ id: tech.id, is_active: e.target.checked })}
+                  />
+                </Group>
                 <Group gap="xs">
                   {userRole === 'ADMIN' && !tech.is_on_call && (
                     <Button
