@@ -733,9 +733,10 @@ def my_calls_page(tech_id: str, db: Session = Depends(get_db)):
     from app.models.assignment import Assignment
     from app.models.service_call import ServiceCall
     from app.models.elevator import Elevator
+    from app.models.technician import Technician as TechnicianModel
     import json
 
-    tech = db.query(Technician).filter(Technician.id == tech_id).first()
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
     if not tech:
         raise HTTPException(status_code=404, detail="Technician not found")
 
@@ -931,7 +932,8 @@ renderList();
 @router.post("/my-calls/{tech_id}/accept/{assignment_id}")
 def accept_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db)):
     from app.services.ai_assignment_agent import confirm_assignment_by_id
-    tech = db.query(Technician).filter(Technician.id == tech_id).first()
+    from app.models.technician import Technician as TechnicianModel
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
     if not tech:
         raise HTTPException(status_code=404, detail="Not found")
     result = confirm_assignment_by_id(db, tech.whatsapp_number or tech.phone, assignment_id)
@@ -943,7 +945,8 @@ def accept_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db))
 @router.post("/my-calls/{tech_id}/reject/{assignment_id}")
 def reject_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db)):
     from app.services.ai_assignment_agent import reject_assignment_by_id
-    tech = db.query(Technician).filter(Technician.id == tech_id).first()
+    from app.models.technician import Technician as TechnicianModel
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
     if not tech:
         raise HTTPException(status_code=404, detail="Not found")
     result = reject_assignment_by_id(db, tech.whatsapp_number or tech.phone, assignment_id)
