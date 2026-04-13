@@ -156,6 +156,14 @@ def rank_technicians(
         scored.append(CandidateScore(tech, travel, daily, score))
 
     scored.sort(key=lambda c: c.score)
+    logger.warning(
+        "📊 Ranking for call (working_hours=%s): %s",
+        is_working_hours(),
+        " | ".join(
+            f"{c.technician.name} score={c.score:.3f} travel={c.travel_minutes}m calls={c.daily_calls}"
+            for c in scored
+        ) or "NO CANDIDATES"
+    )
     return scored
 
 
