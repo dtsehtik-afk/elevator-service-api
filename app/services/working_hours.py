@@ -6,12 +6,12 @@ _IL_TZ = ZoneInfo("Asia/Jerusalem")
 
 # Python weekday(): Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
 _SCHEDULE = {
-    6: (8, 30, 16, 30),  # Sun
-    0: (8, 30, 16, 30),  # Mon
-    1: (8, 30, 16, 30),  # Tue
-    2: (8, 30, 16, 30),  # Wed
-    3: (8, 30, 16, 30),  # Thu
-    4: (8, 30, 13,  0),  # Fri
+    6: (7, 30, 16, 30),  # Sun
+    0: (7, 30, 16, 30),  # Mon
+    1: (7, 30, 16, 30),  # Tue
+    2: (7, 30, 16, 30),  # Wed
+    3: (7, 30, 16, 30),  # Thu
+    4: (7, 30, 13,  0),  # Fri
     # 5 = Sat: not present → closed
 }
 
