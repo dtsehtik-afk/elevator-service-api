@@ -1256,7 +1256,7 @@ def _check_location_reminders():
         s = get_settings()
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        cutoff = now - timedelta(minutes=20)
+        cutoff = now - timedelta(minutes=45)
 
         techs = db.query(Technician).filter(
             Technician.is_active == True,          # noqa: E712
