@@ -9,6 +9,7 @@ import CallsPage from './pages/CallsPage'
 import TechniciansPage from './pages/TechniciansPage'
 import MaintenancePage from './pages/MaintenancePage'
 import ConversationsPage from './pages/ConversationsPage'
+import TechAppPage from './pages/TechAppPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -21,6 +22,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/tech" element={<TechAppPage />} />
         <Route
           path="/*"
           element={

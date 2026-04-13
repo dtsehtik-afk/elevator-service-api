@@ -727,6 +727,45 @@ def trigger_morning_message(
 
 # ── Technician call confirmation map page ────────────────────────────────────
 
+@router.get("/my-calls/{tech_id}/data", summary="JSON list of pending calls for technician app")
+def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
+    from app.models.assignment import Assignment
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician as TechnicianModel
+
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.technician_id == tech.id, Assignment.status == "PENDING_CONFIRMATION")
+        .order_by(Assignment.assigned_at.asc())
+        .all()
+    )
+    result = []
+    for a in assignments:
+        call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
+        if not call:
+            continue
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        if not elev:
+            continue
+        result.append({
+            "assignment_id": str(a.id),
+            "address": elev.address,
+            "city": elev.city,
+            "fault_type": call.fault_type,
+            "priority": call.priority,
+            "description": call.description or "",
+            "travel_minutes": a.travel_minutes or "?",
+            "lat": elev.latitude,
+            "lng": elev.longitude,
+        })
+    return result
+
+
 @router.get("/my-calls/{tech_id}", summary="Mobile map page for technician to accept/reject pending calls")
 def my_calls_page(tech_id: str, db: Session = Depends(get_db)):
     from fastapi.responses import HTMLResponse
