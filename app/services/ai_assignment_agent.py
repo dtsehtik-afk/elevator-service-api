@@ -532,6 +532,15 @@ def confirm_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Opt
         f"🚘 Waze:\n{waze_url}\n"
         f"בסיום שלח: *דוח* + תיאור קצר"
     )
+    # Send updated route if technician already has GPS
+    if tech.current_latitude and tech.current_longitude:
+        try:
+            from app.services.route_service import send_route_to_technician
+            db.refresh(tech)
+            send_route_to_technician(db, tech)
+        except Exception as exc:
+            logger.error("Route update failed for %s: %s", tech.name, exc)
+
     logger.info("✅ %s confirmed assignment %s", tech.name, assignment_id)
     return assignment
 
