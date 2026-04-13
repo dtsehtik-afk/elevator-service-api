@@ -648,6 +648,152 @@ def _handle_self_assign(db, phone: str, text: str) -> None:
     logger.info("✋ %s self-assigned call %s at %s", tech.name, matched_call.id, addr)
 
 
+def _handle_technician_request(db, phone: str, text: str) -> None:
+    """
+    A technician sends 'מבקש [כתובת]' to request handling an open call that
+    was not auto-assigned (passed to manual assignment).
+
+    Unlike _handle_self_assign, this does NOT immediately assign — it creates
+    a PENDING_CONFIRMATION assignment of type REQUEST and notifies the dispatcher
+    for approval.  The dispatcher can then approve ('אשר בקשת <name>') or
+    reject ('דחה בקשת <name>') via WhatsApp.
+    """
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.elevator import Elevator
+    from app.models.service_call import ServiceCall
+    from app.models.technician import Technician
+    from app.services.whatsapp_service import _send_message, notify_dispatcher
+    from datetime import datetime, timezone
+
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    tech = (db.query(Technician)
+            .filter(Technician.phone.contains(digits[-9:]) |
+                    Technician.whatsapp_number.contains(digits[-9:]))
+            .first())
+    if not tech:
+        return
+
+    # Extract address hint — strip request keywords
+    address_hint = text
+    for kw in ["מבקש לטפל ב", "מבקש לטפל", "מבקש", "אשמח לטפל ב", "אשמח לטפל",
+               "רוצה לטפל ב", "רוצה לטפל", "אני מבקש את הקריאה ב",
+               "אני מבקש את הקריאה", "אני מבקש"]:
+        address_hint = address_hint.replace(kw, "").strip()
+
+    # Find OPEN calls only (manual assignment queue)
+    open_calls = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.status == "OPEN")
+        .all()
+    )
+
+    if not open_calls:
+        _send_message(tech.whatsapp_number or tech.phone,
+                      "ℹ️ אין כרגע קריאות פתוחות הממתינות לשיבוץ.")
+        return
+
+    # Match by address hint
+    matched_call = None
+    if address_hint:
+        for call in open_calls:
+            elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+            if elevator and address_hint in (elevator.address + " " + elevator.city):
+                matched_call = call
+                break
+        if not matched_call:
+            hint_words = set(address_hint.split())
+            for call in open_calls:
+                elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+                if elevator:
+                    addr_words = set((elevator.address + " " + elevator.city).split())
+                    if hint_words & addr_words:
+                        matched_call = call
+                        break
+    else:
+        # No address — request the highest-priority open call
+        matched_call = sorted(
+            open_calls,
+            key=lambda c: {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}.get(c.priority, 2)
+        )[0]
+
+    if not matched_call:
+        _send_message(tech.whatsapp_number or tech.phone,
+                      f"❌ לא נמצאה קריאה פתוחה עם הכתובת: *{address_hint}*\n"
+                      f"נסה לשלוח 'מבקש' בלבד לקריאה הדחופה ביותר.")
+        return
+
+    elevator = db.query(Elevator).filter(Elevator.id == matched_call.elevator_id).first()
+    addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+
+    # Check if tech already has a pending request for this call
+    existing_request = (db.query(Assignment)
+                        .filter(Assignment.service_call_id == matched_call.id,
+                                Assignment.technician_id == tech.id,
+                                Assignment.assignment_type == "REQUEST",
+                                Assignment.status == "PENDING_CONFIRMATION")
+                        .first())
+    if existing_request:
+        _send_message(tech.whatsapp_number or tech.phone,
+                      f"⏳ כבר שלחת בקשה לקריאה ב*{addr}*. ממתין לאישור המוקד.")
+        return
+
+    # Compute travel time if possible
+    from app.services.maps_service import travel_time_minutes
+    travel = None
+    if tech.current_latitude and elevator and elevator.latitude:
+        try:
+            travel = travel_time_minutes(
+                tech.current_latitude, tech.current_longitude,
+                elevator.latitude, elevator.longitude
+            )
+        except Exception:
+            pass
+
+    # Create a REQUEST-type pending assignment
+    assignment = Assignment(
+        service_call_id=matched_call.id,
+        technician_id=tech.id,
+        assignment_type="REQUEST",
+        status="PENDING_CONFIRMATION",
+        travel_minutes=travel,
+        notes=f"{tech.name} ביקש לטפל בקריאה דרך ווצאפ",
+    )
+    db.add(assignment)
+
+    audit = AuditLog(
+        service_call_id=matched_call.id,
+        changed_by=tech.email or tech.name,
+        old_status="OPEN",
+        new_status="OPEN",
+        notes=f"{tech.name} ביקש לטפל — ממתין לאישור מוקד",
+    )
+    db.add(audit)
+    db.commit()
+
+    travel_str = f"\n🚗 זמן נסיעה משוער: ~{travel} דק'" if travel else ""
+    tech_first = tech.name.split()[0] if tech.name else tech.name
+
+    # Notify dispatcher for approval
+    notify_dispatcher(
+        f"🙋 *{tech.name} מבקש לטפל בקריאה*\n"
+        f"📍 {addr}\n"
+        f"⚡ {matched_call.fault_type} | ⚠️ {matched_call.priority}"
+        f"{travel_str}\n\n"
+        f"לאישור: *אשר בקשת {tech_first}*\n"
+        f"לדחייה: *דחה בקשת {tech_first}*"
+    )
+
+    # Acknowledge the technician
+    _send_message(
+        tech.whatsapp_number or tech.phone,
+        f"✅ בקשתך לטפל בקריאה ב*{addr}* נשלחה למוקד.\n"
+        f"תקבל עדכון לאחר אישור."
+    )
+    logger.info("🙋 %s requested call %s at %s — awaiting dispatcher approval", tech.name, matched_call.id, addr)
+
+
 def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = False) -> None:
     """
     Route ANY free-text message from a technician through Gemini for intent detection.
@@ -681,6 +827,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             _handle_technician_report(db, phone, text)
         elif any(w in text for w in ["לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך"]):
             _handle_self_assign(db, phone, text)
+        elif any(w in text for w in ["מבקש", "אשמח לטפל", "רוצה לטפל", "אני מבקש"]):
+            _handle_technician_request(db, phone, text)
         else:
             _handle_chat_question_simple(db, phone, text, settings)
         return
@@ -714,10 +862,14 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             "אתה מנתח כוונות של הודעות ווצאפ מטכנאים של חברת מעליות. "
             "החזר JSON בלבד (ללא הסברים) עם שדה 'intent' אחד מתוך:\n"
             "- REPORT   (הטכנאי מדווח שסיים טיפול / שולח סיכום)\n"
-            "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה)\n"
+            "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה — 'לקחתי', 'אני לוקח')\n"
+            "- REQUEST  (הטכנאי מבקש לטפל בקריאה הממתינה לשיבוץ ידני — 'מבקש', 'אשמח לטפל', 'רוצה לטפל', 'אני מבקש את הקריאה')\n"
             "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה, סטטוס)\n"
             "- IGNORE   (ברכה קצרה כמו 'אוקיי', 'תודה', 'סבבה', אמוג'י בלבד)\n"
             "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה).\n\n"
+            "הבדל בין TAKE לבין REQUEST:\n"
+            "- TAKE: הטכנאי לוקח קריאה ישירות ללא אישור ('לקחתי', 'קיבלתי', 'אני על זה').\n"
+            "- REQUEST: הטכנאי מבקש אישור מהמוקד ('מבקש', 'אשמח', 'רוצה', 'אפשר לטפל').\n\n"
             "חשוב: רק הודעות קצרות וחסרות תוכן כמו 'אוקיי', 'תודה', 'סבבה' הן IGNORE. "
             "כל הודעה שיש בה תוכן מהותי — אפילו אם לא ברור — תהיה QUESTION.\n\n"
             f"הודעה: {text}"
@@ -749,6 +901,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             _handle_technician_report(db, phone, extract or text)
         elif intent == "TAKE":
             _handle_self_assign(db, phone, extract or text)
+        elif intent == "REQUEST":
+            _handle_technician_request(db, phone, extract or text)
         elif intent == "QUESTION":
             _handle_chat_question(db, phone, text, settings, with_history=is_reply)
         else:

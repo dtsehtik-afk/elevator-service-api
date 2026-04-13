@@ -11,7 +11,7 @@ from app.services.whatsapp_service import _send_message, notify_dispatcher
 logger = logging.getLogger(__name__)
 
 _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעליות. החזר JSON בלבד:
-{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|FIND_BY_PHONE|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת", "phone": "מספר טלפון אם קיים"}}
+{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|FIND_BY_PHONE|APPROVE_REQUEST|REJECT_REQUEST|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת", "phone": "מספר טלפון אם קיים"}}
 
 דוגמאות:
 "סגור קריאה ברחוב הרצל 5" → CLOSE_CALL
@@ -25,6 +25,10 @@ _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעל�
 "דוח שבועי" → WEEKLY_REPORT
 "דוח חודשי" → MONTHLY_REPORT
 "איזו מעלית שייכת למספר 05XXXXXXXX?" → FIND_BY_PHONE (address contains the phone)
+"אשר בקשת תומר" → APPROVE_REQUEST (tech_name=תומר)
+"אשר" → APPROVE_REQUEST (tech_name ריק — אשר את כל הבקשות הממתינות)
+"דחה בקשת תומר" → REJECT_REQUEST (tech_name=תומר)
+"דחה" → REJECT_REQUEST (tech_name ריק — דחה את כל הבקשות הממתינות)
 
 חשוב מאוד — שאלות על מיקום טכנאים, קרבה לאזור, היכן נמצא טכנאי — תמיד UNKNOWN (לא STATUS_QUERY):
 "יש לנו מישהו באזור עפולה?" → UNKNOWN
@@ -82,6 +86,10 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
         _cmd_daily_report(db, phone, days)
     elif command == "FIND_BY_PHONE":
         _cmd_find_by_phone(db, phone, phone_number)
+    elif command == "APPROVE_REQUEST":
+        _cmd_approve_request(db, phone, tech_name)
+    elif command == "REJECT_REQUEST":
+        _cmd_reject_request(db, phone, tech_name)
     else:
         # Free question — route to chat agent
         from app.services.scheduler import _handle_chat_question
@@ -383,3 +391,173 @@ def _cmd_find_by_phone(db, dispatcher_phone: str, search_phone: str) -> None:
 
     lines = "\n".join(matches)
     _send_message(dispatcher_phone, f"📞 מעליות עם מספר *{search_phone}*:\n{lines}")
+
+
+def _cmd_approve_request(db, dispatcher_phone: str, tech_name: str) -> None:
+    """
+    Approve a technician's pending assignment request (type=REQUEST, status=PENDING_CONFIRMATION).
+    Confirms the assignment, sets call to ASSIGNED, and notifies the technician.
+    """
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician
+    from datetime import datetime, timezone
+
+    # Find pending technician requests
+    pending_requests = (
+        db.query(Assignment)
+        .filter(
+            Assignment.assignment_type == "REQUEST",
+            Assignment.status == "PENDING_CONFIRMATION",
+        )
+        .all()
+    )
+
+    if not pending_requests:
+        _send_message(dispatcher_phone, "ℹ️ אין בקשות טכנאי ממתינות לאישור.")
+        return
+
+    # Filter by tech name if provided
+    if tech_name:
+        filtered = []
+        for a in pending_requests:
+            tech = db.query(Technician).filter(Technician.id == a.technician_id).first()
+            if tech and tech_name.lower() in tech.name.lower():
+                filtered.append((a, tech))
+        if not filtered:
+            _send_message(dispatcher_phone, f"❌ לא נמצאה בקשה ממתינה מטכנאי בשם: *{tech_name}*")
+            return
+    else:
+        # No name given — approve all pending requests
+        filtered = []
+        for a in pending_requests:
+            tech = db.query(Technician).filter(Technician.id == a.technician_id).first()
+            if tech:
+                filtered.append((a, tech))
+
+    approved = []
+    for assignment, tech in filtered:
+        from app.models.service_call import ServiceCall
+        call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+        if not call:
+            continue
+
+        elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+
+        # Confirm the assignment
+        assignment.status = "CONFIRMED"
+        call.status = "ASSIGNED"
+        call.assigned_at = datetime.now(timezone.utc)
+
+        audit = AuditLog(
+            service_call_id=call.id,
+            changed_by="dispatcher",
+            old_status="OPEN",
+            new_status="ASSIGNED",
+            notes=f"בקשת {tech.name} אושרה על ידי מוקד",
+        )
+        db.add(audit)
+
+        # Notify technician
+        tech_phone = tech.whatsapp_number or tech.phone
+        if tech_phone:
+            travel_str = f"\n🚗 זמן נסיעה משוער: ~{assignment.travel_minutes} דק'" if assignment.travel_minutes else ""
+            _send_message(
+                tech_phone,
+                f"✅ *בקשתך אושרה!*\n"
+                f"📍 קריאה ב*{addr}* שובצה אליך."
+                f"{travel_str}\n\n"
+                f"בסיום הטיפול, שלח *דוח* + תיאור קצר לסגירה."
+            )
+
+        approved.append(f"{tech.name} → {addr}")
+        logger.warning("✅ Dispatcher approved request: %s → call %s at %s", tech.name, call.id, addr)
+
+    db.commit()
+
+    if approved:
+        lines = "\n".join(f"• {item}" for item in approved)
+        _send_message(dispatcher_phone, f"✅ *אושרו {len(approved)} בקשות:*\n{lines}")
+    else:
+        _send_message(dispatcher_phone, "❌ לא נמצאו בקשות מתאימות לאישור.")
+
+
+def _cmd_reject_request(db, dispatcher_phone: str, tech_name: str) -> None:
+    """
+    Reject a technician's pending assignment request.
+    Cancels the assignment, returns call to OPEN, and notifies the technician.
+    """
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician
+
+    pending_requests = (
+        db.query(Assignment)
+        .filter(
+            Assignment.assignment_type == "REQUEST",
+            Assignment.status == "PENDING_CONFIRMATION",
+        )
+        .all()
+    )
+
+    if not pending_requests:
+        _send_message(dispatcher_phone, "ℹ️ אין בקשות טכנאי ממתינות לדחייה.")
+        return
+
+    if tech_name:
+        filtered = []
+        for a in pending_requests:
+            tech = db.query(Technician).filter(Technician.id == a.technician_id).first()
+            if tech and tech_name.lower() in tech.name.lower():
+                filtered.append((a, tech))
+        if not filtered:
+            _send_message(dispatcher_phone, f"❌ לא נמצאה בקשה ממתינה מטכנאי בשם: *{tech_name}*")
+            return
+    else:
+        filtered = []
+        for a in pending_requests:
+            tech = db.query(Technician).filter(Technician.id == a.technician_id).first()
+            if tech:
+                filtered.append((a, tech))
+
+    rejected = []
+    for assignment, tech in filtered:
+        from app.models.service_call import ServiceCall
+        call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+        if not call:
+            continue
+
+        elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+
+        assignment.status = "CANCELLED"
+        # Call stays OPEN — available for other technicians or dispatcher
+
+        audit = AuditLog(
+            service_call_id=call.id,
+            changed_by="dispatcher",
+            old_status="OPEN",
+            new_status="OPEN",
+            notes=f"בקשת {tech.name} נדחתה על ידי מוקד",
+        )
+        db.add(audit)
+
+        tech_phone = tech.whatsapp_number or tech.phone
+        if tech_phone:
+            _send_message(
+                tech_phone,
+                f"❌ בקשתך לטפל בקריאה ב*{addr}* נדחתה על ידי המוקד.\n"
+                f"ניתן לפנות למוקד לפרטים נוספים."
+            )
+
+        rejected.append(f"{tech.name} → {addr}")
+        logger.warning("❌ Dispatcher rejected request: %s → call %s at %s", tech.name, call.id, addr)
+
+    db.commit()
+
+    if rejected:
+        lines = "\n".join(f"• {item}" for item in rejected)
+        _send_message(dispatcher_phone, f"✅ *נדחו {len(rejected)} בקשות:*\n{lines}")
+    else:
+        _send_message(dispatcher_phone, "❌ לא נמצאו בקשות מתאימות לדחייה.")
