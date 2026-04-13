@@ -8,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
+_location_reminder_sent: dict[str, datetime] = {}  # tech_id → last reminder time
 
 
 def _transcribe_voice(msg_data: dict, settings) -> str:
@@ -1269,11 +1270,17 @@ def _check_location_reminders():
             phone = tech.whatsapp_number or tech.phone
             if not phone:
                 continue
+            # Send reminder at most once every 45 minutes per technician
+            tech_id_str = str(tech.id)
+            last_sent = _location_reminder_sent.get(tech_id_str)
+            if last_sent and (now - last_sent).total_seconds() < 45 * 60:
+                continue
             tracking_url = f"{s.app_base_url}/webhooks/track/{tech.id}"
             _send_message(phone,
                 f"📍 {tech.name}, המיקום שלך הפסיק להתעדכן.\n"
                 f"פתח שוב את הקישור כדי להמשיך:\n{tracking_url}"
             )
+            _location_reminder_sent[tech_id_str] = now
             logger.warning("📍 Location reminder sent to %s", tech.name)
     except Exception as exc:
         logger.error("Location reminder job failed: %s", exc)
