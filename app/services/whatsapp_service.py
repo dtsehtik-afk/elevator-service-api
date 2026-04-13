@@ -112,15 +112,29 @@ def notify_technician_new_call(
     caller_phone: str,
     travel_minutes: int,
     description: str = "",
+    tech_id: str = "",
 ) -> bool:
-    """Send a new-call notification to a technician asking for 1/2 confirmation."""
+    """Send a new-call notification to a technician with a map confirmation link."""
+    from app.config import get_settings
     fault  = _FAULT_LABEL.get(fault_type, fault_type)
     pri    = _PRIORITY_LABEL.get(priority, priority)
     ts     = _now_il()
 
-    desc_line    = f"📝 *פירוט:* {description}\n" if description else ""
-    caller_line  = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
-    phone_line   = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
+    desc_line   = f"📝 *פירוט:* {description}\n" if description else ""
+    caller_line = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
+    phone_line  = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
+
+    base_url    = get_settings().app_base_url
+    confirm_url = f"{base_url}/webhooks/my-calls/{tech_id}" if tech_id else ""
+    confirm_line = (
+        f"────────────────────\n"
+        f"✅ לאישור/דחייה פתח:\n\n"
+        f"{confirm_url}\n"
+    ) if confirm_url else (
+        f"────────────────────\n"
+        f"השב *1* לקבלת הקריאה ✅\n"
+        f"השב *2* לדחייה ❌"
+    )
 
     message = (
         f"🔔 *קריאת שירות חדשה*\n"
@@ -133,9 +147,7 @@ def notify_technician_new_call(
         f"{caller_line}"
         f"{phone_line}"
         f"🚗 *זמן נסיעה משוער:* ~{travel_minutes} דקות\n"
-        f"────────────────────\n"
-        f"השב *1* לקבלת הקריאה ✅\n"
-        f"השב *2* לדחייה ❌"
+        f"{confirm_line}"
     )
     return _send_message(phone, message)
 

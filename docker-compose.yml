@@ -41,6 +41,15 @@ services:
     depends_on:
       - app
 
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: always
+    command: http app:8000 --log stdout
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    depends_on:
+      - app
+
   certbot:
     image: certbot/certbot
     volumes:

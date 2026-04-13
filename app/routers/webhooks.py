@@ -725,6 +725,233 @@ def trigger_morning_message(
     return {"status": "sent"}
 
 
+# ── Technician call confirmation map page ────────────────────────────────────
+
+@router.get("/my-calls/{tech_id}", summary="Mobile map page for technician to accept/reject pending calls")
+def my_calls_page(tech_id: str, db: Session = Depends(get_db)):
+    from fastapi.responses import HTMLResponse
+    from app.models.assignment import Assignment
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    import json
+
+    tech = db.query(Technician).filter(Technician.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.technician_id == tech.id, Assignment.status == "PENDING_CONFIRMATION")
+        .order_by(Assignment.assigned_at.asc())
+        .all()
+    )
+
+    calls_data = []
+    _FAULT_HE = {"STUCK": "מעלית תקועה 🚨", "DOOR": "תקלת דלת", "ELECTRICAL": "חשמלית",
+                 "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית"}
+    _PRI_HE = {"CRITICAL": "🔴 קריטי", "HIGH": "🟠 גבוה", "MEDIUM": "🟡 בינוני", "LOW": "🟢 נמוך"}
+
+    for a in assignments:
+        call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
+        if not call:
+            continue
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        if not elev:
+            continue
+        calls_data.append({
+            "assignment_id": str(a.id),
+            "address": elev.address,
+            "city": elev.city,
+            "fault": _FAULT_HE.get(call.fault_type, call.fault_type),
+            "priority": _PRI_HE.get(call.priority, call.priority),
+            "priority_raw": call.priority,
+            "description": call.description or "",
+            "travel_minutes": a.travel_minutes or "?",
+            "lat": elev.latitude,
+            "lng": elev.longitude,
+            "maps_url": f"https://maps.google.com/?q={elev.address}+{elev.city}",
+            "waze_url": f"https://waze.com/ul?q={elev.address}+{elev.city}",
+        })
+
+    base_url = settings.app_base_url
+    calls_json = json.dumps(calls_data, ensure_ascii=False)
+
+    html = f"""<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>קריאות לאישור — {tech.name}</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; direction: rtl; }}
+  #header {{ background: #1a73e8; color: white; padding: 14px 16px; text-align: center; }}
+  #header h1 {{ font-size: 18px; }}
+  #header p {{ font-size: 13px; opacity: .85; margin-top: 4px; }}
+  #map {{ height: 280px; width: 100%; }}
+  #list {{ padding: 12px; }}
+  .card {{
+    background: white; border-radius: 12px; padding: 14px; margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.1);
+  }}
+  .card.done {{ opacity: .45; pointer-events: none; }}
+  .card-title {{ font-size: 16px; font-weight: 700; margin-bottom: 4px; }}
+  .card-sub {{ font-size: 13px; color: #555; margin-bottom: 10px; }}
+  .badge {{
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 12px; font-weight: 600; margin-left: 6px;
+  }}
+  .CRITICAL {{ background:#fde8e8; color:#c0392b; }}
+  .HIGH {{ background:#fef0e6; color:#e67e22; }}
+  .MEDIUM {{ background:#fefce8; color:#b7950b; }}
+  .LOW {{ background:#e8f8f0; color:#27ae60; }}
+  .btn-row {{ display: flex; gap: 10px; }}
+  .btn {{
+    flex: 1; padding: 12px; border: none; border-radius: 10px;
+    font-size: 15px; font-weight: 700; cursor: pointer;
+  }}
+  .btn-accept {{ background: #27ae60; color: white; }}
+  .btn-reject {{ background: #e74c3c; color: white; }}
+  .btn:active {{ opacity: .8; }}
+  .nav-row {{ display: flex; gap: 8px; margin-bottom: 10px; }}
+  .nav-btn {{
+    flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 8px;
+    background: white; font-size: 13px; text-align: center;
+    text-decoration: none; color: #333;
+  }}
+  #empty {{ text-align: center; padding: 40px 20px; color: #888; font-size: 16px; }}
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>קריאות ממתינות לאישורך</h1>
+  <p id="count-label">טוען...</p>
+</div>
+<div id="map"></div>
+<div id="list"></div>
+
+<script>
+const TECH_ID = "{tech_id}";
+const BASE_URL = "{base_url}";
+const CALLS = {calls_json};
+
+const _PRI_COLOR = {{CRITICAL:"#e74c3c",HIGH:"#e67e22",MEDIUM:"#f1c40f",LOW:"#27ae60"}};
+
+// Init map
+const map = L.map('map', {{zoomControl: true}});
+L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+  attribution: '© OpenStreetMap'
+}}).addTo(map);
+
+const markers = {{}};
+const bounds = [];
+
+function buildMarker(c) {{
+  if (!c.lat || !c.lng) return;
+  const icon = L.divIcon({{
+    className: '',
+    html: `<div style="background:${{_PRI_COLOR[c.priority_raw] || '#888'}};width:28px;height:28px;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4);"></div>`,
+    iconSize: [28,28], iconAnchor: [14,14]
+  }});
+  const m = L.marker([c.lat, c.lng], {{icon}}).addTo(map);
+  m.bindPopup(`<b>${{c.address}}, ${{c.city}}</b><br>${{c.fault}}`);
+  markers[c.assignment_id] = m;
+  bounds.push([c.lat, c.lng]);
+}}
+
+function renderList() {{
+  const list = document.getElementById('list');
+  const pending = CALLS.filter(c => !c._done);
+  document.getElementById('count-label').textContent =
+    pending.length === 0 ? 'אין קריאות ממתינות' : `${{pending.length}} קריאות ממתינות לאישורך`;
+
+  if (pending.length === 0) {{
+    list.innerHTML = '<div id="empty">✅ כל הקריאות טופלו!</div>';
+    return;
+  }}
+
+  list.innerHTML = pending.map(c => `
+    <div class="card" id="card-${{c.assignment_id}}">
+      <div class="card-title">📍 ${{c.address}}, ${{c.city}}</div>
+      <div class="card-sub">
+        ${{c.fault}}
+        <span class="badge ${{c.priority_raw}}">${{c.priority}}</span>
+        🚗 ~${{c.travel_minutes}} דק'
+        ${{c.description ? '<br>📝 ' + c.description : ''}}
+      </div>
+      <div class="nav-row">
+        <a class="nav-btn" href="${{c.maps_url}}" target="_blank">🗺 גוגל מפות</a>
+        <a class="nav-btn" href="${{c.waze_url}}" target="_blank">🚘 Waze</a>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-accept" onclick="action('${{c.assignment_id}}','accept')">✅ קבל קריאה</button>
+        <button class="btn btn-reject" onclick="action('${{c.assignment_id}}','reject')">❌ דחה</button>
+      </div>
+    </div>
+  `).join('');
+}}
+
+async function action(aid, type) {{
+  const card = document.getElementById('card-' + aid);
+  if (card) card.style.opacity = '0.5';
+  try {{
+    const r = await fetch(`${{BASE_URL}}/webhooks/my-calls/${{TECH_ID}}/${{type}}/${{aid}}`, {{method:'POST'}});
+    if (r.ok) {{
+      const c = CALLS.find(x => x.assignment_id === aid);
+      if (c) c._done = true;
+      if (markers[aid]) map.removeLayer(markers[aid]);
+      renderList();
+    }} else {{
+      if (card) card.style.opacity = '1';
+      alert('שגיאה, נסה שוב');
+    }}
+  }} catch(e) {{
+    if (card) card.style.opacity = '1';
+    alert('בעיית חיבור');
+  }}
+}}
+
+// Build map
+CALLS.forEach(buildMarker);
+if (bounds.length > 0) {{
+  map.fitBounds(bounds, {{padding: [30,30]}});
+}} else {{
+  map.setView([32.6, 35.3], 9);
+}}
+
+renderList();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
+@router.post("/my-calls/{tech_id}/accept/{assignment_id}")
+def accept_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db)):
+    from app.services.ai_assignment_agent import confirm_assignment_by_id
+    tech = db.query(Technician).filter(Technician.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Not found")
+    result = confirm_assignment_by_id(db, tech.whatsapp_number or tech.phone, assignment_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    return {"status": "accepted"}
+
+
+@router.post("/my-calls/{tech_id}/reject/{assignment_id}")
+def reject_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db)):
+    from app.services.ai_assignment_agent import reject_assignment_by_id
+    tech = db.query(Technician).filter(Technician.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Not found")
+    result = reject_assignment_by_id(db, tech.whatsapp_number or tech.phone, assignment_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    return {"status": "rejected"}
+
+
 # ── Incoming call log ─────────────────────────────────────────────────────────
 
 @router.get("/calls/log", summary="List all incoming call logs")

@@ -237,6 +237,19 @@ def assign_with_confirmation(
         caller_phone = _extract_phone(service_call.reported_by)
 
         if needs_confirmation:
+            # Count existing pending assignments BEFORE this new one
+            existing_pending = (
+                db.query(Assignment)
+                .filter(
+                    Assignment.technician_id == tech.id,
+                    Assignment.status == "PENDING_CONFIRMATION",
+                    Assignment.id != assignment.id,
+                )
+                .count()
+            )
+            # If tech already has unanswered calls → send map page link
+            tech_id_for_map = str(tech.id) if existing_pending >= 1 else ""
+
             sent = whatsapp_service.notify_technician_new_call(
                 phone=phone,
                 technician_name=tech.name,
@@ -249,6 +262,7 @@ def assign_with_confirmation(
                 caller_phone=caller_phone,
                 travel_minutes=best.travel_minutes,
                 description=service_call.description or "",
+                tech_id=tech_id_for_map,
             )
         else:
             sent = whatsapp_service.notify_technician_auto_assigned(
@@ -268,14 +282,6 @@ def assign_with_confirmation(
             logger.info("WhatsApp sent to %s (%s)", tech.name, phone)
         else:
             logger.warning("WhatsApp failed for %s — assignment created anyway", tech.name)
-
-        # If technician is already out in the field (has GPS), update their route
-        if tech.current_latitude and tech.current_longitude:
-            try:
-                from app.services.route_service import notify_technician_new_stop
-                notify_technician_new_stop(db, tech, service_call)
-            except Exception as exc:
-                logger.error("Route update failed for %s: %s", tech.name, exc)
     else:
         logger.warning("Technician %s has no phone — WhatsApp skipped", tech.name)
 
@@ -302,7 +308,7 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
             Assignment.technician_id == tech.id,
             Assignment.status == "PENDING_CONFIRMATION",
         )
-        .order_by(Assignment.assigned_at.desc())
+        .order_by(Assignment.assigned_at.asc())
         .first()
     )
     if not assignment:
@@ -354,6 +360,14 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
         f"בסיום הטיפול שלח: *דוח* + תיאור קצר"
     )
 
+    # If technician is already in the field with GPS, send updated route
+    if tech.current_latitude and tech.current_longitude:
+        try:
+            from app.services.route_service import send_route_to_technician
+            send_route_to_technician(db, tech)
+        except Exception as exc:
+            logger.error("Route update failed for %s: %s", tech.name, exc)
+
     logger.info("✅ %s confirmed assignment for call %s", tech.name, call.id if call else "?")
     return assignment
 
@@ -378,7 +392,7 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
             Assignment.technician_id == tech.id,
             Assignment.status == "PENDING_CONFIRMATION",
         )
-        .order_by(Assignment.assigned_at.desc())
+        .order_by(Assignment.assigned_at.asc())
         .first()
     )
     if not assignment:
@@ -460,6 +474,7 @@ def get_pending_assignments_for_phone(db: Session, phone: str) -> list:
             "assignment_id": str(a.id),
             "address": elevator.address if elevator else "",
             "city": elevator.city if elevator else "",
+            "assigned_at": a.assigned_at,
         })
     return result
 

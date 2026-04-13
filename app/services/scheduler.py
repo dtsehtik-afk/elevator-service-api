@@ -160,10 +160,11 @@ def _send_morning_location_requests():
                 +
                 f"────────────────────\n"
                 f"────────────────────\n"
-                f"📍 *לשיתוף מיקום חי* — פתח את הקישור ואפשר גישה למיקום:\n"
+                f"📍 *לשיתוף מיקום חי* — פתח את הקישור ואפשר גישה למיקום:\n\n"
                 f"{base_url}/webhooks/track/{tech.id}\n\n"
                 f"השאר את הדף פתוח — המיקום יתעדכן אוטומטית כל 5 דקות.\n\n"
-                f"🔗 *פורטל הטכנאי שלך*:\n{portal_link}\n\n"
+                f"🔗 *פורטל הטכנאי שלך*:\n\n"
+                f"{portal_link}\n\n"
                 f"תודה ובהצלחה! 🙏"
             )
             if _send_message(phone, msg):
@@ -271,12 +272,14 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:
     """
     from app.services import ai_assignment_agent
 
-    # Classic 1/2 fallback (single pending or explicit digit)
-    if text.strip() == "1" and len(pending) == 1:
-        ai_assignment_agent.confirm_assignment_by_id(db, phone, pending[0]["assignment_id"])
+    # Classic 1/2: always act on the oldest pending assignment (FIFO)
+    if text.strip() == "1":
+        oldest = min(pending, key=lambda x: x["assigned_at"])
+        ai_assignment_agent.confirm_assignment_by_id(db, phone, oldest["assignment_id"])
         return
-    if text.strip() == "2" and len(pending) == 1:
-        ai_assignment_agent.reject_assignment_by_id(db, phone, pending[0]["assignment_id"])
+    if text.strip() == "2":
+        oldest = min(pending, key=lambda x: x["assigned_at"])
+        ai_assignment_agent.reject_assignment_by_id(db, phone, oldest["assignment_id"])
         return
 
     # Gemini natural-language parsing
