@@ -46,3 +46,8 @@ export async function getCallAudit(id: string): Promise<AuditLogEntry[]> {
 export async function autoAssignCall(id: string): Promise<void> {
   await client.post(`/calls/${id}/auto-assign`)
 }
+
+export async function setCallMonitoring(id: string, notes: string): Promise<ServiceCall> {
+  const { data } = await client.post<ServiceCall>(`/calls/${id}/monitor`, null, { params: { notes } })
+  return data
+}

@@ -20,6 +20,7 @@ export const CALL_STATUS_LABELS: Record<string, string> = {
   IN_PROGRESS: 'בטיפול',
   RESOLVED: 'נפתרה',
   CLOSED: 'סגורה',
+  MONITORING: 'במעקב',
 }
 
 export const CALL_STATUS_COLORS: Record<string, MantineColor> = {
@@ -28,6 +29,7 @@ export const CALL_STATUS_COLORS: Record<string, MantineColor> = {
   IN_PROGRESS: 'blue',
   RESOLVED: 'green',
   CLOSED: 'gray',
+  MONITORING: 'teal',
 }
 
 export const ELEVATOR_STATUS_LABELS: Record<string, string> = {

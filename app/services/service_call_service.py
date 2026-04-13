@@ -79,6 +79,38 @@ def create_service_call(
         elevator.risk_score = new_score
         db.commit()
 
+    # If there's a MONITORING call for the same elevator, close it and mark new call recurring
+    monitoring_call = (
+        db.query(ServiceCall)
+        .filter(
+            ServiceCall.elevator_id == data.elevator_id,
+            ServiceCall.status == "MONITORING",
+            ServiceCall.id != call.id,
+        )
+        .first()
+    )
+    if monitoring_call:
+        call.is_recurring = True
+        if call.priority in ("LOW", "MEDIUM"):
+            call.priority = "HIGH"
+        monitoring_call.status = "CLOSED"
+        db.add(AuditLog(
+            service_call_id=monitoring_call.id,
+            changed_by="system",
+            old_status="MONITORING",
+            new_status="CLOSED",
+            notes="נסגרה — תקלה חוזרת נפתחה",
+        ))
+        db.add(AuditLog(
+            service_call_id=call.id,
+            changed_by=current_user_email,
+            old_status="OPEN",
+            new_status="OPEN",
+            notes="סומנה כתקלה חוזרת — עדיפות עודכנה ל-HIGH",
+        ))
+        db.commit()
+        db.refresh(call)
+
     # Auto-assign CRITICAL calls
     if data.priority == "CRITICAL":
         from app.services.assignment_service import auto_assign_call

@@ -29,7 +29,7 @@ class ServiceCall(Base):
 
     # CRITICAL | HIGH | MEDIUM | LOW
     priority: Mapped[str] = mapped_column(String(20), nullable=False, default="MEDIUM", index=True)
-    # OPEN | ASSIGNED | IN_PROGRESS | RESOLVED | CLOSED
+    # OPEN | ASSIGNED | IN_PROGRESS | RESOLVED | CLOSED | MONITORING
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="OPEN", index=True)
     # MECHANICAL | ELECTRICAL | SOFTWARE | STUCK | DOOR | OTHER
     fault_type: Mapped[str] = mapped_column(String(20), nullable=False, default="OTHER", index=True)
@@ -39,6 +39,8 @@ class ServiceCall(Base):
 
     resolution_notes: Mapped[str] = mapped_column(Text, nullable=True)
     quote_needed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    monitoring_notes: Mapped[str] = mapped_column(Text, nullable=True)
+    monitoring_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

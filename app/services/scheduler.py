@@ -1128,6 +1128,79 @@ def _check_location_reminders():
         db.close()
 
 
+def _check_monitoring_calls():
+    """
+    Daily job (08:00): auto-close MONITORING calls older than 7 days.
+    Also checks if a new call arrived for the same elevator — marks it as recurring.
+    """
+    from datetime import datetime, timezone, timedelta
+    from app.database import SessionLocal
+    from app.models.service_call import ServiceCall
+    from app.models.assignment import AuditLog
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        monitoring_calls = (
+            db.query(ServiceCall)
+            .filter(ServiceCall.status == "MONITORING")
+            .all()
+        )
+        closed = 0
+        for call in monitoring_calls:
+            if not call.monitoring_since:
+                continue
+            # Check if a new call arrived for this elevator since monitoring started
+            new_call = (
+                db.query(ServiceCall)
+                .filter(
+                    ServiceCall.elevator_id == call.elevator_id,
+                    ServiceCall.id != call.id,
+                    ServiceCall.created_at > call.monitoring_since,
+                    ServiceCall.status != "MONITORING",
+                )
+                .first()
+            )
+            if new_call:
+                # Mark as recurring and reopen with HIGH priority
+                new_call.is_recurring = True
+                new_call.priority = "HIGH"
+                call.status = "CLOSED"
+                db.add(AuditLog(
+                    service_call_id=call.id,
+                    changed_by="system",
+                    old_status="MONITORING",
+                    new_status="CLOSED",
+                    notes="נסגרה — תקלה חוזרת זוהתה בקריאה חדשה",
+                ))
+                db.add(AuditLog(
+                    service_call_id=new_call.id,
+                    changed_by="system",
+                    old_status=new_call.status,
+                    new_status=new_call.status,
+                    notes="סומנה כתקלה חוזרת — עדיפות עודכנה ל-HIGH",
+                ))
+                closed += 1
+            elif call.monitoring_since <= cutoff:
+                # 7 days passed with no recurrence — close it
+                call.status = "CLOSED"
+                db.add(AuditLog(
+                    service_call_id=call.id,
+                    changed_by="system",
+                    old_status="MONITORING",
+                    new_status="CLOSED",
+                    notes="נסגרה אוטומטית — 7 ימי מעקב ללא תקלה חוזרת",
+                ))
+                closed += 1
+        if closed:
+            db.commit()
+            logger.info("🔍 Monitoring: closed %d calls", closed)
+    except Exception as exc:
+        logger.error("_check_monitoring_calls failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -1141,6 +1214,7 @@ def start_scheduler():
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
     _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)
+    _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
     _scheduler.start()
     logger.info("Background scheduler started (timezone: Asia/Jerusalem)")
 

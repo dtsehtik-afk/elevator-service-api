@@ -7,7 +7,7 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall } from '../api/calls'
+import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring } from '../api/calls'
 import { listElevators } from '../api/elevators'
 import { useAuthStore } from '../stores/authStore'
 import {
@@ -45,6 +45,8 @@ export default function CallsPage() {
   const [detailOpened, { open: openDetail, close: closeDetail }] = useDisclosure()
   const [selectedCall, setSelectedCall] = useState<ServiceCall | null>(null)
   const [detailCall, setDetailCall] = useState<CallDetail | null>(null)
+  const [monitorNotes, setMonitorNotes] = useState('')
+  const [monitorOpened, { open: openMonitor, close: closeMonitor }] = useDisclosure()
 
   const [newForm, setNewForm] = useState({
     elevator_id: '',
@@ -121,6 +123,19 @@ export default function CallsPage() {
       closeDetail()
     },
     onError: () => notifications.show({ message: 'לא נמצא טכנאי פנוי', color: 'red' }),
+  })
+
+  const monitorMutation = useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes: string }) => setCallMonitoring(id, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['call-detail'] })
+      notifications.show({ message: 'הקריאה הועברה למעקב', color: 'teal' })
+      closeMonitor()
+      closeDetail()
+      setMonitorNotes('')
+    },
+    onError: () => notifications.show({ message: 'שגיאה בהעברה למעקב', color: 'red' }),
   })
 
   function openDetailModal(call: ServiceCall) {
@@ -364,6 +379,15 @@ export default function CallsPage() {
 
             <Group justify="flex-end" mt="md">
               <Button variant="default" onClick={closeDetail}>סגור</Button>
+              {detail && ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(detail.status) && (
+                <Button
+                  variant="light"
+                  color="teal"
+                  onClick={() => { setSelectedCall(detail); openMonitor() }}
+                >
+                  🔍 העבר למעקב
+                </Button>
+              )}
               {detail && ['OPEN', 'ASSIGNED'].includes(detail.status) && (
                 <Button
                   variant="light"
@@ -435,6 +459,30 @@ export default function CallsPage() {
               })}
             >
               פתח קריאה
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* ── Monitor modal ── */}
+      <Modal opened={monitorOpened} onClose={closeMonitor} title="🔍 העבר למעקב">
+        <Stack gap="sm">
+          <Text size="sm">המעלית חזרה לפעול? העבר את הקריאה למעקב — העדיפות תרד ל-LOW והקריאה תיסגר אוטומטית אחרי 7 ימים ללא תקלה חוזרת.</Text>
+          <Textarea
+            label="הערות מעקב"
+            placeholder="לדוגמה: דיברתי עם הלקוח, המעלית חזרה לפעול"
+            value={monitorNotes}
+            onChange={e => setMonitorNotes(e.target.value)}
+            rows={3}
+          />
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={closeMonitor}>ביטול</Button>
+            <Button
+              color="teal"
+              loading={monitorMutation.isPending}
+              onClick={() => selectedCall && monitorMutation.mutate({ id: selectedCall.id, notes: monitorNotes })}
+            >
+              אשר מעקב
             </Button>
           </Group>
         </Stack>

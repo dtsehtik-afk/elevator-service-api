@@ -177,6 +177,56 @@ def update_call(
     return updated
 
 
+@router.post(
+    "/{call_id}/monitor",
+    response_model=ServiceCallResponse,
+    summary="Set call to MONITORING status",
+)
+def set_monitoring(
+    call_id: uuid.UUID,
+    notes: str = "",
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Move a call to MONITORING — priority drops to LOW, auto-closes after 7 days."""
+    from datetime import datetime, timezone
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.service_call import ServiceCall
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Service call not found")
+    if call.status in ("CLOSED", "RESOLVED"):
+        raise HTTPException(status_code=400, detail="Call already closed")
+
+    old_status = call.status
+    old_priority = call.priority
+    call.status = "MONITORING"
+    call.priority = "LOW"
+    call.monitoring_notes = notes
+    call.monitoring_since = datetime.now(timezone.utc)
+
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=current_user.email or current_user.name,
+        old_status=old_status,
+        new_status="MONITORING",
+        notes=f"במעקב (עדיפות שונתה מ-{old_priority} ל-LOW): {notes}" if notes else f"במעקב (עדיפות שונתה מ-{old_priority} ל-LOW)",
+    ))
+
+    # Cancel any pending assignments
+    pending = db.query(Assignment).filter(
+        Assignment.service_call_id == call_id,
+        Assignment.status == "PENDING_CONFIRMATION",
+    ).all()
+    for a in pending:
+        a.status = "CANCELLED"
+
+    db.commit()
+    db.refresh(call)
+    return call
+
+
 @router.get(
     "/{call_id}/audit",
     response_model=List[AuditLogResponse],
