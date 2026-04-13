@@ -98,6 +98,7 @@ export default function TechniciansPage() {
     mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
       updateTechnician(id, { is_active }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['technicians'] }),
+    onError: (e: any) => notifications.show({ message: `שגיאה: ${e?.response?.data?.detail ?? e.message}`, color: 'red' }),
   })
 
   const onCallMutation = useMutation({
