@@ -1073,10 +1073,9 @@ def _poll_email_calls():
     db = SessionLocal()
     try:
         count = poll_emails(db)
-        if count:
-            logger.info("📧 Email poller created %d new service call(s)", count)
+        logger.warning("📧 Email poller ran — %d new call(s) created", count)
     except Exception as exc:
-        logger.error("Email poller job failed: %s", exc)
+        logger.error("📧 Email poller job failed: %s", exc)
     finally:
         db.close()
 
