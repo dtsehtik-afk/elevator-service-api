@@ -1374,7 +1374,7 @@ def start_scheduler():
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
-    _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)
+    # _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)  # disabled
     _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
     _scheduler.start()
     logger.info("Background scheduler started (timezone: Asia/Jerusalem)")
