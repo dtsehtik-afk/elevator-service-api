@@ -2,12 +2,13 @@
 
 import email
 import email.message
+import email.utils
 import html as html_mod
 import imaplib
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from email.header import decode_header
 from typing import Optional
 
@@ -425,6 +426,18 @@ def poll_emails(db) -> int:
                 _, data = mail.fetch(mid, "(RFC822)")
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
+
+                # Extract email send time — use as created_at for the service call
+                email_date: datetime | None = None
+                try:
+                    date_str = msg.get("Date", "")
+                    if date_str:
+                        email_date = email.utils.parsedate_to_datetime(date_str)
+                        if email_date.tzinfo is None:
+                            email_date = email_date.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+
                 body = _extract_body(msg)
                 # Always force-clean HTML before passing to AI — beepertalk plain-text
                 # parts often contain literal </p><p> tags that slip through detection
@@ -477,6 +490,7 @@ def poll_emails(db) -> int:
                     fault_type=fields["fault_type"],
                     priority="CRITICAL" if is_rescue else "MEDIUM",
                     status="OPEN",
+                    **({"created_at": email_date} if email_date else {}),
                 )
                 db.add(call)
                 db.commit()

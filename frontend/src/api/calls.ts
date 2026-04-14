@@ -55,3 +55,7 @@ export async function setCallMonitoring(id: string, notes: string): Promise<Serv
 export async function manualAssignCall(id: string, technicianId: string, notes?: string): Promise<void> {
   await client.post(`/calls/${id}/assign`, { technician_id: technicianId, notes })
 }
+
+export async function resetAndReassignCall(id: string): Promise<void> {
+  await client.post(`/calls/${id}/reset-and-reassign`)
+}

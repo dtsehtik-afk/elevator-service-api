@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, require_dispatcher_or_admin
 from app.database import get_db
+from app.models.assignment import Assignment
 from app.models.technician import Technician
 from app.schemas.assignment import AssignmentResponse, ManualAssignRequest
 from app.services.assignment_service import auto_assign_call, manual_assign_call
@@ -63,4 +64,40 @@ def auto_assign(
             status_code=503,
             detail="No available technician found.",
         )
+    return assignment
+
+
+@router.post(
+    "/{call_id}/reset-and-reassign",
+    response_model=AssignmentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Reset rejections and reassign",
+    description="Cancel all rejected/pending assignments for a call and auto-assign from scratch.",
+)
+def reset_and_reassign(
+    call_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(require_dispatcher_or_admin),
+):
+    from app.models.service_call import ServiceCall
+    from app.services.ai_assignment_agent import assign_with_confirmation
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Service call not found")
+
+    # Cancel all existing assignments (rejected, pending, cancelled)
+    db.query(Assignment).filter(
+        Assignment.service_call_id == call_id,
+        Assignment.status.in_(["REJECTED", "CANCELLED", "PENDING_CONFIRMATION"]),
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    # Reset call status to OPEN so it can be re-assigned
+    call.status = "OPEN"
+    db.commit()
+
+    assignment = assign_with_confirmation(db, call, needs_confirmation=True)
+    if not assignment:
+        raise HTTPException(status_code=503, detail="No available technician found.")
     return assignment
