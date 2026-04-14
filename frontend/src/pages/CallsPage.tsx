@@ -7,7 +7,7 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall } from '../api/calls'
+import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall, resetAndReassignCall } from '../api/calls'
 import { listElevators } from '../api/elevators'
 import { listTechnicians } from '../api/technicians'
 import { useAuthStore } from '../stores/authStore'
@@ -129,6 +129,17 @@ export default function CallsPage() {
       qc.invalidateQueries({ queryKey: ['calls'] })
       qc.invalidateQueries({ queryKey: ['call-detail'] })
       notifications.show({ message: 'הקריאה הועברה לטכנאי הבא', color: 'blue' })
+      closeDetail()
+    },
+    onError: () => notifications.show({ message: 'לא נמצא טכנאי פנוי', color: 'red' }),
+  })
+
+  const resetReassignMutation = useMutation({
+    mutationFn: (id: string) => resetAndReassignCall(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['call-detail'] })
+      notifications.show({ message: '🔄 הדחיות אופסו — הקריאה נשלחה מחדש', color: 'blue' })
       closeDetail()
     },
     onError: () => notifications.show({ message: 'לא נמצא טכנאי פנוי', color: 'red' }),
@@ -429,6 +440,16 @@ export default function CallsPage() {
                   onClick={() => detail && reassignMutation.mutate(detail.id)}
                 >
                   🔄 העבר לטכנאי הבא
+                </Button>
+              )}
+              {detail && ['OPEN', 'ASSIGNED'].includes(detail.status) && (
+                <Button
+                  variant="light"
+                  color="red"
+                  loading={resetReassignMutation.isPending}
+                  onClick={() => detail && resetReassignMutation.mutate(detail.id)}
+                >
+                  ♻️ שלח שוב לכולם
                 </Button>
               )}
               <Button onClick={() => {
