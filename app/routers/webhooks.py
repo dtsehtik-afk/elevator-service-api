@@ -475,6 +475,9 @@ def _transcribe_audio_gemini(msg_data: dict) -> str:
 def _log_message(db, phone: str, direction: str, msg_type: str, text: str | None, transcription: str | None = None):
     try:
         from app.models.whatsapp_message import WhatsAppMessage
+        # Only log messages from known technicians — skip unknown numbers
+        if not _find_tech_by_phone_local(db, phone):
+            return
         entry = WhatsAppMessage(phone=phone, direction=direction, msg_type=msg_type, text=text, transcription=transcription)
         db.add(entry)
         db.commit()
