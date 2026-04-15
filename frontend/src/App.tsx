@@ -13,7 +13,9 @@ import TechAppPage from './pages/TechAppPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
+  const userRole = useAuthStore((s) => s.userRole)
   if (!token) return <Navigate to="/login" replace />
+  if (userRole === 'TECHNICIAN') return <Navigate to="/tech" replace />
   return <>{children}</>
 }
 

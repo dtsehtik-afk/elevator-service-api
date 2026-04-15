@@ -26,7 +26,7 @@ export default function LoginPage() {
       const name = payload.sub?.split('@')[0] ?? 'משתמש'
       const role = payload.role ?? 'TECHNICIAN'
       setAuth(token, name, role)
-      navigate('/')
+      navigate(role === 'TECHNICIAN' ? '/tech' : '/')
     } catch {
       setError('פרטי התחברות שגויים. אנא נסה שנית.')
     } finally {
