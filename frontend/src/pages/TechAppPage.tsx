@@ -26,6 +26,7 @@ const FAULT_LABEL: Record<string, string> = {
 // ── Types ──────────────────────────────────────────────────────────────────
 interface PendingCall {
   assignment_id: string
+  assignment_status: string
   address: string
   city: string
   fault_type: string
@@ -251,16 +252,37 @@ function TechMain() {
       <Stack gap="md" p="md">
         {isLoading ? (
           <Center h={200}><Loader /></Center>
-        ) : pending.length === 0 ? (
-          <Card withBorder radius="md" p="xl" ta="center">
-            <Text size="xl">✅</Text>
-            <Text fw={600} mt="sm">אין קריאות ממתינות</Text>
-            <Text c="dimmed" size="sm">הרשימה מתרעננת כל 30 שניות</Text>
-          </Card>
         ) : (
           <>
-            <Text fw={700} size="lg">📋 קריאות ממתינות לאישורך ({pending.length})</Text>
-            {pending.map((call) => (
+            {/* ── Active / confirmed calls ── */}
+            {pending.filter(c => c.assignment_status !== 'PENDING_CONFIRMATION').map((call) => (
+              <Card key={call.assignment_id} withBorder radius="md" p="md" shadow="sm"
+                style={{ borderRight: '4px solid #40c057' }}>
+                <Group justify="space-between" mb="xs">
+                  <Badge color="green" size="sm">✅ קריאה פעילה</Badge>
+                  <Badge color={PRIORITY_COLOR[call.priority]} size="sm">{PRIORITY_LABEL[call.priority]}</Badge>
+                </Group>
+                <Text fw={700} size="md">📍 {call.address}, {call.city}</Text>
+                <Text size="sm" c="dimmed">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
+                {call.description && <Text size="sm" c="dimmed">📝 {call.description}</Text>}
+                {call.lat && call.lng && (
+                  <Group mt="sm" gap="xs">
+                    <Button size="sm" color="blue" component="a"
+                      href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank">
+                      🗺 גוגל מפות</Button>
+                    <Button size="sm" color="teal" component="a"
+                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank">
+                      🚘 Waze</Button>
+                  </Group>
+                )}
+              </Card>
+            ))}
+
+            {/* ── Pending confirmation calls ── */}
+            {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION').length > 0 && (
+              <Text fw={700} size="lg">📋 ממתינות לאישורך</Text>
+            )}
+            {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION').map((call) => (
               <Card key={call.assignment_id} withBorder radius="md" p="md" shadow="sm">
                 <Group justify="space-between" mb="xs">
                   <Text fw={700} size="md">📍 {call.address}, {call.city}</Text>
@@ -269,39 +291,37 @@ function TechMain() {
                 <Text size="sm" c="dimmed">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
                 {call.description && <Text size="sm" c="dimmed">📝 {call.description}</Text>}
                 <Text size="sm" c="dimmed">🚗 ~{call.travel_minutes} דקות נסיעה</Text>
-
                 {call.lat && call.lng && (
                   <Group mt="xs" gap="xs">
-                    <Button
-                      size="xs" variant="light" color="blue"
-                      component="a"
-                      href={`https://maps.google.com/?q=${call.lat},${call.lng}`}
-                      target="_blank"
-                    >🗺 גוגל מפות</Button>
-                    <Button
-                      size="xs" variant="light" color="teal"
-                      component="a"
-                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}`}
-                      target="_blank"
-                    >🚘 Waze</Button>
+                    <Button size="xs" variant="light" color="blue" component="a"
+                      href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank">
+                      🗺 גוגל מפות</Button>
+                    <Button size="xs" variant="light" color="teal" component="a"
+                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank">
+                      🚘 Waze</Button>
                   </Group>
                 )}
-
                 <Divider my="sm" />
                 <Group gap="sm">
-                  <Button
-                    flex={1} color="green" size="md"
+                  <Button flex={1} color="green" size="md"
                     loading={acceptMutation.isPending && acceptMutation.variables?.aid === call.assignment_id}
-                    onClick={() => acceptMutation.mutate({ aid: call.assignment_id })}
-                  >✅ קבל</Button>
-                  <Button
-                    flex={1} color="red" variant="light" size="md"
+                    onClick={() => acceptMutation.mutate({ aid: call.assignment_id })}>
+                    ✅ קבל</Button>
+                  <Button flex={1} color="red" variant="light" size="md"
                     loading={rejectMutation.isPending && rejectMutation.variables?.aid === call.assignment_id}
-                    onClick={() => rejectMutation.mutate({ aid: call.assignment_id })}
-                  >❌ דחה</Button>
+                    onClick={() => rejectMutation.mutate({ aid: call.assignment_id })}>
+                    ❌ דחה</Button>
                 </Group>
               </Card>
             ))}
+
+            {pending.length === 0 && (
+              <Card withBorder radius="md" p="xl" ta="center">
+                <Text size="xl">✅</Text>
+                <Text fw={600} mt="sm">אין קריאות פעילות</Text>
+                <Text c="dimmed" size="sm">הרשימה מתרעננת כל 30 שניות</Text>
+              </Card>
+            )}
           </>
         )}
 

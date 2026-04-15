@@ -743,28 +743,30 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
 
     assignments = (
         db.query(Assignment)
-        .filter(Assignment.technician_id == tech.id, Assignment.status == "PENDING_CONFIRMATION")
+        .filter(
+            Assignment.technician_id == tech.id,
+            Assignment.status.in_(["PENDING_CONFIRMATION", "CONFIRMED", "AUTO_ASSIGNED"]),
+        )
         .order_by(Assignment.assigned_at.asc())
         .all()
     )
     result = []
     for a in assignments:
         call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
-        if not call:
+        if not call or call.status not in ("OPEN", "ASSIGNED", "IN_PROGRESS"):
             continue
-        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
-        if not elev:
-            continue
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
         result.append({
             "assignment_id": str(a.id),
-            "address": elev.address,
-            "city": elev.city,
+            "assignment_status": a.status,
+            "address": elev.address if elev else "כתובת לא ידועה",
+            "city": elev.city if elev else "",
             "fault_type": call.fault_type,
             "priority": call.priority,
             "description": call.description or "",
             "travel_minutes": a.travel_minutes or "?",
-            "lat": elev.latitude,
-            "lng": elev.longitude,
+            "lat": elev.latitude if elev else None,
+            "lng": elev.longitude if elev else None,
         })
     return result
 
