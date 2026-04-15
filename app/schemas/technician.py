@@ -34,6 +34,7 @@ class TechnicianUpdate(BaseModel):
     is_active: Optional[bool] = None
     base_latitude: Optional[float] = Field(None, ge=-90, le=90)
     base_longitude: Optional[float] = Field(None, ge=-180, le=180)
+    password: Optional[str] = Field(None, min_length=8, description="Set to reset the technician's password")
 
 
 class LocationUpdate(BaseModel):

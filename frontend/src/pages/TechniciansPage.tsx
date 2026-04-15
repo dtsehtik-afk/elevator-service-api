@@ -30,10 +30,12 @@ export default function TechniciansPage() {
     name: string; phone: string; whatsapp_number: string; role: string;
     max_daily_calls: number; is_active: boolean;
     base_latitude: number | null; base_longitude: number | null;
+    password: string;
   }>({
     name: '', phone: '', whatsapp_number: '', role: 'TECHNICIAN',
     max_daily_calls: 8, is_active: true,
     base_latitude: null, base_longitude: null,
+    password: '',
   })
 
   const { data: technicians = [] } = useQuery({
@@ -124,6 +126,7 @@ export default function TechniciansPage() {
       is_active: tech.is_active,
       base_latitude: tech.base_latitude,
       base_longitude: tech.base_longitude,
+      password: '',
     })
     openEdit()
   }
@@ -286,6 +289,15 @@ export default function TechniciansPage() {
           <Switch label="טכנאי פעיל"
             checked={editForm.is_active}
             onChange={e => setEditForm(s => ({ ...s, is_active: e.target.checked }))} />
+          <Divider label="🔑 איפוס סיסמה" labelPosition="center" />
+          <PasswordInput
+            label="סיסמה חדשה"
+            placeholder="השאר ריק כדי לא לשנות"
+            dir="ltr"
+            value={editForm.password}
+            onChange={e => setEditForm(s => ({ ...s, password: e.target.value }))}
+            error={editForm.password.length > 0 && editForm.password.length < 8 ? 'לפחות 8 תווים' : null}
+          />
           <Divider label="📍 מיקום בסיס (ברירת מחדל כשאין מיקום חי)" labelPosition="center" />
           <Group grow>
             <NumberInput
@@ -315,10 +327,12 @@ export default function TechniciansPage() {
               disabled={!editForm.name || editForm.name.length < 2}
               onClick={() => {
                 if (!selected) return
-                const payload = {
-                  ...editForm,
+                const { password, ...rest } = editForm
+                const payload: any = {
+                  ...rest,
                   max_daily_calls: Math.max(1, Math.min(20, editForm.max_daily_calls || 8)),
                 }
+                if (password && password.length >= 8) payload.password = password
                 updateMutation.mutate({ id: selected.id, payload })
               }}>
               שמור שינויים

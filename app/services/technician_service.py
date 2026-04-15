@@ -78,7 +78,15 @@ def update_technician(
     # Fields that are NOT NULL in the DB — skip if value is None to avoid DB constraint errors
     NON_NULLABLE = {"name", "max_daily_calls", "is_available", "is_active", "role"}
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+
+    # Handle password reset separately — hash before storing
+    if "password" in updates:
+        raw_password = updates.pop("password")
+        if raw_password:
+            tech.hashed_password = hash_password(raw_password)
+
+    for field, value in updates.items():
         if value is None and field in NON_NULLABLE:
             continue   # ignore None for required fields (e.g. NumberInput cleared in UI)
         setattr(tech, field, value)
