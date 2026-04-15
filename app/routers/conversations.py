@@ -8,6 +8,20 @@ from app.auth.dependencies import require_admin
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
 
+def _known_phone_suffixes(db: Session) -> set[str]:
+    """Return set of last-9-digit suffixes for all technician phones."""
+    from app.models.technician import Technician
+    suffixes = set()
+    for t in db.query(Technician).all():
+        for num in [t.phone, t.whatsapp_number]:
+            if not num:
+                continue
+            digits = "".join(c for c in num if c.isdigit())
+            if len(digits) >= 9:
+                suffixes.add(digits[-9:])
+    return suffixes
+
+
 @router.get("")
 def list_conversations(db: Session = Depends(get_db), _=Depends(require_admin)):
     from app.models.whatsapp_message import WhatsAppMessage
@@ -49,3 +63,18 @@ def list_conversations(db: Session = Depends(get_db), _=Depends(require_admin)):
     # Sort by most recent message
     result.sort(key=lambda x: x["messages"][-1]["timestamp"] if x["messages"] else "", reverse=True)
     return result
+
+
+@router.delete("/cleanup-unknown")
+def cleanup_unknown_conversations(db: Session = Depends(get_db), _=Depends(require_admin)):
+    """Delete all stored messages from phone numbers not registered as technicians."""
+    from app.models.whatsapp_message import WhatsAppMessage
+    known = _known_phone_suffixes(db)
+    deleted = 0
+    for msg in db.query(WhatsAppMessage).all():
+        digits = "".join(c for c in msg.phone if c.isdigit())
+        if len(digits) < 9 or digits[-9:] not in known:
+            db.delete(msg)
+            deleted += 1
+    db.commit()
+    return {"deleted": deleted}
