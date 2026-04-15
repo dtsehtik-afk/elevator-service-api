@@ -47,13 +47,26 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
-      - name: Build APK
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > frontend/android/app/akord.keystore
+
+      - name: Build signed APK
         working-directory: frontend/android
-        run: ./gradlew assembleDebug
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$PWD/app/akord.keystore \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: akord-elevators-debug
-          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          name: akord-elevators
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
