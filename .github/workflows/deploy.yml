@@ -19,6 +19,7 @@ jobs:
             set -e
             cd elevator-service-api
             git pull origin main
-            docker compose up -d --build app
+            docker compose build --no-cache app
+            docker compose up -d
             docker system prune -f --filter "until=24h"
             echo "✅ Deploy completed at $(date)"
