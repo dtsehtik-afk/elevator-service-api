@@ -997,6 +997,137 @@ def reject_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db))
     return {"status": "rejected"}
 
 
+# ── Open-calls board (all technicians see all open calls) ─────────────────────
+
+@router.get("/open-calls-board", summary="All open/unconfirmed calls for technician board")
+def open_calls_board(db: Session = Depends(get_db)):
+    from app.models.assignment import Assignment
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician as TechnicianModel
+
+    calls = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED"]))
+        .order_by(ServiceCall.created_at.desc())
+        .all()
+    )
+
+    PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    result = []
+    for call in calls:
+        # Skip calls that already have a confirmed assignment
+        confirmed = db.query(Assignment).filter(
+            Assignment.service_call_id == call.id,
+            Assignment.status == "CONFIRMED",
+        ).first()
+        if confirmed:
+            continue
+
+        pending = db.query(Assignment).filter(
+            Assignment.service_call_id == call.id,
+            Assignment.status == "PENDING_CONFIRMATION",
+        ).first()
+
+        primary_tech_name = None
+        if pending:
+            tech = db.query(TechnicianModel).filter(TechnicianModel.id == pending.technician_id).first()
+            primary_tech_name = tech.name if tech else None
+
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+
+        result.append({
+            "call_id": str(call.id),
+            "address": elev.address if elev else "כתובת לא ידועה",
+            "city": elev.city if elev else "",
+            "fault_type": call.fault_type or "OTHER",
+            "priority": call.priority or "MEDIUM",
+            "description": call.description or "",
+            "primary_tech": primary_tech_name,
+            "lat": elev.latitude if elev else None,
+            "lng": elev.longitude if elev else None,
+        })
+
+    result.sort(key=lambda x: PRIORITY_ORDER.get(x["priority"], 99))
+    return result
+
+
+@router.post("/claim-call/{call_id}", summary="Technician claims an open call")
+def claim_call(call_id: str, db: Session = Depends(get_db)):
+    from app.auth.dependencies import get_current_user
+    from app.auth.security import decode_token
+    from app.models.assignment import Assignment
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    from fastapi import Request
+    from datetime import datetime, timezone
+    # We resolve the current user via the Authorization header manually
+    # so we can reuse the same no-auth pattern as the rest of this router
+    raise HTTPException(status_code=501, detail="Use /claim-call-by-tech/{tech_id}/{call_id}")
+
+
+@router.post("/claim-call-by-tech/{tech_id}/{call_id}", summary="Technician claims an open call")
+def claim_call_by_tech(tech_id: str, call_id: str, db: Session = Depends(get_db)):
+    from app.models.assignment import Assignment
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician as TechnicianModel
+    from datetime import datetime, timezone
+
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
+
+    call = db.query(ServiceCall).filter(
+        ServiceCall.id == call_id,
+        ServiceCall.status.in_(["OPEN", "ASSIGNED"]),
+    ).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="קריאה לא נמצאה או לא פתוחה")
+
+    # Reject if already confirmed by someone
+    confirmed = db.query(Assignment).filter(
+        Assignment.service_call_id == call_id,
+        Assignment.status == "CONFIRMED",
+    ).first()
+    if confirmed:
+        raise HTTPException(status_code=409, detail="הקריאה כבר שויכה לטכנאי אחר")
+
+    # Cancel pending assignments
+    pending_list = db.query(Assignment).filter(
+        Assignment.service_call_id == call_id,
+        Assignment.status == "PENDING_CONFIRMATION",
+    ).all()
+    for p in pending_list:
+        p.status = "CANCELLED"
+
+    new_assignment = Assignment(
+        service_call_id=call.id,
+        technician_id=tech.id,
+        assignment_type="MANUAL",
+        status="CONFIRMED",
+        assigned_at=datetime.now(timezone.utc),
+    )
+    db.add(new_assignment)
+    call.status = "ASSIGNED"
+    db.commit()
+
+    try:
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+        addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+        from app.services.whatsapp_service import send_whatsapp_message
+        from app.config import get_settings
+        settings = get_settings()
+        for num in (settings.dispatcher_whatsapp or "").split(","):
+            num = num.strip()
+            if num:
+                send_whatsapp_message(num, f"🔔 {tech.name} משך קריאה: {addr}")
+    except Exception as exc:
+        logger.warning("claim_call notify failed: %s", exc)
+
+    return {"ok": True, "message": f"הקריאה שויכה ל{tech.name} בהצלחה"}
+
+
 # ── Incoming call log ─────────────────────────────────────────────────────────
 
 @router.get("/calls/log", summary="List all incoming call logs")

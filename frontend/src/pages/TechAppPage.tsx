@@ -42,6 +42,18 @@ interface TechInfo {
   role: string
 }
 
+interface OpenCall {
+  call_id: string
+  address: string
+  city: string
+  fault_type: string
+  priority: string
+  description: string
+  primary_tech: string | null
+  lat: number | null
+  lng: number | null
+}
+
 // ── API helpers ────────────────────────────────────────────────────────────
 async function fetchMe(): Promise<TechInfo> {
   const { data } = await client.get('/auth/me')
@@ -59,6 +71,15 @@ async function acceptCall(techId: string, assignmentId: string) {
 
 async function rejectCall(techId: string, assignmentId: string) {
   await client.post(`/webhooks/my-calls/${techId}/reject/${assignmentId}`)
+}
+
+async function fetchOpenBoard(): Promise<OpenCall[]> {
+  const { data } = await client.get('/webhooks/open-calls-board')
+  return data
+}
+
+async function claimCall(techId: string, callId: string) {
+  await client.post(`/webhooks/claim-call-by-tech/${techId}/${callId}`)
 }
 
 async function sendLocation(techId: string, lat: number, lng: number) {
@@ -175,6 +196,25 @@ function TechMain() {
     refetchInterval: 30000,
   })
 
+  const { data: openBoard = [], isLoading: boardLoading } = useQuery({
+    queryKey: ['open-board'],
+    queryFn: fetchOpenBoard,
+    enabled: !!techId,
+    refetchInterval: 30000,
+  })
+
+  const claimMutation = useMutation({
+    mutationFn: ({ callId }: { callId: string }) => claimCall(techId!, callId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['open-board'] })
+      qc.invalidateQueries({ queryKey: ['pending'] })
+      notifications.show({ message: '✅ הקריאה שויכה אליך!', color: 'green' })
+    },
+    onError: (e: any) => {
+      notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה במשיכת הקריאה', color: 'red' })
+    },
+  })
+
   const acceptMutation = useMutation({
     mutationFn: ({ aid }: { aid: string }) => acceptCall(techId!, aid),
     onSuccess: () => {
@@ -260,6 +300,53 @@ function TechMain() {
                     onClick={() => rejectMutation.mutate({ aid: call.assignment_id })}
                   >❌ דחה</Button>
                 </Group>
+              </Card>
+            ))}
+          </>
+        )}
+
+        {/* ── Open calls board ── */}
+        <Divider label="📋 לוח קריאות פתוחות" labelPosition="center" mt="md" />
+        {boardLoading ? (
+          <Center h={80}><Loader size="sm" /></Center>
+        ) : openBoard.length === 0 ? (
+          <Card withBorder radius="md" p="md" ta="center">
+            <Text c="dimmed" size="sm">אין קריאות פתוחות כרגע</Text>
+          </Card>
+        ) : (
+          <>
+            <Text size="sm" c="dimmed">כל הקריאות הפתוחות שלא שויכו סופית — לחץ "משוך" כדי לקחת</Text>
+            {openBoard.map((call) => (
+              <Card key={call.call_id} withBorder radius="md" p="md" shadow="xs"
+                style={{ borderRight: `4px solid ${PRIORITY_COLOR[call.priority] === 'red' ? '#fa5252' : PRIORITY_COLOR[call.priority] === 'orange' ? '#fd7e14' : '#228be6'}` }}>
+                <Group justify="space-between" mb={4}>
+                  <Text fw={700} size="sm">📍 {call.address}, {call.city}</Text>
+                  <Badge color={PRIORITY_COLOR[call.priority]} size="sm">{PRIORITY_LABEL[call.priority]}</Badge>
+                </Group>
+                <Text size="xs" c="dimmed">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
+                {call.description && <Text size="xs" c="dimmed">📝 {call.description}</Text>}
+                {call.primary_tech ? (
+                  <Text size="xs" c="blue" mt={4}>🔵 {call.primary_tech} ממתין לאישור</Text>
+                ) : (
+                  <Text size="xs" c="orange" mt={4}>⚠️ ממתין לשיבוץ</Text>
+                )}
+                {call.lat && call.lng && (
+                  <Group mt="xs" gap="xs">
+                    <Button size="xs" variant="subtle" color="blue"
+                      component="a" href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank">
+                      🗺 מפות</Button>
+                    <Button size="xs" variant="subtle" color="teal"
+                      component="a" href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank">
+                      🚘 Waze</Button>
+                  </Group>
+                )}
+                <Button
+                  fullWidth mt="sm" size="sm" color="grape" variant="light"
+                  loading={claimMutation.isPending && claimMutation.variables?.callId === call.call_id}
+                  onClick={() => claimMutation.mutate({ callId: call.call_id })}
+                >
+                  🙋 משוך קריאה אלי
+                </Button>
               </Card>
             ))}
           </>
