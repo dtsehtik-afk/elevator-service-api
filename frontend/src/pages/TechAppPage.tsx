@@ -254,26 +254,42 @@ function TechMain() {
           <Center h={200}><Loader /></Center>
         ) : (
           <>
-            {/* ── Active / confirmed calls ── */}
+            {/* ── Active / confirmed calls — always at top ── */}
             {pending.filter(c => c.assignment_status !== 'PENDING_CONFIRMATION').map((call) => (
-              <Card key={call.assignment_id} withBorder radius="md" p="md" shadow="sm"
-                style={{ borderRight: '4px solid #40c057' }}>
-                <Group justify="space-between" mb="xs">
-                  <Badge color="green" size="sm">✅ קריאה פעילה</Badge>
-                  <Badge color={PRIORITY_COLOR[call.priority]} size="sm">{PRIORITY_LABEL[call.priority]}</Badge>
+              <Card key={call.assignment_id} withBorder radius="md" p="lg" shadow="md"
+                style={{ borderRight: '5px solid #40c057', background: '#f8fff9' }}>
+                <Group justify="space-between" mb="sm">
+                  <Badge color="green" size="md" variant="filled">✅ קריאה פעילה</Badge>
+                  <Badge color={PRIORITY_COLOR[call.priority]} size="md">{PRIORITY_LABEL[call.priority]}</Badge>
                 </Group>
-                <Text fw={700} size="md">📍 {call.address}, {call.city}</Text>
-                <Text size="sm" c="dimmed">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
-                {call.description && <Text size="sm" c="dimmed">📝 {call.description}</Text>}
-                {call.lat && call.lng && (
-                  <Group mt="sm" gap="xs">
-                    <Button size="sm" color="blue" component="a"
-                      href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank">
-                      🗺 גוגל מפות</Button>
-                    <Button size="sm" color="teal" component="a"
-                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank">
-                      🚘 Waze</Button>
-                  </Group>
+
+                <Text fw={800} size="lg" mb={4}>📍 {call.address}</Text>
+                <Text fw={500} size="md" c="dimmed" mb="xs">{call.city}</Text>
+
+                <Stack gap={4} mb="sm">
+                  <Text size="sm">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
+                  {call.description && <Text size="sm" c="dimmed">📝 {call.description}</Text>}
+                  {call.travel_minutes && call.travel_minutes !== '?' &&
+                    <Text size="sm" c="dimmed">🚗 ~{call.travel_minutes} דקות נסיעה</Text>}
+                </Stack>
+
+                {call.lat && call.lng ? (
+                  <Stack gap="xs" mt="sm">
+                    <Button
+                      size="md" color="blue" fullWidth
+                      component="a"
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${call.lat},${call.lng}`}
+                      target="_blank"
+                    >🗺 נווט — גוגל מפות</Button>
+                    <Button
+                      size="md" color="teal" fullWidth variant="light"
+                      component="a"
+                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}&navigate=yes`}
+                      target="_blank"
+                    >🚘 נווט — Waze</Button>
+                  </Stack>
+                ) : (
+                  <Text size="sm" c="orange" mt="sm">⚠️ אין קואורדינטות — חפש כתובת ידנית</Text>
                 )}
               </Card>
             ))}
