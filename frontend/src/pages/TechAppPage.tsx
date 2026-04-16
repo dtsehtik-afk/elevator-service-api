@@ -3,7 +3,7 @@
  * Accessible at /tech — no admin shell, optimized for phone
  */
 import { useState, useEffect, useRef } from 'react'
-import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput } from '@mantine/core'
+import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../stores/authStore'
@@ -84,8 +84,8 @@ async function claimCall(techId: string, callId: string) {
   await client.post(`/webhooks/claim-call-by-tech/${techId}/${callId}`)
 }
 
-async function resolveCall(techId: string, callId: string) {
-  await client.post(`/webhooks/resolve-call/${techId}/${callId}`)
+async function resolveCall(techId: string, callId: string, notes: string) {
+  await client.post(`/webhooks/resolve-call/${techId}/${callId}`, { resolution_notes: notes })
 }
 
 async function searchElevators(techId: string, q: string) {
@@ -218,16 +218,22 @@ function TechMain() {
     refetchInterval: 30000,
   })
 
+  const [resolveOpen, setResolveOpen] = useState(false)
+  const [resolveCallId, setResolveCallId] = useState<string | null>(null)
+  const [resolveNotes, setResolveNotes] = useState('')
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
   const [elevResults, setElevResults] = useState<{ id: string; address: string; city: string; building_name: string }[]>([])
 
   const resolveMutation = useMutation({
-    mutationFn: ({ callId }: { callId: string }) => resolveCall(techId!, callId),
+    mutationFn: ({ callId, notes }: { callId: string; notes: string }) =>
+      resolveCall(techId!, callId, notes),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pending'] })
       qc.invalidateQueries({ queryKey: ['open-board'] })
+      setResolveOpen(false)
+      setResolveNotes('')
       notifications.show({ message: '✅ הקריאה סגורה בהצלחה', color: 'green' })
     },
     onError: () => notifications.show({ message: 'שגיאה בסגירת הקריאה', color: 'red' }),
@@ -339,14 +345,35 @@ function TechMain() {
                     onClick={() => { setReassignCallId(call.call_id); setReassignOpen(true) }}>
                     🏢 שנה כתובת</Button>
                   <Button flex={1} size="sm" color="red" variant="light"
-                    loading={resolveMutation.isPending}
-                    onClick={() => {
-                      if (confirm('לסגור את הקריאה?')) resolveMutation.mutate({ callId: call.call_id })
-                    }}>
+                    onClick={() => { setResolveCallId(call.call_id); setResolveNotes(''); setResolveOpen(true) }}>
                     ✅ סגור קריאה</Button>
                 </Group>
               </Card>
             ))}
+
+            {/* ── Resolve call modal ── */}
+            <Modal opened={resolveOpen} onClose={() => setResolveOpen(false)} title="✅ סגירת קריאה" size="md" dir="rtl">
+              <Stack gap="sm">
+                <Text size="sm" c="dimmed">תאר את הפעולות שבוצעו (אופציונלי)</Text>
+                <Textarea
+                  placeholder="לדוגמה: הוחלף חיישן הדלת, נבדקה תקינות המנוע..."
+                  minRows={4}
+                  value={resolveNotes}
+                  onChange={e => setResolveNotes(e.target.value)}
+                  autoFocus
+                />
+                <Group justify="flex-end" mt="sm">
+                  <Button variant="default" onClick={() => setResolveOpen(false)}>ביטול</Button>
+                  <Button
+                    color="red"
+                    loading={resolveMutation.isPending}
+                    onClick={() => resolveCallId && resolveMutation.mutate({ callId: resolveCallId, notes: resolveNotes })}
+                  >
+                    סגור קריאה
+                  </Button>
+                </Group>
+              </Stack>
+            </Modal>
 
             {/* ── Elevator reassign modal ── */}
             <Modal opened={reassignOpen} onClose={() => setReassignOpen(false)} title="🏢 שיוך מעלית אחרת" size="md" dir="rtl">
