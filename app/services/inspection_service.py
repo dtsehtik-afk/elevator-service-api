@@ -128,10 +128,25 @@ def process_inspection_report(
         except ValueError:
             pass
 
-    # Find elevator — try serial number first, then address fuzzy match
+    # ── Elevator matching — ספק = אין ספק ──────────────────────────────────────
+    # Tier 1: serial number → definitive match (AUTO_MATCHED)
+    # Tier 2: fuzzy score >= 0.65 → confident address match (AUTO_MATCHED)
+    # Tier 3: 0.30 <= score < 0.65 → uncertain, ask dispatcher (PENDING_REVIEW)
+    # Tier 4: score < 0.30 or no street → cannot match (UNMATCHED)
+
+    _AUTO_THRESHOLD    = 0.65
+    _PARTIAL_THRESHOLD = 0.30
+
     elevator = None
+    suggested_elevator = None
+    match_score = None
+    match_status = "UNMATCHED"
+
     if serial_number:
         elevator = db.query(Elevator).filter(Elevator.serial_number == str(serial_number)).first()
+        if elevator:
+            match_status = "AUTO_MATCHED"
+            match_score = 1.0
 
     if not elevator and street:
         parsed_call = ParsedCall(
@@ -141,24 +156,57 @@ def process_inspection_report(
             description="ביקורת תקינות",
         )
         match = find_elevator(db, parsed_call)
-        if match.elevator and match.score >= 0.3:
+        match_score = match.score if match.elevator else 0.0
+
+        if match.elevator and match_score >= _AUTO_THRESHOLD:
             elevator = match.elevator
+            match_status = "AUTO_MATCHED"
+        elif match.elevator and match_score >= _PARTIAL_THRESHOLD:
+            suggested_elevator = match.elevator
+            match_status = "PENDING_REVIEW"
+        else:
+            match_status = "UNMATCHED"
 
     # Create inspection report record
     report = InspectionReport(
         elevator_id=elevator.id if elevator else None,
+        suggested_elevator_id=suggested_elevator.id if suggested_elevator else None,
         source=source,
         file_name=file_name,
         raw_address=address,
+        raw_street=street,
+        raw_city=city,
         inspection_date=inspection_date,
         result=result_str if result_str in ("PASS", "FAIL") else "UNKNOWN",
         inspector_name=inspector_name,
         deficiency_count=len(deficiencies),
         deficiencies=deficiencies if deficiencies else None,
+        match_status=match_status,
+        match_score=round(match_score, 3) if match_score is not None else None,
     )
     db.add(report)
 
-    if not elevator:
+    # ── PENDING_REVIEW: notify dispatcher to confirm ──────────────────────────
+    if match_status == "PENDING_REVIEW":
+        suggested_addr = f"{suggested_elevator.address}, {suggested_elevator.city}" if suggested_elevator else "—"
+        msg = (
+            f"🔍 *דוח ביקורת ממתין לאישור*\n"
+            f"כתובת בדוח: *{address or 'לא ידוע'}*\n"
+            f"מעלית מוצעת: {suggested_addr} (ציון: {match_score:.0%})\n"
+            f"בודק: {inspector_name or 'לא ידוע'}\n"
+            f"אנא אשר/דחה את השיוך בדשבורד תחת 'דוחות ביקורת'."
+        )
+        logger.warning("Inspection PENDING_REVIEW: %s → suggested %s (%.0f%%)", address, suggested_addr, (match_score or 0) * 100)
+        db.commit()
+        db.refresh(report)
+        for num in (settings.dispatcher_whatsapp or "").split(","):
+            n = num.strip()
+            if n:
+                send_whatsapp_message(n, msg)
+        return {"status": "pending_review", "report_id": str(report.id), "message": msg}
+
+    # ── UNMATCHED: notify dispatcher ─────────────────────────────────────────
+    if match_status == "UNMATCHED":
         msg = f"⚠️ דוח ביקורת — לא נמצאה מעלית לכתובת: {address or 'לא ידוע'}"
         logger.warning(msg)
         db.commit()
@@ -169,14 +217,34 @@ def process_inspection_report(
                 send_whatsapp_message(n, msg)
         return {"status": "no_elevator", "report_id": str(report.id), "message": msg}
 
-    # Update elevator last service date
+    # ── AUTO_MATCHED: proceed with update ────────────────────────────────────
+    db.commit()
+    db.refresh(report)
+    return _apply_inspection_to_elevator(db, report, elevator)
+
+
+def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
+    """
+    Apply a confirmed inspection report to an elevator:
+    - Update last_service_date
+    - Send WhatsApp notification
+    - Open a service call if deficiencies found
+    Called for both AUTO_MATCHED and MANUALLY_CONFIRMED reports.
+    """
+    from app.services.whatsapp_service import _send_message as send_whatsapp_message
+    from app.schemas.service_call import ServiceCallCreate
+    from app.services import service_call_service
+
+    settings = get_settings()
+    deficiencies = report.deficiencies or []
+    inspection_date = report.inspection_date
+    inspector_name = report.inspector_name
+
     if inspection_date:
         elevator.last_service_date = inspection_date
         db.commit()
 
-    # No deficiencies — clean inspection
-    if not deficiencies or result_str == "PASS":
-        db.commit()
+    if not deficiencies or report.result == "PASS":
         db.refresh(report)
         msg = f"✅ ביקורת תקינה: {elevator.address}, {elevator.city}"
         if inspection_date:
@@ -187,10 +255,8 @@ def process_inspection_report(
                 send_whatsapp_message(n, msg)
         return {"status": "clean", "report_id": str(report.id), "elevator_id": str(elevator.id), "message": msg}
 
-    # Has deficiencies — create service call
     severities = [d.get("severity", "MEDIUM") for d in deficiencies]
     priority = "HIGH" if "HIGH" in severities else ("MEDIUM" if "MEDIUM" in severities else "LOW")
-
     deficiency_text = "\n".join(
         f"• {d.get('description', '')} [{d.get('severity', 'MEDIUM')}]"
         for d in deficiencies

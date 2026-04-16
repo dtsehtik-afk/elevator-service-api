@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
-  FileInput, Center, Collapse, Card, Loader,
+  FileInput, Center, Collapse, Card, Loader, Alert, Modal, TextInput,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -11,6 +11,9 @@ interface InspectionReport {
   id: string
   elevator_address: string
   elevator_id: string | null
+  suggested_elevator_id: string | null
+  suggested_elevator_address: string | null
+  raw_address: string | null
   file_name: string | null
   inspection_date: string | null
   result: 'PASS' | 'FAIL' | 'UNKNOWN'
@@ -18,6 +21,8 @@ interface InspectionReport {
   deficiencies: { description: string; severity: string }[] | null
   inspector_name: string | null
   service_call_id: string | null
+  match_status: 'AUTO_MATCHED' | 'PENDING_REVIEW' | 'MANUALLY_CONFIRMED' | 'UNMATCHED'
+  match_score: number | null
   processed_at: string | null
 }
 
@@ -38,16 +43,26 @@ async function uploadInspection(file: File): Promise<any> {
 const RESULT_COLOR: Record<string, string> = { PASS: 'green', FAIL: 'red', UNKNOWN: 'gray' }
 const RESULT_LABEL: Record<string, string> = { PASS: '✅ תקין', FAIL: '❌ ליקויים', UNKNOWN: '❓ לא ידוע' }
 const SEVERITY_COLOR: Record<string, string> = { HIGH: 'red', MEDIUM: 'orange', LOW: 'yellow' }
+const MATCH_COLOR: Record<string, string> = {
+  AUTO_MATCHED: 'green', PENDING_REVIEW: 'orange', MANUALLY_CONFIRMED: 'blue', UNMATCHED: 'red',
+}
+const MATCH_LABEL: Record<string, string> = {
+  AUTO_MATCHED: 'שויך אוטומטית', PENDING_REVIEW: '⚠️ ממתין לאישור', MANUALLY_CONFIRMED: '✓ אושר ידנית', UNMATCHED: 'לא שויך',
+}
 
 export default function InspectionsPage() {
   const qc = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [confirmReport, setConfirmReport] = useState<InspectionReport | null>(null)
+  const [overrideElevId, setOverrideElevId] = useState('')
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ['inspections'],
     queryFn: fetchInspections,
   })
+
+  const pendingCount = reports.filter(r => r.match_status === 'PENDING_REVIEW').length
 
   const uploadMutation = useMutation({
     mutationFn: uploadInspection,
@@ -58,6 +73,8 @@ export default function InspectionsPage() {
         ? '✅ ביקורת תקינה — יומן המעלית עודכן'
         : result.status === 'deficiencies_found'
         ? `⚠️ נמצאו ${result.deficiency_count} ליקויים — נפתחה קריאת שירות`
+        : result.status === 'pending_review'
+        ? '⚠️ כתובת לא ודאית — נשלחה בקשת אישור למוקד'
         : result.status === 'no_elevator'
         ? '⚠️ לא נמצאה מעלית מתאימה — נשלחה התראה למוקד'
         : '✅ הדוח עובד בהצלחה'
@@ -72,9 +89,36 @@ export default function InspectionsPage() {
     },
   })
 
+  const confirmMutation = useMutation({
+    mutationFn: ({ reportId, elevatorId }: { reportId: string; elevatorId?: string }) =>
+      client.post(`/inspections/${reportId}/confirm${elevatorId ? `?elevator_id=${elevatorId}` : ''}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      setConfirmReport(null)
+      setOverrideElevId('')
+      notifications.show({ message: '✅ הדוח אושר ושויך למעלית', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה באישור', color: 'red' }),
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: (reportId: string) => client.post(`/inspections/${reportId}/reject`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      notifications.show({ message: 'הדוח סומן כ"לא שויך"', color: 'orange' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בדחייה', color: 'red' }),
+  })
+
   return (
     <Stack gap="lg">
       <Title order={2}>🔍 דוחות ביקורת תקינות</Title>
+
+      {pendingCount > 0 && (
+        <Alert color="orange" title={`${pendingCount} דוחות ממתינים לאישור שיוך`}>
+          דוחות אלו הועלו אך המערכת לא הצליחה לזהות את המעלית בוודאות. יש לאשר או לדחות את ההצעה.
+        </Alert>
+      )}
 
       <Paper withBorder p="lg" radius="md">
         <Stack gap="sm">
@@ -110,11 +154,15 @@ export default function InspectionsPage() {
         <Stack gap="sm">
           <Text size="sm" c="dimmed">{reports.length} דוחות</Text>
           {reports.map(r => (
-            <Card key={r.id} withBorder radius="md" p="md">
+            <Card key={r.id} withBorder radius="md" p="md"
+              style={r.match_status === 'PENDING_REVIEW' ? { borderColor: 'var(--mantine-color-orange-4)', borderWidth: 2 } : undefined}
+            >
               <Group justify="space-between" mb={4}>
                 <Group gap="sm">
-                  <Badge color={RESULT_COLOR[r.result]} size="md">
-                    {RESULT_LABEL[r.result]}
+                  <Badge color={RESULT_COLOR[r.result]} size="md">{RESULT_LABEL[r.result]}</Badge>
+                  <Badge color={MATCH_COLOR[r.match_status]} variant="light" size="sm">
+                    {MATCH_LABEL[r.match_status]}
+                    {r.match_score != null && r.match_status === 'PENDING_REVIEW' ? ` (${Math.round(r.match_score * 100)}%)` : ''}
                   </Badge>
                   {r.deficiency_count > 0 && (
                     <Badge color="red" variant="light" size="sm">{r.deficiency_count} ליקויים</Badge>
@@ -125,7 +173,28 @@ export default function InspectionsPage() {
                 </Text>
               </Group>
 
-              <Text fw={600}>📍 {r.elevator_address}</Text>
+              {r.match_status === 'PENDING_REVIEW' ? (
+                <Stack gap={6} my={6} p="sm" style={{ background: 'var(--mantine-color-orange-0)', borderRadius: 8 }}>
+                  <Text size="sm" fw={600}>כתובת בדוח: {r.raw_address || '—'}</Text>
+                  {r.suggested_elevator_address && (
+                    <Text size="sm">מעלית מוצעת: <strong>{r.suggested_elevator_address}</strong></Text>
+                  )}
+                  <Group gap="sm" mt={4}>
+                    <Button size="xs" color="green" onClick={() => setConfirmReport(r)}>
+                      ✅ אשר שיוך
+                    </Button>
+                    <Button size="xs" color="red" variant="light"
+                      loading={rejectMutation.isPending}
+                      onClick={() => rejectMutation.mutate(r.id)}
+                    >
+                      ❌ דחה
+                    </Button>
+                  </Group>
+                </Stack>
+              ) : (
+                <Text fw={600}>📍 {r.elevator_address}</Text>
+              )}
+
               <Group gap="md" mt={4}>
                 {r.inspection_date && (
                   <Text size="sm" c="dimmed">📅 {new Date(r.inspection_date).toLocaleDateString('he-IL')}</Text>
@@ -166,6 +235,45 @@ export default function InspectionsPage() {
           ))}
         </Stack>
       )}
+
+      {/* Confirm match modal */}
+      <Modal
+        opened={!!confirmReport}
+        onClose={() => { setConfirmReport(null); setOverrideElevId('') }}
+        title="אישור שיוך דוח ביקורת"
+        dir="rtl"
+      >
+        {confirmReport && (
+          <Stack gap="md">
+            <Text size="sm">כתובת בדוח: <strong>{confirmReport.raw_address}</strong></Text>
+            {confirmReport.suggested_elevator_address && (
+              <Text size="sm">מעלית מוצעת: <strong>{confirmReport.suggested_elevator_address}</strong></Text>
+            )}
+            <Button
+              color="green"
+              loading={confirmMutation.isPending}
+              onClick={() => confirmMutation.mutate({ reportId: confirmReport.id })}
+            >
+              ✅ אשר מעלית מוצעת
+            </Button>
+            <Text size="xs" c="dimmed" ta="center">— או שייך למעלית אחרת —</Text>
+            <TextInput
+              placeholder="UUID של מעלית אחרת"
+              value={overrideElevId}
+              onChange={e => setOverrideElevId(e.target.value)}
+              label="ID מעלית"
+            />
+            <Button
+              variant="light"
+              disabled={!overrideElevId.trim()}
+              loading={confirmMutation.isPending}
+              onClick={() => confirmMutation.mutate({ reportId: confirmReport.id, elevatorId: overrideElevId.trim() })}
+            >
+              שייך למעלית אחרת
+            </Button>
+          </Stack>
+        )}
+      </Modal>
     </Stack>
   )
 }
