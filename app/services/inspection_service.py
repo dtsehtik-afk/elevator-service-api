@@ -176,8 +176,19 @@ def process_inspection_report(
         match_score = match.score if match.elevator else 0.0
 
         if match.elevator and match_score >= _AUTO_THRESHOLD:
-            elevator = match.elevator
-            match_status = "AUTO_MATCHED"
+            # Hard rule: if we have a house number it MUST appear in the elevator's
+            # address. A score-based match alone is never enough when the number differs.
+            house_number_confirmed = (
+                not house_number  # no number to check
+                or house_number in (match.elevator.address or "")
+            )
+            if house_number_confirmed:
+                elevator = match.elevator
+                match_status = "AUTO_MATCHED"
+            else:
+                # Score looks good but house number doesn't match → ask dispatcher
+                suggested_elevator = match.elevator
+                match_status = "PENDING_REVIEW"
         elif match.elevator and match_score >= _PARTIAL_THRESHOLD:
             suggested_elevator = match.elevator
             match_status = "PENDING_REVIEW"
@@ -212,12 +223,18 @@ def process_inspection_report(
     # ── PENDING_REVIEW: notify dispatcher to confirm ──────────────────────────
     if match_status == "PENDING_REVIEW":
         suggested_addr = f"{suggested_elevator.address}, {suggested_elevator.city}" if suggested_elevator else "—"
+        # Explain why confirmation is needed
+        if suggested_elevator and house_number and house_number not in (suggested_elevator.address or ""):
+            reason = f"מספר בית בדוח: *{house_number}* — לא תואם לכתובת המוצעת"
+        else:
+            reason = f"ציון התאמה: {match_score:.0%} — מתחת לסף הוודאות"
         msg = (
             f"🔍 *דוח ביקורת ממתין לאישור*\n"
             f"כתובת בדוח: *{address or 'לא ידוע'}*\n"
-            f"מעלית מוצעת: {suggested_addr} (ציון: {match_score:.0%})\n"
+            f"מעלית מוצעת: {suggested_addr}\n"
+            f"סיבה: {reason}\n"
             f"בודק: {inspector_name or 'לא ידוע'}\n"
-            f"אנא אשר/דחה את השיוך בדשבורד תחת 'דוחות ביקורת'."
+            f"אנא אשר/דחה בדשבורד תחת 'דוחות ביקורת'."
         )
         logger.warning("Inspection PENDING_REVIEW: %s → suggested %s (%.0f%%)", address, suggested_addr, (match_score or 0) * 100)
         db.commit()
