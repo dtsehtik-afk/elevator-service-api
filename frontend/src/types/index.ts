@@ -13,6 +13,7 @@ export interface Elevator {
   next_service_date: string | null
   status: 'ACTIVE' | 'INACTIVE' | 'UNDER_REPAIR'
   risk_score: number
+  service_contract: 'ANNUAL_6' | 'ANNUAL_12' | null
   created_at: string
   updated_at: string
 }

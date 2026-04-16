@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Grid, TextInput,
-  NumberInput, Select, Tabs, Table, Loader, Center, ActionIcon, Tooltip,
+  NumberInput, Select, Tabs, Table, Loader, Center, ActionIcon, Alert,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -64,6 +64,12 @@ export default function ElevatorDetailPage() {
         )}
       </Group>
 
+      {!elevator.service_contract && (
+        <Alert color="orange" title="יש להגדיר מספר טיפולים בשנה" icon="⚠️">
+          לא הוגדר חוזה שירות למעלית זו. יש לבחור 6 או 12 טיפולים בשנה בלשונית הפרטים.
+        </Alert>
+      )}
+
       <Tabs defaultValue="details">
         <Tabs.List>
           <Tabs.Tab value="details">פרטים</Tabs.Tab>
@@ -123,6 +129,32 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 <Stack gap={2}><Text size="xs" c="dimmed">תאריך התקנה</Text><Text fw={500}>{formatDate(elevator.installation_date)}</Text></Stack>
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <Select
+                    label="מספר טיפולים בשנה"
+                    placeholder="בחר..."
+                    clearable
+                    data={[
+                      { value: 'ANNUAL_6', label: '6 טיפולים בשנה (כל ~61 יום)' },
+                      { value: 'ANNUAL_12', label: '12 טיפולים בשנה (כל ~30 יום)' },
+                    ]}
+                    value={form.service_contract ?? null}
+                    onChange={v => setForm((s: any) => ({ ...s, service_contract: v ?? null }))}
+                  />
+                ) : (
+                  <Stack gap={2}>
+                    <Text size="xs" c="dimmed">מספר טיפולים בשנה</Text>
+                    {elevator.service_contract ? (
+                      <Badge color="blue" variant="light">
+                        {elevator.service_contract === 'ANNUAL_6' ? '6 טיפולים / שנה' : '12 טיפולים / שנה'}
+                      </Badge>
+                    ) : (
+                      <Badge color="orange" variant="light">לא הוגדר</Badge>
+                    )}
+                  </Stack>
+                )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 <Stack gap={2}>

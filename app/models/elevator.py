@@ -3,6 +3,7 @@
 import json as _json
 import uuid
 from datetime import date, datetime
+from typing import Optional
 
 from sqlalchemy import Date, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -67,6 +68,9 @@ class Elevator(Base):
     longitude: Mapped[float] = mapped_column(Float, nullable=True)
     # Known caller phone numbers for this elevator (auto-populated from incoming calls)
     caller_phones: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
+    # Service contract: how many maintenance treatments per year (6 or 12)
+    # Values: "ANNUAL_6" | "ANNUAL_12" | None (unset — triggers warning in UI)
+    service_contract: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
