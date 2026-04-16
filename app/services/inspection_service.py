@@ -145,15 +145,10 @@ def process_inspection_report(
     match_status = "UNMATCHED"
 
     # Tier 0: Labor Ministry file number — definitive, unique per elevator
+    # Only labor_file_number is trusted for auto-match.
+    # Serial numbers vary between companies and are unreliable.
     if labor_file_number:
         elevator = db.query(Elevator).filter(Elevator.labor_file_number == labor_file_number).first()
-        if elevator:
-            match_status = "AUTO_MATCHED"
-            match_score = 1.0
-
-    # Tier 1: serial number
-    if not elevator and serial_number:
-        elevator = db.query(Elevator).filter(Elevator.serial_number == str(serial_number)).first()
         if elevator:
             match_status = "AUTO_MATCHED"
             match_score = 1.0
