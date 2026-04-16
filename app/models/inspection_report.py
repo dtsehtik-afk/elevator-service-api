@@ -20,6 +20,7 @@ class InspectionReport(Base):
     raw_address: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     raw_street: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     raw_city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    labor_file_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     inspection_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     result: Mapped[str] = mapped_column(String(10), nullable=False, default="UNKNOWN")  # PASS | FAIL | UNKNOWN
     inspector_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)

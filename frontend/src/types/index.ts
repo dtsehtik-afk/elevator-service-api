@@ -14,6 +14,7 @@ export interface Elevator {
   status: 'ACTIVE' | 'INACTIVE' | 'UNDER_REPAIR'
   risk_score: number
   service_contract: 'ANNUAL_6' | 'ANNUAL_12' | null
+  labor_file_number: string | null
   created_at: string
   updated_at: string
 }
