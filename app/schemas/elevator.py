@@ -21,6 +21,7 @@ class ElevatorBase(BaseModel):
     last_service_date: Optional[date] = None
     next_service_date: Optional[date] = None
     status: str = Field("ACTIVE", pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
+    service_contract: Optional[str] = Field(None, pattern="^(ANNUAL_6|ANNUAL_12)$")
 
 
 class ElevatorCreate(ElevatorBase):
@@ -42,6 +43,7 @@ class ElevatorUpdate(BaseModel):
     last_service_date: Optional[date] = None
     next_service_date: Optional[date] = None
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
+    service_contract: Optional[str] = Field(None, pattern="^(ANNUAL_6|ANNUAL_12)$")
 
 
 class ElevatorResponse(BaseModel):
@@ -60,6 +62,7 @@ class ElevatorResponse(BaseModel):
     next_service_date: Optional[date] = None
     status: str
     risk_score: float
+    service_contract: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

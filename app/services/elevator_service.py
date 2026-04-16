@@ -106,6 +106,20 @@ def list_elevators(
     return query.offset(skip).limit(min(limit, 2000)).all()
 
 
+def _recalculate_next_service(elevator: Elevator) -> None:
+    """Auto-fill next_service_date from last_service_date + service_contract interval.
+
+    ANNUAL_6  → 6 treatments/year  → every ~61 days
+    ANNUAL_12 → 12 treatments/year → every ~30 days
+    Only fills next_service_date when both fields are set and next_service_date
+    was not explicitly provided in the same update.
+    """
+    from datetime import timedelta
+    if elevator.last_service_date and elevator.service_contract:
+        interval = timedelta(days=61 if elevator.service_contract == "ANNUAL_6" else 30)
+        elevator.next_service_date = elevator.last_service_date + interval
+
+
 def update_elevator(
     db: Session, elevator_id: uuid.UUID, data: ElevatorUpdate
 ) -> Optional[Elevator]:
@@ -117,8 +131,12 @@ def update_elevator(
     elevator = get_elevator(db, elevator_id)
     if not elevator:
         return None
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(elevator, field, value)
+    # Auto-recalculate next_service_date unless it was explicitly set in this call
+    if "next_service_date" not in updates:
+        _recalculate_next_service(elevator)
     db.commit()
     db.refresh(elevator)
     return elevator
