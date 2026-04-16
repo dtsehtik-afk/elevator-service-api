@@ -147,6 +147,7 @@ def _score_elevator(elevator: Elevator, parsed: ParsedCall) -> float:
       street similarity  — 60 %
       city similarity    — 30 %
       house-number bonus — 10 %
+      house-number mismatch penalty — −20 %
     """
     street_score = _similarity(parsed.street, elevator.address or "")
 
@@ -157,10 +158,13 @@ def _score_elevator(elevator: Elevator, parsed: ParsedCall) -> float:
         city_score = 0.5  # neutral if caller didn't provide a city
 
     house_bonus = 0.0
-    if parsed.house_number and parsed.house_number in (elevator.address or ""):
-        house_bonus = 0.1
+    if parsed.house_number:
+        if parsed.house_number in (elevator.address or ""):
+            house_bonus = 0.1          # house number confirmed ✓
+        else:
+            house_bonus = -0.2         # house number given but doesn't match ✗
 
-    return street_score * 0.6 + city_score * 0.3 + house_bonus
+    return max(0.0, street_score * 0.6 + city_score * 0.3 + house_bonus)
 
 
 _MATCH_THRESHOLD   = 0.55   # above this → MATCHED
@@ -237,6 +241,25 @@ def find_elevator(db: Session, parsed: ParsedCall) -> MatchResult:
     phone_note = " + טלפון מזוהה" if best_elevator.id in phone_matched_ids else ""
 
     if best_score >= _MATCH_THRESHOLD:
+        # Safety check: if house_number was NOT provided and there are multiple
+        # elevators on the same street in the same city → cannot be certain → PARTIAL
+        if not parsed.house_number:
+            street_lower = (parsed.street or "").lower()
+            same_street = [
+                e for e in candidates
+                if street_lower and street_lower in (e.address or "").lower()
+                and _similarity(parsed.city, e.city or "") > 0.8
+            ]
+            if len(same_street) > 1:
+                return MatchResult(
+                    elevator=best_elevator,
+                    score=round(best_score, 3),
+                    match_status="PARTIAL",
+                    match_notes=(
+                        f"רחוב תואם ({best_score:.0%}) אך מספר בית לא סופק — "
+                        f"נמצאו {len(same_street)} מעליות ברחוב זה{phone_note}"
+                    ),
+                )
         return MatchResult(
             elevator=best_elevator,
             score=round(best_score, 3),
