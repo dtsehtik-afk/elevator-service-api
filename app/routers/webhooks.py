@@ -177,7 +177,7 @@ async def receive_call(
     if match.match_status == "MATCHED" and match.elevator and parsed.phone:
         _save_caller_phone(match.elevator, parsed.phone, db)
 
-    # 4. Create service call
+    # 4. Create service call (only on confident match) — otherwise alert dispatcher
     service_call = None
     if match.match_status == "MATCHED" and match.elevator:
         call_data = ServiceCallCreate(
@@ -190,6 +190,24 @@ async def receive_call(
         service_call = service_call_service.create_service_call(
             db, call_data, "webhook@system"
         )
+    elif match.match_status in ("PARTIAL", "UNMATCHED"):
+        # Elevator not found with enough confidence — notify dispatcher to handle manually
+        closest_address = match.elevator.address if match.elevator else None
+        closest_city = match.elevator.city if match.elevator else None
+        try:
+            whatsapp_service.notify_dispatcher_elevator_not_found(
+                street=parsed.street,
+                house_number=parsed.house_number,
+                city=parsed.city,
+                fault_type=parsed.fault_type,
+                caller_name=parsed.name,
+                caller_phone=parsed.phone,
+                score=match.score,
+                closest_address=closest_address,
+                closest_city=closest_city,
+            )
+        except Exception as exc:
+            logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
 
     # 5. AI assignment — recommend technician + send WhatsApp
     assignment = None

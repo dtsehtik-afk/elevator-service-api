@@ -301,3 +301,37 @@ def notify_dispatcher_unassigned(phone: str, address: str, city: str, fault_type
         f"לא שובצה אוטומטית — נא לשבץ ידנית."
     )
     return _send_message(phone, message)
+
+
+def notify_dispatcher_elevator_not_found(
+    street: str,
+    house_number: str,
+    city: str,
+    fault_type: str,
+    caller_name: str,
+    caller_phone: str,
+    score: float,
+    closest_address: str | None = None,
+    closest_city: str | None = None,
+) -> bool:
+    """Notify the dispatcher that an incoming call could not be matched to any elevator."""
+    fault = _FAULT_LABEL.get(fault_type, fault_type)
+    address_str = f"{street} {house_number}".strip()
+
+    lines = [
+        "🔍 *קריאה נכנסה — לא נמצאה מעלית תואמת*",
+        f"📍 כתובת שדווחה: {address_str}, {city}",
+        f"🔧 תקלה: {fault}",
+    ]
+    if caller_name or caller_phone:
+        caller = " | ".join(filter(None, [caller_name, caller_phone]))
+        lines.append(f"📞 מתקשר: {caller}")
+    if closest_address:
+        lines.append(f"\n🏢 הכי קרוב שנמצא: {closest_address}, {closest_city or ''} ({score:.0%})")
+        lines.append("❓ האם זו אותה כתובת? אם לא — האם להוסיף מעלית חדשה?")
+    else:
+        lines.append("❓ לא נמצאה מעלית — האם להוסיף מעלית חדשה?")
+
+    lines.append("\n⚠️ *הקריאה לא נפתחה במערכת — נא לטפל ידנית*")
+
+    return notify_dispatcher("\n".join(lines))
