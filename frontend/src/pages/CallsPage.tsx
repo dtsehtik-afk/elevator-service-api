@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall, resetAndReassignCall } from '../api/calls'
 import { listElevators } from '../api/elevators'
+import client from '../api/client'
 import { listTechnicians } from '../api/technicians'
 import { useAuthStore } from '../stores/authStore'
 import {
@@ -51,6 +52,8 @@ export default function CallsPage() {
   const [assignOpened, { open: openAssign, close: closeAssign }] = useDisclosure()
   const [assignTechId, setAssignTechId] = useState<string | null>(null)
   const [assignNotes, setAssignNotes] = useState('')
+  const [changeElevOpened, { open: openChangeElev, close: closeChangeElev }] = useDisclosure()
+  const [changeElevId, setChangeElevId] = useState<string | null>(null)
 
   const [newForm, setNewForm] = useState({
     elevator_id: '',
@@ -171,6 +174,20 @@ export default function CallsPage() {
       setMonitorNotes('')
     },
     onError: () => notifications.show({ message: 'שגיאה בהעברה למעקב', color: 'red' }),
+  })
+
+  const changeElevMutation = useMutation({
+    mutationFn: ({ callId, elevId }: { callId: string; elevId: string }) =>
+      client.patch(`/service-calls/${callId}/elevator`, null, { params: { elevator_id: elevId } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['call-detail'] })
+      notifications.show({ message: '🏢 הכתובת עודכנה בהצלחה', color: 'teal' })
+      closeChangeElev()
+      closeDetail()
+      setChangeElevId(null)
+    },
+    onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה בעדכון כתובת', color: 'red' }),
   })
 
   function openDetailModal(call: ServiceCall) {
@@ -417,6 +434,15 @@ export default function CallsPage() {
               {detail && ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(detail.status) && (
                 <Button
                   variant="light"
+                  color="grape"
+                  onClick={() => { setSelectedCall(detail); setChangeElevId(null); openChangeElev() }}
+                >
+                  🏢 שנה מעלית
+                </Button>
+              )}
+              {detail && ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(detail.status) && (
+                <Button
+                  variant="light"
                   color="teal"
                   onClick={() => { setSelectedCall(detail); openMonitor() }}
                 >
@@ -617,6 +643,40 @@ export default function CallsPage() {
               })}
             >
               שמור
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* ── Change elevator modal ── */}
+      <Modal opened={changeElevOpened} onClose={closeChangeElev} title="🏢 שנה מעלית לקריאה" size="md" dir="rtl">
+        <Stack gap="sm">
+          {selectedCall && (
+            <Text size="sm" c="dimmed">
+              קריאה #{selectedCall.id.slice(0, 8)} — בחר מעלית חדשה מהרשימה
+            </Text>
+          )}
+          <Select
+            label="מעלית"
+            placeholder="חפש לפי כתובת..."
+            data={elevatorOptions}
+            value={changeElevId}
+            onChange={setChangeElevId}
+            searchable
+            clearable
+          />
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={closeChangeElev}>ביטול</Button>
+            <Button
+              color="grape"
+              disabled={!changeElevId}
+              loading={changeElevMutation.isPending}
+              onClick={() => {
+                if (selectedCall && changeElevId)
+                  changeElevMutation.mutate({ callId: selectedCall.id, elevId: changeElevId })
+              }}
+            >
+              עדכן מעלית
             </Button>
           </Group>
         </Stack>
