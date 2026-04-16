@@ -141,10 +141,7 @@ def travel_time_minutes(
     dest_lat: float,   dest_lng: float,
 ) -> int:
     """
-    Best-effort travel time in minutes.
-    Tries Google Maps first; falls back to Haversine estimate.
+    Travel time estimate in minutes using Haversine (straight-line × 1.3 road factor).
+    Avoids the costly Google Distance Matrix API — accurate enough for technician ranking.
     """
-    gm = get_travel_minutes(origin_lat, origin_lng, dest_lat, dest_lng)
-    if gm is not None:
-        return gm
     return haversine_minutes(origin_lat, origin_lng, dest_lat, dest_lng)
