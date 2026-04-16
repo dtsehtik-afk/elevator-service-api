@@ -1000,8 +1000,12 @@ def reject_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db))
     return {"status": "rejected"}
 
 
+class ResolveCallRequest(BaseModel):
+    resolution_notes: str = ""
+
+
 @router.post("/resolve-call/{tech_id}/{call_id}", summary="Technician closes/resolves a call")
-def resolve_call(tech_id: str, call_id: str, db: Session = Depends(get_db)):
+def resolve_call(tech_id: str, call_id: str, data: ResolveCallRequest = ResolveCallRequest(), db: Session = Depends(get_db)):
     from app.models.assignment import Assignment, AuditLog
     from app.models.service_call import ServiceCall
     from app.models.technician import Technician as TechnicianModel
@@ -1020,13 +1024,16 @@ def resolve_call(tech_id: str, call_id: str, db: Session = Depends(get_db)):
 
     call.status = "RESOLVED"
     call.resolved_at = datetime.now(timezone.utc)
+    if data.resolution_notes:
+        call.resolution_notes = data.resolution_notes
 
+    notes_text = data.resolution_notes or "לא צוין"
     db.add(AuditLog(
         service_call_id=call.id,
         changed_by=tech.name,
         old_status="ASSIGNED",
         new_status="RESOLVED",
-        notes=f"סגור על ידי {tech.name} מהאפליקציה",
+        notes=f"סגור על ידי {tech.name}: {notes_text}",
     ))
     db.commit()
 
