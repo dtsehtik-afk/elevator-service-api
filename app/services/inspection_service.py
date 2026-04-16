@@ -137,8 +137,7 @@ def process_inspection_report(
     # Tier 3: 0.30 <= score < 0.65 → uncertain, ask dispatcher (PENDING_REVIEW)
     # Tier 4: score < 0.30 or no street → cannot match (UNMATCHED)
 
-    _AUTO_THRESHOLD    = 0.65
-    _PARTIAL_THRESHOLD = 0.30
+    _PARTIAL_THRESHOLD = 0.30  # minimum score to suggest a candidate for review
 
     elevator = None
     suggested_elevator = None
@@ -175,21 +174,9 @@ def process_inspection_report(
         match = find_elevator(db, parsed_call)
         match_score = match.score if match.elevator else 0.0
 
-        if match.elevator and match_score >= _AUTO_THRESHOLD:
-            # Hard rule: if we have a house number it MUST appear in the elevator's
-            # address. A score-based match alone is never enough when the number differs.
-            house_number_confirmed = (
-                not house_number  # no number to check
-                or house_number in (match.elevator.address or "")
-            )
-            if house_number_confirmed:
-                elevator = match.elevator
-                match_status = "AUTO_MATCHED"
-            else:
-                # Score looks good but house number doesn't match → ask dispatcher
-                suggested_elevator = match.elevator
-                match_status = "PENDING_REVIEW"
-        elif match.elevator and match_score >= _PARTIAL_THRESHOLD:
+        # Address fuzzy matching always requires human confirmation.
+        # Only labor_file_number and serial_number are trusted for auto-match.
+        if match.elevator and match_score >= _PARTIAL_THRESHOLD:
             suggested_elevator = match.elevator
             match_status = "PENDING_REVIEW"
         else:
