@@ -11,6 +11,7 @@ import MaintenancePage from './pages/MaintenancePage'
 import ConversationsPage from './pages/ConversationsPage'
 import TechAppPage from './pages/TechAppPage'
 import InspectionsPage from './pages/InspectionsPage'
+import PendingCallsPage from './pages/PendingCallsPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -40,6 +41,7 @@ export default function App() {
                   <Route path="/maintenance" element={<MaintenancePage />} />
                   <Route path="/conversations" element={<ConversationsPage />} />
                   <Route path="/inspections" element={<InspectionsPage />} />
+                  <Route path="/pending-calls" element={<PendingCallsPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Shell>

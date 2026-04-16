@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { label: 'דשבורד', path: '/', icon: '📊' },
   { label: 'מעליות', path: '/elevators', icon: '🏢' },
   { label: 'קריאות שירות', path: '/calls', icon: '🔧' },
+  { label: 'קריאות ממתינות', path: '/pending-calls', icon: '⚠️' },
   { label: 'טכנאים', path: '/technicians', icon: '👷' },
   { label: 'תחזוקה', path: '/maintenance', icon: '📅' },
   { label: 'ביקורות תקינות', path: '/inspections', icon: '🔍' },
