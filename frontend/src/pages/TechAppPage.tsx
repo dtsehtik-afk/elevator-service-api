@@ -2,8 +2,8 @@
  * TechAppPage — Mobile technician app
  * Accessible at /tech — no admin shell, optimized for phone
  */
-import { useEffect, useRef, useState } from 'react'
-import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center } from '@mantine/core'
+import { useState, useEffect, useRef } from 'react'
+import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../stores/authStore'
@@ -81,6 +81,19 @@ async function fetchOpenBoard(): Promise<OpenCall[]> {
 
 async function claimCall(techId: string, callId: string) {
   await client.post(`/webhooks/claim-call-by-tech/${techId}/${callId}`)
+}
+
+async function resolveCall(techId: string, callId: string) {
+  await client.post(`/webhooks/resolve-call/${techId}/${callId}`)
+}
+
+async function searchElevators(techId: string, q: string) {
+  const { data } = await client.get(`/app/tech/${techId}/elevators`, { params: { q } })
+  return data as { id: string; address: string; city: string; building_name: string }[]
+}
+
+async function reassignElevator(techId: string, elevatorId: string) {
+  await client.post(`/webhooks/reassign-elevator-json/${techId}`, null, { params: { elevator_id: elevatorId } })
 }
 
 async function sendLocation(techId: string, lat: number, lng: number) {
@@ -204,6 +217,40 @@ function TechMain() {
     refetchInterval: 30000,
   })
 
+  const [reassignOpen, setReassignOpen] = useState(false)
+  const [reassignCallId, setReassignCallId] = useState<string | null>(null)
+  const [elevSearch, setElevSearch] = useState('')
+  const [elevResults, setElevResults] = useState<{ id: string; address: string; city: string; building_name: string }[]>([])
+
+  const resolveMutation = useMutation({
+    mutationFn: ({ callId }: { callId: string }) => resolveCall(techId!, callId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending'] })
+      qc.invalidateQueries({ queryKey: ['open-board'] })
+      notifications.show({ message: '✅ הקריאה סגורה בהצלחה', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בסגירת הקריאה', color: 'red' }),
+  })
+
+  const reassignMutation = useMutation({
+    mutationFn: ({ elevId }: { elevId: string }) => reassignElevator(techId!, elevId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending'] })
+      setReassignOpen(false)
+      setElevSearch('')
+      setElevResults([])
+      notifications.show({ message: '🏢 הכתובת עודכנה', color: 'teal' })
+    },
+    onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה בעדכון כתובת', color: 'red' }),
+  })
+
+  const handleElevSearch = async (q: string) => {
+    setElevSearch(q)
+    if (q.length < 2) { setElevResults([]); return }
+    const results = await searchElevators(techId!, q)
+    setElevResults(results)
+  }
+
   const claimMutation = useMutation({
     mutationFn: ({ callId }: { callId: string }) => claimCall(techId!, callId),
     onSuccess: () => {
@@ -275,24 +322,55 @@ function TechMain() {
 
                 {call.lat && call.lng ? (
                   <Stack gap="xs" mt="sm">
-                    <Button
-                      size="md" color="blue" fullWidth
-                      component="a"
-                      href={`https://www.google.com/maps/dir/?api=1&destination=${call.lat},${call.lng}`}
-                      target="_blank"
-                    >🗺 נווט — גוגל מפות</Button>
-                    <Button
-                      size="md" color="teal" fullWidth variant="light"
-                      component="a"
-                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}&navigate=yes`}
-                      target="_blank"
-                    >🚘 נווט — Waze</Button>
+                    <Button size="md" color="blue" fullWidth component="a"
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${call.lat},${call.lng}`} target="_blank">
+                      🗺 נווט — גוגל מפות</Button>
+                    <Button size="md" color="teal" fullWidth variant="light" component="a"
+                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}&navigate=yes`} target="_blank">
+                      🚘 נווט — Waze</Button>
                   </Stack>
                 ) : (
                   <Text size="sm" c="orange" mt="sm">⚠️ אין קואורדינטות — חפש כתובת ידנית</Text>
                 )}
+                <Divider my="sm" />
+                <Group gap="xs">
+                  <Button flex={1} size="sm" color="orange" variant="light"
+                    onClick={() => { setReassignCallId(call.assignment_id); setReassignOpen(true) }}>
+                    🏢 שנה כתובת</Button>
+                  <Button flex={1} size="sm" color="red" variant="light"
+                    loading={resolveMutation.isPending}
+                    onClick={() => {
+                      if (confirm('לסגור את הקריאה?')) resolveMutation.mutate({ callId: call.assignment_id })
+                    }}>
+                    ✅ סגור קריאה</Button>
+                </Group>
               </Card>
             ))}
+
+            {/* ── Elevator reassign modal ── */}
+            <Modal opened={reassignOpen} onClose={() => setReassignOpen(false)} title="🏢 שיוך מעלית אחרת" size="md" dir="rtl">
+              <Stack gap="sm">
+                <TextInput
+                  placeholder="חפש לפי כתובת / עיר / שם בניין"
+                  value={elevSearch}
+                  onChange={e => handleElevSearch(e.target.value)}
+                  autoFocus
+                />
+                {elevResults.map(e => (
+                  <Card key={e.id} withBorder p="sm" style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (confirm(`לשייך ל: ${e.address}, ${e.city}?`))
+                        reassignMutation.mutate({ elevId: e.id })
+                    }}>
+                    <Text fw={600}>{e.address}</Text>
+                    <Text size="sm" c="dimmed">{e.city} {e.building_name && `— ${e.building_name}`}</Text>
+                  </Card>
+                ))}
+                {elevSearch.length >= 2 && elevResults.length === 0 && (
+                  <Text c="dimmed" ta="center" size="sm">לא נמצאו תוצאות</Text>
+                )}
+              </Stack>
+            </Modal>
 
             {/* ── Pending confirmation calls ── */}
             {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION').length > 0 && (

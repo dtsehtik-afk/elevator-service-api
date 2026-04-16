@@ -999,6 +999,102 @@ def reject_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db))
     return {"status": "rejected"}
 
 
+@router.post("/resolve-call/{tech_id}/{call_id}", summary="Technician closes/resolves a call")
+def resolve_call(tech_id: str, call_id: str, db: Session = Depends(get_db)):
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.service_call import ServiceCall
+    from app.models.technician import Technician as TechnicianModel
+    from datetime import datetime, timezone
+
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
+
+    call = db.query(ServiceCall).filter(
+        ServiceCall.id == call_id,
+        ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]),
+    ).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="קריאה לא נמצאה")
+
+    call.status = "RESOLVED"
+    call.resolved_at = datetime.now(timezone.utc)
+
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=tech.name,
+        old_status="ASSIGNED",
+        new_status="RESOLVED",
+        notes=f"סגור על ידי {tech.name} מהאפליקציה",
+    ))
+    db.commit()
+
+    try:
+        from app.services.whatsapp_service import send_whatsapp_message
+        from app.config import get_settings
+        from app.models.elevator import Elevator
+        settings = get_settings()
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+        addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+        for num in (settings.dispatcher_whatsapp or "").split(","):
+            num = num.strip()
+            if num:
+                send_whatsapp_message(num, f"✅ {tech.name} סגר קריאה: {addr}")
+    except Exception as exc:
+        logger.warning("resolve_call notify failed: %s", exc)
+
+    return {"ok": True}
+
+
+@router.post("/reassign-elevator-json/{tech_id}", summary="Reassign active call to different elevator (JSON)")
+def reassign_elevator_json(tech_id: str, db: Session = Depends(get_db), elevator_id: str = ""):
+    from app.routers.technician_app import ReassignElevator, _get_tech_and_call
+    from app.models.assignment import AuditLog
+    from app.models.elevator import Elevator
+    from datetime import datetime, timezone
+    import uuid
+
+    tech, assignment, call = _get_tech_and_call(db, tech_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="אין קריאה פעילה")
+
+    try:
+        new_elevator_id = uuid.UUID(elevator_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="מזהה מעלית לא תקין")
+
+    new_elev = db.query(Elevator).filter(Elevator.id == new_elevator_id).first()
+    if not new_elev:
+        raise HTTPException(status_code=404, detail="מעלית לא נמצאה")
+
+    old_elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+    old_addr = f"{old_elev.address}, {old_elev.city}" if old_elev else "לא ידוע"
+    new_addr = f"{new_elev.address}, {new_elev.city}"
+
+    call.elevator_id = new_elevator_id
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=tech.name,
+        old_status=call.status,
+        new_status=call.status,
+        notes=f"שיוך מחדש: {old_addr} → {new_addr}",
+    ))
+    db.commit()
+
+    try:
+        from app.services.whatsapp_service import send_whatsapp_message
+        from app.config import get_settings
+        settings = get_settings()
+        for num in (settings.dispatcher_whatsapp or "").split(","):
+            num = num.strip()
+            if num:
+                send_whatsapp_message(num, f"🏢 {tech.name} שייך מחדש: {old_addr} → {new_addr}")
+    except Exception as exc:
+        logger.warning("reassign_elevator_json notify failed: %s", exc)
+
+    return {"ok": True, "new_address": new_addr}
+
+
 # ── Open-calls board (all technicians see all open calls) ─────────────────────
 
 @router.get("/open-calls-board", summary="All open/unconfirmed calls for technician board")
