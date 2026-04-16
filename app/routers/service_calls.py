@@ -177,6 +177,68 @@ def update_call(
     return updated
 
 
+@router.patch(
+    "/{call_id}/elevator",
+    summary="Reassign service call to a different elevator",
+)
+def reassign_call_elevator(
+    call_id: uuid.UUID,
+    elevator_id: uuid.UUID = Query(..., description="New elevator UUID"),
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Change the elevator linked to an open service call (admin/dispatcher only)."""
+    if current_user.role == "TECHNICIAN":
+        raise HTTPException(status_code=403, detail="Technicians cannot reassign call elevators")
+
+    call = service_call_service.get_service_call(db, call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Service call not found")
+    if call.status == "RESOLVED":
+        raise HTTPException(status_code=400, detail="Cannot reassign a resolved call")
+
+    from app.models.elevator import Elevator
+    new_elev = db.query(Elevator).filter(Elevator.id == elevator_id).first()
+    if not new_elev:
+        raise HTTPException(status_code=404, detail="Elevator not found")
+
+    old_elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    old_addr = f"{old_elev.address}, {old_elev.city}" if old_elev else "לא ידוע"
+    new_addr = f"{new_elev.address}, {new_elev.city}"
+
+    call.elevator_id = elevator_id
+
+    from app.models.assignment import AuditLog
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=current_user.email,
+        old_status=call.status,
+        new_status=call.status,
+        notes=f"מעלית שויכה מחדש: {old_addr} → {new_addr}",
+    ))
+    db.commit()
+    db.refresh(call)
+
+    # Notify assigned technician of address change
+    from app.models.assignment import Assignment
+    from app.models.technician import Technician as TechModel
+    active = db.query(Assignment).filter(
+        Assignment.service_call_id == call.id,
+        Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]),
+    ).first()
+    if active:
+        tech = db.query(TechModel).filter(TechModel.id == active.technician_id).first()
+        if tech:
+            from app.services.whatsapp_service import _send_message
+            _send_message(
+                tech.whatsapp_number or tech.phone,
+                f"⚠️ *עדכון כתובת לקריאה שלך*\n"
+                f"מ: {old_addr}\nל: *{new_addr}*",
+            )
+
+    return {"ok": True, "new_address": new_addr}
+
+
 @router.post(
     "/{call_id}/monitor",
     response_model=ServiceCallResponse,
