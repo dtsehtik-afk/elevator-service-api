@@ -238,8 +238,11 @@ def find_elevator(db: Session, parsed: ParsedCall) -> MatchResult:
 
     def score(e: Elevator) -> float:
         base = _score_elevator(e, parsed)
-        # Phone bonus only for personal/direct phones, not management companies
-        bonus = 0.25 if (e.id in phone_matched_ids and not is_management_phone) else 0.0
+        # Phone bonus applies in all cases:
+        # - Personal phone → confirms specific elevator
+        # - Management company phone → identifies the company; combined with
+        #   address match it still raises confidence for the right elevator
+        bonus = 0.25 if e.id in phone_matched_ids else 0.0
         return min(base + bonus, 1.0)
 
     scored = [(e, score(e)) for e in candidates]
