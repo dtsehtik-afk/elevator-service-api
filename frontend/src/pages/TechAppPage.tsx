@@ -6,6 +6,8 @@ import { useState, useEffect, useRef } from 'react'
 import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Geolocation } from '@capacitor/geolocation'
+import { Capacitor } from '@capacitor/core'
 import { useAuthStore } from '../stores/authStore'
 import { login as apiLogin } from '../api/auth'
 import client from '../api/client'
@@ -159,39 +161,57 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 // ── GPS Hook ───────────────────────────────────────────────────────────────
 function useGPS(techId: string | null) {
   const [status, setStatus] = useState<'idle' | 'active' | 'error'>('idle')
-  const watchRef = useRef<number | null>(null)
-
-  const start = () => {
-    if (!techId || !navigator.geolocation) {
-      setStatus('error')
-      return
-    }
-    watchRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        sendLocation(techId, pos.coords.latitude, pos.coords.longitude).catch(() => {})
-        setStatus('active')
-      },
-      () => setStatus('error'),
-      { enableHighAccuracy: true, maximumAge: 30000 }
-    )
-    setStatus('active')
-  }
+  const watchIdRef = useRef<string | null>(null)
+  const cancelledRef = useRef(false)
 
   const stop = () => {
-    if (watchRef.current !== null) {
-      navigator.geolocation.clearWatch(watchRef.current)
-      watchRef.current = null
+    cancelledRef.current = true
+    if (watchIdRef.current !== null) {
+      Geolocation.clearWatch({ id: watchIdRef.current }).catch(() => {})
+      watchIdRef.current = null
     }
     setStatus('idle')
   }
 
-  // Auto-start on mount
   useEffect(() => {
-    if (techId) start()
+    if (!techId) return
+    cancelledRef.current = false
+
+    ;(async () => {
+      try {
+        // On native Android/iOS — request runtime permission explicitly
+        if (Capacitor.isNativePlatform()) {
+          const perm = await Geolocation.requestPermissions()
+          if (cancelledRef.current) return
+          if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
+            setStatus('error')
+            return
+          }
+        }
+
+        const id = await Geolocation.watchPosition(
+          { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 },
+          (pos, err) => {
+            if (err || !pos) { setStatus('error'); return }
+            sendLocation(techId, pos.coords.latitude, pos.coords.longitude).catch(() => {})
+            setStatus('active')
+          }
+        )
+
+        if (cancelledRef.current) {
+          Geolocation.clearWatch({ id }).catch(() => {})
+          return
+        }
+        watchIdRef.current = id
+      } catch {
+        if (!cancelledRef.current) setStatus('error')
+      }
+    })()
+
     return () => stop()
   }, [techId])
 
-  return { status, start, stop }
+  return { status }
 }
 
 // ── Main App ───────────────────────────────────────────────────────────────
