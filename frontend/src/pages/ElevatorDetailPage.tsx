@@ -132,6 +132,16 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
+                  <TextInput label="מס׳ תיק משרד העבודה" value={form.labor_file_number ?? ''} onChange={e => setForm((s: any) => ({ ...s, labor_file_number: e.target.value || null }))} />
+                ) : (
+                  <Stack gap={2}>
+                    <Text size="xs" c="dimmed">מס׳ תיק משרד העבודה</Text>
+                    <Text fw={500}>{elevator.labor_file_number ?? '—'}</Text>
+                  </Stack>
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
                   <Select
                     label="מספר טיפולים בשנה"
                     placeholder="בחר..."

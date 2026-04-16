@@ -68,6 +68,8 @@ class Elevator(Base):
     longitude: Mapped[float] = mapped_column(Float, nullable=True)
     # Known caller phone numbers for this elevator (auto-populated from incoming calls)
     caller_phones: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
+    # Ministry of Labor file number — unique per elevator, extracted from inspection reports
+    labor_file_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, unique=True, index=True)
     # Service contract: how many maintenance treatments per year (6 or 12)
     # Values: "ANNUAL_6" | "ANNUAL_12" | None (unset — triggers warning in UI)
     service_contract: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
