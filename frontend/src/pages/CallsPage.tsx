@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  Stack, Title, Group, Select, Badge, Text, Button, Paper,
+  Stack, Title, Group, Select, Badge, Text, Button, Paper, TextInput,
   Modal, Textarea, Pagination, Table, ScrollArea, Loader, Center,
   Divider, Timeline, ThemeIcon, Box, Checkbox, Alert,
 } from '@mantine/core'
@@ -54,6 +54,8 @@ export default function CallsPage() {
   const [assignNotes, setAssignNotes] = useState('')
   const [changeElevOpened, { open: openChangeElev, close: closeChangeElev }] = useDisclosure()
   const [changeElevId, setChangeElevId] = useState<string | null>(null)
+  const [addElevOpened, { open: openAddElev, close: closeAddElev }] = useDisclosure()
+  const [addElevForm, setAddElevForm] = useState({ address: '', city: '' })
 
   const [newForm, setNewForm] = useState({
     elevator_id: '',
@@ -174,6 +176,25 @@ export default function CallsPage() {
       setMonitorNotes('')
     },
     onError: () => notifications.show({ message: 'שגיאה בהעברה למעקב', color: 'red' }),
+  })
+
+  const addElevMutation = useMutation({
+    mutationFn: async ({ callId, address, city }: { callId: string; address: string; city: string }) => {
+      // 1. Create elevator
+      const { data: elev } = await client.post('/elevators/', { address, city, floor_count: 5 })
+      // 2. Reassign call to new elevator
+      await client.patch(`/service-calls/${callId}/elevator`, null, { params: { elevator_id: elev.id } })
+      return elev
+    },
+    onSuccess: (elev) => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['elevators'] })
+      notifications.show({ message: `🏗️ מעלית חדשה נוספה: ${elev.address}, ${elev.city}`, color: 'teal' })
+      closeAddElev()
+      closeDetail()
+      setAddElevForm({ address: '', city: '' })
+    },
+    onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה בהוספת מעלית', color: 'red' }),
   })
 
   const changeElevMutation = useMutation({
@@ -437,7 +458,16 @@ export default function CallsPage() {
                   color="grape"
                   onClick={() => { setSelectedCall(detail); setChangeElevId(null); openChangeElev() }}
                 >
-                  🏢 שנה מעלית
+                  🔗 שייך למעלית קיימת
+                </Button>
+              )}
+              {detail && ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(detail.status) && (
+                <Button
+                  variant="light"
+                  color="teal"
+                  onClick={() => { setSelectedCall(detail); setAddElevForm({ address: '', city: '' }); openAddElev() }}
+                >
+                  🏗️ הוסף מעלית חדשה
                 </Button>
               )}
               {detail && ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(detail.status) && (
@@ -677,6 +707,40 @@ export default function CallsPage() {
               }}
             >
               עדכן מעלית
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      {/* ── Add new elevator modal ── */}
+      <Modal opened={addElevOpened} onClose={closeAddElev} title="🏗️ הוסף מעלית חדשה לקריאה" size="sm" dir="rtl">
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">המעלית תיווצר במערכת ותשויך לקריאה זו</Text>
+          <TextInput
+            label="רחוב ומספר בית"
+            placeholder="לדוגמה: העלייה 45"
+            value={addElevForm.address}
+            onChange={e => setAddElevForm(s => ({ ...s, address: e.target.value }))}
+            required
+          />
+          <TextInput
+            label="עיר"
+            placeholder="לדוגמה: עפולה"
+            value={addElevForm.city}
+            onChange={e => setAddElevForm(s => ({ ...s, city: e.target.value }))}
+            required
+          />
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={closeAddElev}>ביטול</Button>
+            <Button
+              color="teal"
+              disabled={!addElevForm.address || !addElevForm.city}
+              loading={addElevMutation.isPending}
+              onClick={() => {
+                if (selectedCall && addElevForm.address && addElevForm.city)
+                  addElevMutation.mutate({ callId: selectedCall.id, address: addElevForm.address, city: addElevForm.city })
+              }}
+            >
+              צור מעלית ושייך
             </Button>
           </Group>
         </Stack>
