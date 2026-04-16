@@ -45,6 +45,7 @@ class ElevatorUpdate(BaseModel):
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
     service_contract: Optional[str] = Field(None, pattern="^(ANNUAL_6|ANNUAL_12)$")
     labor_file_number: Optional[str] = None
+    management_company_id: Optional[uuid.UUID] = None
 
 
 class ElevatorResponse(BaseModel):
@@ -65,6 +66,8 @@ class ElevatorResponse(BaseModel):
     risk_score: float
     service_contract: Optional[str] = None
     labor_file_number: Optional[str] = None
+    management_company_id: Optional[uuid.UUID] = None
+    management_company_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

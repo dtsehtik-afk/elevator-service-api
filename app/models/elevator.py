@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, Integer, String, func
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import ARRAY, JSON, TypeDecorator, Uuid
 
@@ -70,6 +70,10 @@ class Elevator(Base):
     caller_phones: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
     # Ministry of Labor file number — unique per elevator, extracted from inspection reports
     labor_file_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, unique=True, index=True)
+    # Management company grouping
+    management_company_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("management_companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # Service contract: how many maintenance treatments per year (6 or 12)
     # Values: "ANNUAL_6" | "ANNUAL_12" | None (unset — triggers warning in UI)
     service_contract: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -86,4 +90,7 @@ class Elevator(Base):
     )
     maintenance_schedules: Mapped[list["MaintenanceSchedule"]] = relationship(  # noqa: F821
         "MaintenanceSchedule", back_populates="elevator", cascade="all, delete-orphan"
+    )
+    management_company: Mapped[Optional["ManagementCompany"]] = relationship(  # noqa: F821
+        "ManagementCompany", back_populates="elevators", foreign_keys=[management_company_id]
     )
