@@ -1265,3 +1265,159 @@ def list_call_logs(
     if match_status:
         query = query.filter(IncomingCallLog.match_status == match_status)
     return query.offset(skip).limit(limit).all()
+
+
+# ── Pending unmatched calls — manual resolution ───────────────────────────────
+
+@router.get("/pending-unmatched", summary="List unmatched incoming calls awaiting manual action")
+def list_pending_unmatched(db: Session = Depends(get_db)):
+    """Return all calls that could not be matched to an elevator and have no service call yet."""
+    from app.models.elevator import Elevator
+    logs = (
+        db.query(IncomingCallLog)
+        .filter(
+            IncomingCallLog.match_status.in_(["PARTIAL", "UNMATCHED"]),
+            IncomingCallLog.service_call_id.is_(None),
+        )
+        .order_by(IncomingCallLog.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    result = []
+    for log in logs:
+        closest = None
+        if log.elevator_id:
+            elev = db.query(Elevator).filter(Elevator.id == log.elevator_id).first()
+            if elev:
+                closest = f"{elev.address}, {elev.city}"
+        result.append({
+            "id": str(log.id),
+            "call_street": log.call_street,
+            "call_city": log.call_city,
+            "fault_type": log.fault_type,
+            "priority": log.priority,
+            "caller_name": log.caller_name,
+            "caller_phone": log.caller_phone,
+            "match_status": log.match_status,
+            "match_score": log.match_score,
+            "match_notes": log.match_notes,
+            "closest_elevator": closest,
+            "closest_elevator_id": str(log.elevator_id) if log.elevator_id else None,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        })
+    return result
+
+
+@router.post("/pending-unmatched/{log_id}/add-elevator", summary="Create a new elevator from an unmatched call and open a service call")
+def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
+    """Create a new elevator from the call data, open a service call, and trigger AI assignment."""
+    from app.models.elevator import Elevator
+    from app.services.call_parser import parse_email
+    import uuid as _uuid
+
+    log = db.query(IncomingCallLog).filter(IncomingCallLog.id == _uuid.UUID(log_id)).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="לא נמצא רשומת קריאה")
+    if log.service_call_id:
+        raise HTTPException(status_code=409, detail="קריאת שירות כבר קיימת לרשומה זו")
+
+    # Re-parse raw_text to get house_number
+    parsed = parse_email(log.raw_text or "")
+    address_parts = [log.call_street or parsed.street]
+    if parsed.house_number:
+        address_parts.append(parsed.house_number)
+    full_address = " ".join(p for p in address_parts if p).strip() or "כתובת לא ידועה"
+    city = log.call_city or parsed.city or "לא ידוע"
+
+    # Create elevator
+    elevator = Elevator(
+        address=full_address,
+        city=city,
+        floor_count=5,
+        caller_phones=[log.caller_phone] if log.caller_phone else [],
+    )
+    db.add(elevator)
+    db.flush()
+
+    # Create service call
+    call_data = ServiceCallCreate(
+        elevator_id=elevator.id,
+        reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
+        description=f"{log.call_type or ''} | מעלית חדשה — נוספה אוטומטית מקריאה נכנסת".strip(" |"),
+        priority=log.priority or "MEDIUM",
+        fault_type=log.fault_type or "OTHER",
+    )
+    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+
+    # Update log
+    log.elevator_id = elevator.id
+    log.service_call_id = service_call.id
+    log.match_status = "MATCHED"
+    log.match_notes = "מעלית חדשה נוספה ידנית"
+    db.commit()
+
+    # Trigger AI assignment
+    try:
+        ai_assignment_agent.assign_with_confirmation(db, service_call)
+    except Exception as exc:
+        logger.warning("AI assignment after add-elevator failed: %s", exc)
+
+    whatsapp_service.notify_dispatcher(
+        f"🏗️ *מעלית חדשה נוספה למערכת*\n"
+        f"📍 {full_address}, {city}\n"
+        f"🔧 {log.fault_type or 'כללי'} — קריאת שירות נפתחה ושובצה."
+    )
+
+    return {"elevator_id": str(elevator.id), "service_call_id": str(service_call.id)}
+
+
+@router.post("/pending-unmatched/{log_id}/match-elevator", summary="Link an unmatched call to an existing elevator and open a service call")
+def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depends(get_db)):
+    """Assign an existing elevator to an unmatched call and create a service call."""
+    from app.models.elevator import Elevator
+    import uuid as _uuid
+
+    log = db.query(IncomingCallLog).filter(IncomingCallLog.id == _uuid.UUID(log_id)).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="לא נמצא רשומת קריאה")
+    if log.service_call_id:
+        raise HTTPException(status_code=409, detail="קריאת שירות כבר קיימת לרשומה זו")
+
+    elevator = db.query(Elevator).filter(Elevator.id == _uuid.UUID(elevator_id)).first()
+    if not elevator:
+        raise HTTPException(status_code=404, detail="מעלית לא נמצאה")
+
+    # Save caller phone for future matching
+    if log.caller_phone:
+        phones = list(elevator.caller_phones or [])
+        digits = "".join(c for c in log.caller_phone if c.isdigit())
+        last9 = digits[-9:] if len(digits) >= 9 else digits
+        already = any("".join(c for c in p if c.isdigit())[-9:] == last9 for p in phones)
+        if not already:
+            phones.append(log.caller_phone)
+            elevator.caller_phones = phones
+
+    # Create service call
+    call_data = ServiceCallCreate(
+        elevator_id=elevator.id,
+        reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
+        description=log.call_type or "קריאת שירות",
+        priority=log.priority or "MEDIUM",
+        fault_type=log.fault_type or "OTHER",
+    )
+    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+
+    # Update log
+    log.elevator_id = elevator.id
+    log.service_call_id = service_call.id
+    log.match_status = "MATCHED"
+    log.match_notes = "שויך ידנית למעלית קיימת"
+    db.commit()
+
+    # Trigger AI assignment
+    try:
+        ai_assignment_agent.assign_with_confirmation(db, service_call)
+    except Exception as exc:
+        logger.warning("AI assignment after match-elevator failed: %s", exc)
+
+    return {"elevator_id": str(elevator.id), "service_call_id": str(service_call.id)}

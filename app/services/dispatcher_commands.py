@@ -11,7 +11,7 @@ from app.services.whatsapp_service import _send_message, notify_dispatcher
 logger = logging.getLogger(__name__)
 
 _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעליות. החזר JSON בלבד:
-{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|FIND_BY_PHONE|APPROVE_REQUEST|REJECT_REQUEST|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת", "phone": "מספר טלפון אם קיים"}}
+{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|FIND_BY_PHONE|APPROVE_REQUEST|REJECT_REQUEST|ADD_ELEVATOR|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת", "phone": "מספר טלפון אם קיים"}}
 
 דוגמאות:
 "סגור קריאה ברחוב הרצל 5" → CLOSE_CALL
@@ -29,6 +29,9 @@ _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעל�
 "אשר" → APPROVE_REQUEST (tech_name ריק — אשר את כל הבקשות הממתינות)
 "דחה בקשת תומר" → REJECT_REQUEST (tech_name=תומר)
 "דחה" → REJECT_REQUEST (tech_name ריק — דחה את כל הבקשות הממתינות)
+"כן, תוסיף מעלית" → ADD_ELEVATOR
+"הוסף מעלית" → ADD_ELEVATOR
+"הוסף" → ADD_ELEVATOR (רק אם ההודעה קצרה ומתייחסת להוספת מעלית)
 
 חשוב מאוד — שאלות על מיקום טכנאים, קרבה לאזור, היכן נמצא טכנאי — תמיד UNKNOWN (לא STATUS_QUERY):
 "יש לנו מישהו באזור עפולה?" → UNKNOWN
@@ -90,6 +93,8 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
         _cmd_approve_request(db, phone, tech_name)
     elif command == "REJECT_REQUEST":
         _cmd_reject_request(db, phone, tech_name)
+    elif command == "ADD_ELEVATOR":
+        _cmd_add_elevator(db, phone)
     else:
         # Free question — route to chat agent
         from app.services.scheduler import _handle_chat_question
@@ -561,3 +566,71 @@ def _cmd_reject_request(db, dispatcher_phone: str, tech_name: str) -> None:
         _send_message(dispatcher_phone, f"✅ *נדחו {len(rejected)} בקשות:*\n{lines}")
     else:
         _send_message(dispatcher_phone, "❌ לא נמצאו בקשות מתאימות לדחייה.")
+
+
+def _cmd_add_elevator(db, dispatcher_phone: str) -> None:
+    """Create a new elevator from the most recent unmatched incoming call."""
+    from app.models.incoming_call import IncomingCallLog
+    from app.models.elevator import Elevator
+    from app.services.call_parser import parse_email
+    from app.services import service_call_service, ai_assignment_agent
+    from app.schemas.service_call import ServiceCallCreate
+
+    log = (
+        db.query(IncomingCallLog)
+        .filter(
+            IncomingCallLog.match_status.in_(["PARTIAL", "UNMATCHED"]),
+            IncomingCallLog.service_call_id.is_(None),
+        )
+        .order_by(IncomingCallLog.created_at.desc())
+        .first()
+    )
+
+    if not log:
+        _send_message(dispatcher_phone, "ℹ️ אין קריאות ממתינות ללא מעלית משויכת.")
+        return
+
+    # Re-parse to get house_number
+    parsed = parse_email(log.raw_text or "")
+    address_parts = [log.call_street or parsed.street]
+    if parsed.house_number:
+        address_parts.append(parsed.house_number)
+    full_address = " ".join(p for p in address_parts if p).strip() or "כתובת לא ידועה"
+    city = log.call_city or parsed.city or "לא ידוע"
+
+    elevator = Elevator(
+        address=full_address,
+        city=city,
+        floor_count=5,
+        caller_phones=[log.caller_phone] if log.caller_phone else [],
+    )
+    db.add(elevator)
+    db.flush()
+
+    call_data = ServiceCallCreate(
+        elevator_id=elevator.id,
+        reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
+        description=log.call_type or "קריאת שירות",
+        priority=log.priority or "MEDIUM",
+        fault_type=log.fault_type or "OTHER",
+    )
+    service_call = service_call_service.create_service_call(db, call_data, "dispatcher@whatsapp")
+
+    log.elevator_id = elevator.id
+    log.service_call_id = service_call.id
+    log.match_status = "MATCHED"
+    log.match_notes = "מעלית חדשה נוספה על ידי מנהל"
+    db.commit()
+
+    try:
+        ai_assignment_agent.assign_with_confirmation(db, service_call)
+    except Exception as exc:
+        logger.warning("AI assignment after WhatsApp add-elevator failed: %s", exc)
+
+    _send_message(
+        dispatcher_phone,
+        f"✅ *מעלית חדשה נוספה ושובצה*\n"
+        f"📍 {full_address}, {city}\n"
+        f"🔧 קריאת שירות נפתחה — מחפש טכנאי."
+    )
+    logger.warning("🏗️ Dispatcher added elevator: %s, %s via WhatsApp", full_address, city)
