@@ -160,9 +160,15 @@ def process_inspection_report(
             match_score = 1.0
 
     if not elevator and street:
+        # Extract house number from street string (trailing digits) so the
+        # penalty/bonus logic in _score_elevator applies correctly.
+        import re as _re
+        _hn_match = _re.search(r'(\d+)\s*$', street)
+        house_number = _hn_match.group(1) if _hn_match else ""
+
         parsed_call = ParsedCall(
             name="inspection", phone="", city=city, street=street,
-            house_number="", floor="", call_type="", context="",
+            house_number=house_number, floor="", call_type="", context="",
             call_time="", fault_type="OTHER", priority="MEDIUM",
             description="ביקורת תקינות",
         )
@@ -251,6 +257,7 @@ def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
     from app.services.whatsapp_service import _send_message as send_whatsapp_message
     from app.schemas.service_call import ServiceCallCreate
     from app.services import service_call_service
+    from app.config import get_settings
 
     settings = get_settings()
     deficiencies = report.deficiencies or []
