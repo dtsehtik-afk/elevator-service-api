@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import get_settings
-from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, conversations
+from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, conversations, inspections
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -23,6 +23,9 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
+    from app.database import Base, engine
+    import app.models  # register all models
+    Base.metadata.create_all(bind=engine)  # creates any missing tables
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield
@@ -63,6 +66,7 @@ app.include_router(schedule.router, prefix="/schedule", tags=["Schedule"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(technician_app.router, prefix="/app", tags=["Technician App"])
 app.include_router(conversations.router)
+app.include_router(inspections.router)
 
 
 @app.get("/health", tags=["Health"])

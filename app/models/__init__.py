@@ -6,6 +6,7 @@ from app.models.service_call import ServiceCall
 from app.models.assignment import Assignment, AuditLog
 from app.models.maintenance import MaintenanceSchedule
 from app.models.incoming_call import IncomingCallLog
+from app.models.inspection_report import InspectionReport
 
 __all__ = [
     "Elevator",
@@ -15,4 +16,5 @@ __all__ = [
     "AuditLog",
     "MaintenanceSchedule",
     "IncomingCallLog",
+    "InspectionReport",
 ]

@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { label: 'קריאות שירות', path: '/calls', icon: '🔧' },
   { label: 'טכנאים', path: '/technicians', icon: '👷' },
   { label: 'תחזוקה', path: '/maintenance', icon: '📅' },
+  { label: 'ביקורות תקינות', path: '/inspections', icon: '🔍' },
 ]
 
 const ADMIN_NAV_ITEMS = [

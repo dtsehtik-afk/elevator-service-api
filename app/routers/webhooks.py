@@ -758,6 +758,7 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
         result.append({
             "assignment_id": str(a.id),
+            "call_id": str(call.id),
             "assignment_status": a.status,
             "address": elev.address if elev else "כתובת לא ידועה",
             "city": elev.city if elev else "",

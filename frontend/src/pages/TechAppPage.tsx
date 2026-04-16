@@ -26,6 +26,7 @@ const FAULT_LABEL: Record<string, string> = {
 // ── Types ──────────────────────────────────────────────────────────────────
 interface PendingCall {
   assignment_id: string
+  call_id: string
   assignment_status: string
   address: string
   city: string
@@ -335,12 +336,12 @@ function TechMain() {
                 <Divider my="sm" />
                 <Group gap="xs">
                   <Button flex={1} size="sm" color="orange" variant="light"
-                    onClick={() => { setReassignCallId(call.assignment_id); setReassignOpen(true) }}>
+                    onClick={() => { setReassignCallId(call.call_id); setReassignOpen(true) }}>
                     🏢 שנה כתובת</Button>
                   <Button flex={1} size="sm" color="red" variant="light"
                     loading={resolveMutation.isPending}
                     onClick={() => {
-                      if (confirm('לסגור את הקריאה?')) resolveMutation.mutate({ callId: call.assignment_id })
+                      if (confirm('לסגור את הקריאה?')) resolveMutation.mutate({ callId: call.call_id })
                     }}>
                     ✅ סגור קריאה</Button>
                 </Group>
