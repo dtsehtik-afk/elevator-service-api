@@ -87,7 +87,7 @@ def process_inspection_report(
     from app.schemas.service_call import ServiceCallCreate
     from app.services import service_call_service
     from app.services.call_parser import find_elevator, ParsedCall
-    from app.services.whatsapp_service import send_whatsapp_message
+    from app.services.whatsapp_service import _send_message as send_whatsapp_message
 
     settings = get_settings()
     if not settings.gemini_api_key:
