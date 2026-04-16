@@ -221,24 +221,37 @@ def find_elevator(db: Session, parsed: ParsedCall) -> MatchResult:
         return MatchResult(elevator=None, score=0.0, match_status="UNMATCHED",
                            match_notes="אין מעליות במסד הנתונים")
 
-    # If phone matches exist AND we have city candidates → intersect; else use phone set as priority
-    if phone_matched_ids:
+    # Phone-based narrowing — only when phone maps to few elevators.
+    # If the same phone is linked to many elevators it belongs to a management
+    # company that opens calls for many buildings from one number; in that case
+    # the phone is not a useful discriminator and we fall back to address-only.
+    _MANAGEMENT_PHONE_THRESHOLD = 5
+    is_management_phone = len(phone_matched_ids) > _MANAGEMENT_PHONE_THRESHOLD
+
+    if phone_matched_ids and not is_management_phone:
         phone_candidates = [e for e in candidates if e.id in phone_matched_ids]
         if not phone_candidates:
-            # Phone matches exist but not in this city → try phone-matched across all elevators
+            # Phone matches exist but not in this city → search all elevators
             phone_candidates = db.query(Elevator).filter(Elevator.id.in_(phone_matched_ids)).all()
         if phone_candidates:
             candidates = phone_candidates  # narrowed set
 
     def score(e: Elevator) -> float:
         base = _score_elevator(e, parsed)
-        bonus = 0.25 if e.id in phone_matched_ids else 0.0
+        # Phone bonus only for personal/direct phones, not management companies
+        bonus = 0.25 if (e.id in phone_matched_ids and not is_management_phone) else 0.0
         return min(base + bonus, 1.0)
 
     scored = [(e, score(e)) for e in candidates]
     scored.sort(key=lambda x: x[1], reverse=True)
     best_elevator, best_score = scored[0]
-    phone_note = " + טלפון מזוהה" if best_elevator.id in phone_matched_ids else ""
+
+    if is_management_phone:
+        phone_note = f" + טלפון חברת ניהול ({len(phone_matched_ids)} מעליות)"
+    elif best_elevator.id in phone_matched_ids:
+        phone_note = " + טלפון מזוהה"
+    else:
+        phone_note = ""
 
     if best_score >= _MATCH_THRESHOLD:
         phone_confirmed = best_elevator.id in phone_matched_ids
