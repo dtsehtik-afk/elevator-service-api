@@ -241,25 +241,24 @@ def find_elevator(db: Session, parsed: ParsedCall) -> MatchResult:
     phone_note = " + טלפון מזוהה" if best_elevator.id in phone_matched_ids else ""
 
     if best_score >= _MATCH_THRESHOLD:
-        # Safety check: if house_number was NOT provided and there are multiple
-        # elevators on the same street in the same city → cannot be certain → PARTIAL
-        if not parsed.house_number:
-            street_lower = (parsed.street or "").lower()
-            same_street = [
-                e for e in candidates
-                if street_lower and street_lower in (e.address or "").lower()
-                and _similarity(parsed.city, e.city or "") > 0.8
-            ]
-            if len(same_street) > 1:
-                return MatchResult(
-                    elevator=best_elevator,
-                    score=round(best_score, 3),
-                    match_status="PARTIAL",
-                    match_notes=(
-                        f"רחוב תואם ({best_score:.0%}) אך מספר בית לא סופק — "
-                        f"נמצאו {len(same_street)} מעליות ברחוב זה{phone_note}"
-                    ),
-                )
+        phone_confirmed = best_elevator.id in phone_matched_ids
+        house_confirmed = bool(parsed.house_number and parsed.house_number in (best_elevator.address or ""))
+
+        # "ספק = אין ספק":
+        # Auto-match only when at least one hard confirmation exists:
+        #   • phone match (caller was previously linked to this elevator), OR
+        #   • house number explicitly provided and matches
+        # Without either — always ask the dispatcher.
+        if not phone_confirmed and not house_confirmed:
+            return MatchResult(
+                elevator=best_elevator,
+                score=round(best_score, 3),
+                match_status="PARTIAL",
+                match_notes=(
+                    f"רחוב ועיר תואמים ({best_score:.0%}) אך אין אימות מספר בית או טלפון — דורש אישור מנהל"
+                ),
+            )
+
         return MatchResult(
             elevator=best_elevator,
             score=round(best_score, 3),
