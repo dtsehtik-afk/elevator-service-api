@@ -187,6 +187,12 @@ def assign_with_confirmation(
         logger.error("Elevator %s not found for assignment", service_call.elevator_id)
         return None
 
+    # Guard against double-assignment: refresh call status inside the same transaction
+    db.refresh(service_call)
+    if service_call.status not in ("OPEN", "PENDING"):
+        logger.info("Call %s already assigned (status=%s), skipping", service_call.id, service_call.status)
+        return None
+
     candidates = rank_technicians(db, elevator, service_call.fault_type, service_call.priority)
 
     # Filter out technicians who already rejected this call

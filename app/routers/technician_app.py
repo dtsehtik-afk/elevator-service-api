@@ -26,7 +26,7 @@ def _get_tech_and_call(db: Session, tech_id: str):
     except ValueError:
         raise HTTPException(status_code=404, detail="לא נמצא")
 
-    tech = db.query(Technician).filter(Technician.id == tid).first()
+    tech = db.query(Technician).filter(Technician.id == tid, Technician.is_active == True).first()  # noqa: E712
     if not tech:
         raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
 

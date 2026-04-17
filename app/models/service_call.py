@@ -20,7 +20,7 @@ class ServiceCall(Base):
     )
     elevator_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("elevators.id", ondelete="CASCADE"),
+        ForeignKey("elevators.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )

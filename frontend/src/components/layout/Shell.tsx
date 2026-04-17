@@ -17,11 +17,10 @@ const NAV_ITEMS = [
   { label: 'תחזוקה', path: '/maintenance', icon: '📅' },
   { label: 'ביקורות תקינות', path: '/inspections', icon: '🔍' },
   { label: 'חברות ניהול', path: '/management-companies', icon: '🏗️' },
+  { label: 'ייבוא נתונים', path: '/import', icon: '📥' },
 ]
 
-const ADMIN_NAV_ITEMS = [
-  { label: 'שיחות', path: '/conversations', icon: '💬' },
-]
+const ADMIN_NAV_ITEMS: { label: string; path: string; icon: string }[] = []
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [opened, { toggle }] = useDisclosure()

@@ -1,6 +1,7 @@
 """Webhook endpoints for external integrations (Make.com, telephony providers, Green API)."""
 
 import base64
+import hmac
 import html as html_lib
 import json
 import logging
@@ -124,9 +125,11 @@ class WhatsAppWebhookPayload(BaseModel):
 
 def _verify_secret(x_webhook_secret: Optional[str] = Header(default=None)):
     configured = settings.webhook_secret
-    if configured and x_webhook_secret and x_webhook_secret != configured:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Invalid webhook secret")
+    if configured:
+        provided = x_webhook_secret or ""
+        if not hmac.compare_digest(provided.encode(), configured.encode()):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Invalid webhook secret")
 
 
 # ── Incoming call from telephony provider ─────────────────────────────────────

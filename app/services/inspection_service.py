@@ -169,9 +169,18 @@ def process_inspection_report(
         match = find_elevator(db, parsed_call)
         match_score = match.score if match.elevator else 0.0
 
-        # Address fuzzy matching always requires human confirmation.
-        # Only labor_file_number and serial_number are trusted for auto-match.
-        if match.elevator and match_score >= _PARTIAL_THRESHOLD:
+        # High-confidence address match (≥90%): treat as auto-matched only when
+        # house number also agrees (prevents "בגין 80" matching "בגין 50").
+        _HIGH_CONFIDENCE = 0.90
+        if match.elevator and match_score >= _HIGH_CONFIDENCE:
+            house_ok = not house_number or house_number in (match.elevator.address or "")
+            if house_ok:
+                elevator = match.elevator
+                match_status = "AUTO_MATCHED"
+            else:
+                suggested_elevator = match.elevator
+                match_status = "PENDING_REVIEW"
+        elif match.elevator and match_score >= _PARTIAL_THRESHOLD:
             suggested_elevator = match.elevator
             match_status = "PENDING_REVIEW"
         else:

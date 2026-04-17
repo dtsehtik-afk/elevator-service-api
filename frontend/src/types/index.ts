@@ -1,20 +1,58 @@
 export interface Elevator {
   id: string
+  // Identity
+  internal_number: string | null
+  labor_file_number: string | null
+  // Location
+  building_id: string | null
   address: string
   city: string
+  latitude: number | null
+  longitude: number | null
+  // Description
   building_name: string | null
+  notes: string | null
+  // Technical
   floor_count: number
   model: string | null
   manufacturer: string | null
   installation_date: string | null
   serial_number: string | null
+  warranty_end: string | null
+  is_coded: boolean
+  entry_code: string | null
+  // Contact
   contact_phone: string | null
+  intercom_phone: string | null
+  caller_phones: string[]
+  // Service
+  service_type: 'REGULAR' | 'COMPREHENSIVE' | null
+  service_contract: 'ANNUAL_6' | 'ANNUAL_12' | null
+  maintenance_interval_days: number | null
+  contract_start: string | null
+  contract_renewal: string | null
+  contract_end: string | null
+  drive_link: string | null
+  // Debt
+  has_debt: boolean
+  debt_freeze_date: string | null
+  // Maintenance
   last_service_date: string | null
   next_service_date: string | null
+  // Inspection
+  last_inspection_date: string | null
+  next_inspection_date: string | null
+  inspector_name: string | null
+  inspector_phone: string | null
+  inspector_mobile: string | null
+  inspector_email: string | null
+  last_inspection_report_url: string | null
+  // Status
   status: 'ACTIVE' | 'INACTIVE' | 'UNDER_REPAIR'
   risk_score: number
-  service_contract: 'ANNUAL_6' | 'ANNUAL_12' | null
-  labor_file_number: string | null
+  // Grouping
+  management_company_id: string | null
+  management_company_name: string | null
   created_at: string
   updated_at: string
 }
