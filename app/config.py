@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import List
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://user:password@localhost:5432/elevator_db"
 
     # JWT
-    secret_key: str = "change-me-in-production"
+    secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 10080  # 7 days — suitable for mobile apps
 
@@ -32,11 +33,9 @@ class Settings(BaseSettings):
 
     # App
     environment: str = "development"
-    admin_email: str = "admin@example.com"
-    admin_password: str = "changeme123"
 
     # Webhook security — set a strong random string in .env
-    webhook_secret: str = "change-this-webhook-secret"
+    webhook_secret: str = ""
 
     # Google Maps API
     google_maps_api_key: str = ""
@@ -60,6 +59,15 @@ class Settings(BaseSettings):
 
     # Google Gemini — used for email parsing and WhatsApp chat agent
     gemini_api_key: str = ""
+
+    @model_validator(mode="after")
+    def _validate_secrets(self):
+        if self.environment == "production":
+            if not self.secret_key:
+                raise ValueError("SECRET_KEY must be set in production")
+            if not self.webhook_secret:
+                raise ValueError("WEBHOOK_SECRET must be set in production")
+        return self
 
     @property
     def cors_origins_list(self) -> List[str]:

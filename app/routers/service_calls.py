@@ -1,9 +1,12 @@
 """Router for service call CRUD endpoints."""
 
+import logging
 import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
@@ -73,8 +76,8 @@ def create_call(
                     s.dispatcher_whatsapp,
                     elevator.address, elevator.city, data.fault_type
                 )
-    except Exception:
-        pass  # Assignment failure must never block call creation
+    except Exception as exc:
+        logger.error("AI assignment failed for call %s: %s", call.id, exc, exc_info=True)
 
     return call
 
@@ -338,9 +341,15 @@ def get_call_details(
         .all()
     )
 
+    tech_ids = [a.technician_id for a in assignments_raw]
+    techs_by_id = {
+        t.id: t
+        for t in db.query(Technician).filter(Technician.id.in_(tech_ids)).all()
+    } if tech_ids else {}
+
     assignment_details = []
     for a in assignments_raw:
-        tech = db.query(Technician).filter(Technician.id == a.technician_id).first()
+        tech = techs_by_id.get(a.technician_id)
         assignment_details.append(AssignmentDetailResponse(
             id=a.id,
             technician_id=a.technician_id,

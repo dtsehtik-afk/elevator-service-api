@@ -1,7 +1,9 @@
 """Authentication router — login endpoint."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.auth.schemas import TokenResponse
@@ -10,6 +12,7 @@ from app.database import get_db
 from app.models.technician import Technician
 
 router = APIRouter()
+_limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post(
@@ -18,7 +21,9 @@ router = APIRouter()
     summary="Login",
     description="Authenticate with email and password. Returns a JWT Bearer token.",
 )
+@_limiter.limit("10/minute")
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):

@@ -1,10 +1,13 @@
 """Business logic for service call management."""
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models.assignment import AuditLog
 from app.models.service_call import ServiceCall
@@ -117,8 +120,8 @@ def create_service_call(
         try:
             auto_assign_call(db, call.id, current_user_email)
             db.refresh(call)
-        except Exception:
-            pass  # Log but don't fail the call creation
+        except Exception as exc:
+            logger.error("Auto-assignment failed for CRITICAL call %s: %s", call.id, exc, exc_info=True)
 
     return call
 
