@@ -28,3 +28,6 @@ class ManagementCompany(Base):
     elevators: Mapped[list["Elevator"]] = relationship(  # noqa: F821
         "Elevator", back_populates="management_company", foreign_keys="Elevator.management_company_id"
     )
+    contacts: Mapped[list["Contact"]] = relationship(  # noqa: F821
+        "Contact", back_populates="management_company"
+    )

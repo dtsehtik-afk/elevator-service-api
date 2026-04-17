@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import get_settings
-from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, conversations, inspections, management_companies
+from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, conversations, inspections, management_companies, buildings, contacts, data_import
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -68,6 +68,9 @@ app.include_router(technician_app.router, prefix="/app", tags=["Technician App"]
 app.include_router(conversations.router)
 app.include_router(inspections.router)
 app.include_router(management_companies.router)
+app.include_router(buildings.router)
+app.include_router(contacts.router)
+app.include_router(data_import.router)
 
 
 @app.get("/health", tags=["Health"])
