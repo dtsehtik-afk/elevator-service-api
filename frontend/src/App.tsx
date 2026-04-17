@@ -8,7 +8,6 @@ import ElevatorDetailPage from './pages/ElevatorDetailPage'
 import CallsPage from './pages/CallsPage'
 import TechniciansPage from './pages/TechniciansPage'
 import MaintenancePage from './pages/MaintenancePage'
-import ConversationsPage from './pages/ConversationsPage'
 import TechAppPage from './pages/TechAppPage'
 import InspectionsPage from './pages/InspectionsPage'
 import PendingCallsPage from './pages/PendingCallsPage'
@@ -41,7 +40,6 @@ export default function App() {
                   <Route path="/calls" element={<CallsPage />} />
                   <Route path="/technicians" element={<TechniciansPage />} />
                   <Route path="/maintenance" element={<MaintenancePage />} />
-                  <Route path="/conversations" element={<ConversationsPage />} />
                   <Route path="/inspections" element={<InspectionsPage />} />
                   <Route path="/pending-calls" element={<PendingCallsPage />} />
                   <Route path="/management-companies" element={<ManagementCompaniesPage />} />
