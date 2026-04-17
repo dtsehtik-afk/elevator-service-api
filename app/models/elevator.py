@@ -108,6 +108,12 @@ class Elevator(Base):
     # ── Inspection ────────────────────────────────────────────────────────────
     last_inspection_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     next_inspection_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # בודק מוסמך — certified inspector details
+    inspector_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    inspector_phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    inspector_mobile: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    inspector_email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_inspection_report_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # ── Status / risk ─────────────────────────────────────────────────────────
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE", index=True)

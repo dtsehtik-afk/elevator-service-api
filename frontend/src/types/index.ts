@@ -42,6 +42,11 @@ export interface Elevator {
   // Inspection
   last_inspection_date: string | null
   next_inspection_date: string | null
+  inspector_name: string | null
+  inspector_phone: string | null
+  inspector_mobile: string | null
+  inspector_email: string | null
+  last_inspection_report_url: string | null
   // Status
   status: 'ACTIVE' | 'INACTIVE' | 'UNDER_REPAIR'
   risk_score: number

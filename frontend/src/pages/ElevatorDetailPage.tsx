@@ -65,9 +65,15 @@ export default function ElevatorDetailPage() {
   const [sensitiveField, setSensitiveField] = useState<string | null>(null)
   const [addContactOpen, setAddContactOpen] = useState(false)
   const [newContact, setNewContact] = useState({ name: '', phone: '', email: '', role: 'VAAD' })
+  const [residentsExpanded, setResidentsExpanded] = useState(false)
 
   const set = (key: string, value: any) => setForm(s => ({ ...s, [key]: value }))
   const dateSet = (key: string, d: Date | null) => set(key, toISODate(d))
+
+  function openAddContact(defaultRole: string) {
+    setNewContact({ name: '', phone: '', email: '', role: defaultRole })
+    setAddContactOpen(true)
+  }
 
   function sensitiveSet(key: string, value: any) {
     if (SENSITIVE_FIELDS.has(key)) {
@@ -97,6 +103,16 @@ export default function ElevatorDetailPage() {
     },
     enabled: !!elevator?.building_id,
   })
+
+  const { data: buildingDetail } = useQuery({
+    queryKey: ['building-detail', elevator?.building_id],
+    queryFn: async () => {
+      if (!elevator?.building_id) return null
+      return (await client.get(`/buildings/${elevator.building_id}`)).data
+    },
+    enabled: !!elevator?.building_id,
+  })
+  const siblings: any[] = (buildingDetail?.elevators ?? []).filter((e: any) => e.id !== id)
 
   const updateMutation = useMutation({
     mutationFn: (payload: any) => updateElevator(id!, payload),
@@ -352,6 +368,36 @@ export default function ElevatorDetailPage() {
                   <Field label="הערות" value={elevator.notes} />
                 ) : null}
               </Grid.Col>
+
+              {/* Building siblings */}
+              {siblings.length > 0 && (
+                <>
+                  <Grid.Col span={12}><Divider label={`מעליות אחיות בבניין (${siblings.length})`} labelPosition="right" mt="xs" /></Grid.Col>
+                  <Grid.Col span={12}>
+                    <Stack gap="xs">
+                      {siblings.map((s: any) => (
+                        <Paper
+                          key={s.id} withBorder p="xs" radius="sm"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/elevators/${s.id}`)}
+                        >
+                          <Group justify="space-between" wrap="nowrap">
+                            <Group gap="xs">
+                              <Text size="sm" fw={600}>
+                                {s.internal_number ? `#${s.internal_number}` : s.id.slice(0, 8)}
+                              </Text>
+                              <Text size="sm" c="dimmed">{s.building_name || s.address}</Text>
+                            </Group>
+                            <Badge color={ELEVATOR_STATUS_COLORS[s.status]} size="xs" variant="light">
+                              {ELEVATOR_STATUS_LABELS[s.status]}
+                            </Badge>
+                          </Group>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  </Grid.Col>
+                </>
+              )}
             </Grid>
           </Paper>
         </Tabs.Panel>
@@ -433,50 +479,118 @@ export default function ElevatorDetailPage() {
 
         {/* ── CONTACTS ── */}
         <Tabs.Panel value="contacts" pt="md">
-          <Paper withBorder p="lg" radius="md">
-            <Group justify="space-between" mb="md">
-              <Text fw={600}>אנשי קשר</Text>
-              {elevator.building_id && (
-                <Button size="xs" onClick={() => setAddContactOpen(true)}>+ הוסף</Button>
-              )}
-            </Group>
+          <Stack gap="md">
             {!elevator.building_id && (
               <Alert color="yellow">מעלית זו לא משויכת לבניין — לא ניתן להוסיף אנשי קשר</Alert>
             )}
-            {contacts.length === 0 && elevator.building_id && (
-              <Text c="dimmed" ta="center" mt="md">אין אנשי קשר לבניין זה</Text>
-            )}
-            {contacts.length > 0 && (
-              <Table striped>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>שם</Table.Th>
-                    <Table.Th>תפקיד</Table.Th>
-                    <Table.Th>טלפון</Table.Th>
-                    <Table.Th>מייל</Table.Th>
-                    <Table.Th></Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {contacts.map(c => (
-                    <Table.Tr key={c.id}>
-                      <Table.Td>
-                        {c.name}
-                        {c.auto_added && <Badge size="xs" color="gray" variant="light" ml={4}>אוטו׳</Badge>}
-                      </Table.Td>
-                      <Table.Td><Badge color={ROLE_COLORS[c.role]} size="xs">{ROLE_LABELS[c.role]}</Badge></Table.Td>
-                      <Table.Td>{c.phone ? <Anchor href={`tel:${c.phone}`} size="sm">{c.phone}</Anchor> : '—'}</Table.Td>
-                      <Table.Td>{c.email ? <Anchor href={`mailto:${c.email}`} size="sm">{c.email}</Anchor> : '—'}</Table.Td>
-                      <Table.Td>
-                        <ActionIcon size="xs" color="red" variant="subtle"
-                          onClick={() => deleteContactMutation.mutate(c.id)}>✕</ActionIcon>
-                      </Table.Td>
-                    </Table.Tr>
+
+            {/* ועד הבית */}
+            <Paper withBorder p="md" radius="md">
+              <Group justify="space-between" mb="sm">
+                <Group gap="xs">
+                  <Text fw={700}>ועד הבית</Text>
+                  <Badge color="blue" size="xs" variant="light">{contacts.filter(c => c.role === 'VAAD').length}</Badge>
+                </Group>
+                {elevator.building_id && (
+                  <Button size="xs" variant="light" onClick={() => openAddContact('VAAD')}>+ הוסף ועד</Button>
+                )}
+              </Group>
+              {contacts.filter(c => c.role === 'VAAD').length === 0 ? (
+                <Text size="sm" c="dimmed">אין אנשי ועד רשומים</Text>
+              ) : (
+                <Stack gap="xs">
+                  {contacts.filter(c => c.role === 'VAAD').map(c => (
+                    <Group key={c.id} justify="space-between" p="xs" style={{ borderRadius: 8, background: 'var(--mantine-color-gray-0)' }}>
+                      <Stack gap={1}>
+                        <Text size="sm" fw={600}>{c.name}</Text>
+                        <Group gap="sm">
+                          {c.phone && <Anchor href={`tel:${c.phone}`} size="xs">{c.phone}</Anchor>}
+                          {c.email && <Anchor href={`mailto:${c.email}`} size="xs">{c.email}</Anchor>}
+                        </Group>
+                      </Stack>
+                      <ActionIcon size="xs" color="red" variant="subtle" onClick={() => deleteContactMutation.mutate(c.id)}>✕</ActionIcon>
+                    </Group>
                   ))}
-                </Table.Tbody>
-              </Table>
+                </Stack>
+              )}
+            </Paper>
+
+            {/* דיירים */}
+            <Paper withBorder p="md" radius="md">
+              <Group justify="space-between" mb="sm">
+                <Group gap="xs">
+                  <Text fw={700}>דיירים</Text>
+                  <Badge color="teal" size="xs" variant="light">{contacts.filter(c => c.role === 'RESIDENT').length}</Badge>
+                </Group>
+                <Group gap="xs">
+                  {contacts.filter(c => c.role === 'RESIDENT').length > 3 && (
+                    <Button size="xs" variant="subtle" onClick={() => setResidentsExpanded(e => !e)}>
+                      {residentsExpanded ? '▲ צמצם' : '▼ הצג הכל'}
+                    </Button>
+                  )}
+                  {elevator.building_id && (
+                    <Button size="xs" variant="light" color="teal" onClick={() => openAddContact('RESIDENT')}>+ הוסף דייר</Button>
+                  )}
+                </Group>
+              </Group>
+              {contacts.filter(c => c.role === 'RESIDENT').length === 0 ? (
+                <Text size="sm" c="dimmed">אין דיירים רשומים</Text>
+              ) : (
+                <Stack gap="xs">
+                  {(residentsExpanded
+                    ? contacts.filter(c => c.role === 'RESIDENT')
+                    : contacts.filter(c => c.role === 'RESIDENT').slice(0, 3)
+                  ).map(c => (
+                    <Group key={c.id} justify="space-between" p="xs" style={{ borderRadius: 8, background: 'var(--mantine-color-gray-0)' }}>
+                      <Stack gap={1}>
+                        <Group gap="xs">
+                          <Text size="sm" fw={500}>{c.name}</Text>
+                          {c.auto_added && <Badge size="xs" color="gray" variant="light">אוטו׳</Badge>}
+                        </Group>
+                        <Group gap="sm">
+                          {c.phone && <Anchor href={`tel:${c.phone}`} size="xs">{c.phone}</Anchor>}
+                          {c.email && <Anchor href={`mailto:${c.email}`} size="xs">{c.email}</Anchor>}
+                        </Group>
+                      </Stack>
+                      <ActionIcon size="xs" color="red" variant="subtle" onClick={() => deleteContactMutation.mutate(c.id)}>✕</ActionIcon>
+                    </Group>
+                  ))}
+                  {!residentsExpanded && contacts.filter(c => c.role === 'RESIDENT').length > 3 && (
+                    <Text size="xs" c="dimmed" ta="center">+ {contacts.filter(c => c.role === 'RESIDENT').length - 3} נוספים</Text>
+                  )}
+                </Stack>
+              )}
+            </Paper>
+
+            {/* אחרים — חייגן, ניהול, אחר */}
+            {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).length > 0 && (
+              <Paper withBorder p="md" radius="md">
+                <Group justify="space-between" mb="sm">
+                  <Text fw={700}>אנשי קשר נוספים</Text>
+                  {elevator.building_id && (
+                    <Button size="xs" variant="subtle" onClick={() => openAddContact('OTHER')}>+ הוסף</Button>
+                  )}
+                </Group>
+                <Stack gap="xs">
+                  {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).map(c => (
+                    <Group key={c.id} justify="space-between" p="xs" style={{ borderRadius: 8, background: 'var(--mantine-color-gray-0)' }}>
+                      <Stack gap={1}>
+                        <Group gap="xs">
+                          <Text size="sm" fw={500}>{c.name}</Text>
+                          <Badge color={ROLE_COLORS[c.role]} size="xs">{ROLE_LABELS[c.role]}</Badge>
+                        </Group>
+                        <Group gap="sm">
+                          {c.phone && <Anchor href={`tel:${c.phone}`} size="xs">{c.phone}</Anchor>}
+                          {c.email && <Anchor href={`mailto:${c.email}`} size="xs">{c.email}</Anchor>}
+                        </Group>
+                      </Stack>
+                      <ActionIcon size="xs" color="red" variant="subtle" onClick={() => deleteContactMutation.mutate(c.id)}>✕</ActionIcon>
+                    </Group>
+                  ))}
+                </Stack>
+              </Paper>
             )}
-          </Paper>
+          </Stack>
         </Tabs.Panel>
 
         {/* ── CONTRACT ── */}
@@ -534,6 +648,60 @@ export default function ElevatorDetailPage() {
                   <DateInput label="ביקורת הבאה" value={parseDate(form.next_inspection_date)} onChange={d => dateSet('next_inspection_date', d)} clearable />
                 ) : (
                   <Field label="ביקורת הבאה" value={formatDate(elevator.next_inspection_date)} />
+                )}
+              </Grid.Col>
+
+              <Grid.Col span={12}><Divider label="בודק מוסמך" labelPosition="right" mt="xs" /></Grid.Col>
+
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="שם הבודק" value={form.inspector_name ?? ''} onChange={e => set('inspector_name', e.target.value || null)} />
+                ) : (
+                  <Field label="שם הבודק" value={elevator.inspector_name} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="טלפון" value={form.inspector_phone ?? ''} onChange={e => set('inspector_phone', e.target.value || null)} />
+                ) : (
+                  <Field label="טלפון">
+                    {elevator.inspector_phone
+                      ? <Anchor href={`tel:${elevator.inspector_phone}`} size="sm">{elevator.inspector_phone}</Anchor>
+                      : <Text fw={500}>—</Text>}
+                  </Field>
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="נייד" value={form.inspector_mobile ?? ''} onChange={e => set('inspector_mobile', e.target.value || null)} />
+                ) : (
+                  <Field label="נייד">
+                    {elevator.inspector_mobile
+                      ? <Anchor href={`tel:${elevator.inspector_mobile}`} size="sm">{elevator.inspector_mobile}</Anchor>
+                      : <Text fw={500}>—</Text>}
+                  </Field>
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="מייל" value={form.inspector_email ?? ''} onChange={e => set('inspector_email', e.target.value || null)} />
+                ) : (
+                  <Field label="מייל">
+                    {elevator.inspector_email
+                      ? <Anchor href={`mailto:${elevator.inspector_email}`} size="sm">{elevator.inspector_email}</Anchor>
+                      : <Text fw={500}>—</Text>}
+                  </Field>
+                )}
+              </Grid.Col>
+              <Grid.Col span={12}>
+                {editing ? (
+                  <TextInput label="קישור לתסקיר אחרון (Google Drive / PDF)" placeholder="https://..." value={form.last_inspection_report_url ?? ''} onChange={e => set('last_inspection_report_url', e.target.value || null)} />
+                ) : (
+                  <Field label="תסקיר אחרון">
+                    {elevator.last_inspection_report_url
+                      ? <Anchor href={elevator.last_inspection_report_url} target="_blank" size="sm">📋 פתח תסקיר</Anchor>
+                      : <Text fw={500}>—</Text>}
+                  </Field>
                 )}
               </Grid.Col>
             </Grid>

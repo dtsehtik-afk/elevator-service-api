@@ -67,6 +67,11 @@ class ElevatorUpdate(BaseModel):
     # Inspection
     last_inspection_date: Optional[date] = None
     next_inspection_date: Optional[date] = None
+    inspector_name: Optional[str] = None
+    inspector_phone: Optional[str] = None
+    inspector_mobile: Optional[str] = None
+    inspector_email: Optional[str] = None
+    last_inspection_report_url: Optional[str] = None
     # Status
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
     # Grouping
@@ -117,6 +122,11 @@ class ElevatorResponse(BaseModel):
     # Inspection
     last_inspection_date: Optional[date] = None
     next_inspection_date: Optional[date] = None
+    inspector_name: Optional[str] = None
+    inspector_phone: Optional[str] = None
+    inspector_mobile: Optional[str] = None
+    inspector_email: Optional[str] = None
+    last_inspection_report_url: Optional[str] = None
     # Status
     status: str
     risk_score: float
