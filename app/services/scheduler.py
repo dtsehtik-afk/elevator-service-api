@@ -1079,6 +1079,11 @@ def _check_pending_assignment_timeouts():
         }
         orphaned = [c for c in open_calls if c.id not in active_assignment_call_ids]
 
+        local_hour = datetime.now().hour
+        if orphaned and not (7 <= local_hour < 22):
+            logger.info("⏰ Off-hours (%d:xx) — skipping %d orphaned call(s)", local_hour, len(orphaned))
+            orphaned = []
+
         if orphaned:
             logger.info("🔄 Found %d orphaned OPEN call(s) — attempting assignment", len(orphaned))
             from app.config import get_settings
