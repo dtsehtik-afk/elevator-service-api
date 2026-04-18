@@ -33,7 +33,7 @@ def list_calls(
     priority: Optional[str] = Query(None, description="CRITICAL|HIGH|MEDIUM|LOW"),
     fault_type: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: Technician = Depends(get_current_user),
 ):
