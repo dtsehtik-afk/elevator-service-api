@@ -23,9 +23,11 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
+    from pathlib import Path
     from app.database import Base, engine
     import app.models  # register all models
     Base.metadata.create_all(bind=engine)  # creates any missing tables
+    Path("uploads/elevators").mkdir(parents=True, exist_ok=True)
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield
@@ -80,6 +82,8 @@ def health_check():
 
 # ── Serve React frontend (must be last) ──────────────────────────────────────
 _FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 if _FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")

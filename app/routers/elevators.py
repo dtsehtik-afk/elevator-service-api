@@ -189,3 +189,38 @@ async def import_elevators_pdf(
         raise HTTPException(status_code=422, detail=f"שגיאה בפענוח ה-PDF: {exc}")
 
     return stats
+
+
+@router.post(
+    "/{elevator_id}/upload-file",
+    summary="Upload a file (agreement or inspection report) for an elevator",
+)
+async def upload_elevator_file(
+    elevator_id: uuid.UUID,
+    field: str = Query(..., description="drive_link | last_inspection_report_url"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Store uploaded PDF/image and save its URL on the elevator record."""
+    from pathlib import Path
+
+    if field not in ("drive_link", "last_inspection_report_url"):
+        raise HTTPException(status_code=400, detail=f"Unknown field: {field}")
+
+    upload_dir = Path("uploads/elevators")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = Path(file.filename or "file").suffix or ".pdf"
+    filename = f"{elevator_id}_{field}_{uuid.uuid4().hex[:8]}{ext}"
+    (upload_dir / filename).write_bytes(await file.read())
+
+    url = f"/uploads/elevators/{filename}"
+
+    elev = db.query(elevator_service.Elevator).filter_by(id=elevator_id).first()
+    if not elev:
+        raise HTTPException(status_code=404, detail="Elevator not found")
+
+    setattr(elev, field, url)
+    db.commit()
+    return {"url": url, "field": field}

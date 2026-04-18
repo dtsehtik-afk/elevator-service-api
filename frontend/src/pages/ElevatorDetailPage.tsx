@@ -6,6 +6,7 @@ import {
   Checkbox, Textarea, Anchor, Modal, Divider,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
+import { FileInput } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { getElevator, updateElevator, getElevatorCalls } from '../api/elevators'
@@ -126,14 +127,33 @@ export default function ElevatorDetailPage() {
   })
 
   const addContactMutation = useMutation({
-    mutationFn: (d: any) => client.post('/contacts', d),
+    mutationFn: async (contactData: any) => {
+      let buildingId = elevator!.building_id
+      if (!buildingId) {
+        const bRes = await client.post('/buildings', { address: elevator!.address, city: elevator!.city })
+        buildingId = bRes.data.id
+        await updateElevator(id!, { building_id: buildingId } as any)
+      }
+      return client.post('/contacts', { ...contactData, building_id: buildingId })
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['elevator-contacts', elevator?.building_id] })
+      qc.invalidateQueries({ queryKey: ['elevator', id] })
+      qc.invalidateQueries({ queryKey: ['elevator-contacts'] })
       setAddContactOpen(false)
       setNewContact({ name: '', phone: '', email: '', role: 'VAAD' })
       notifications.show({ message: 'איש קשר נוסף', color: 'green' })
     },
   })
+
+  async function uploadFile(field: 'drive_link' | 'last_inspection_report_url', file: File) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const { data } = await client.post(`/elevators/${id}/upload-file?field=${field}`, fd)
+    set(field, data.url)
+    await updateElevator(id!, { [field]: data.url } as any)
+    qc.invalidateQueries({ queryKey: ['elevator', id] })
+    notifications.show({ message: 'הקובץ הועלה', color: 'green' })
+  }
 
   const deleteContactMutation = useMutation({
     mutationFn: (contactId: string) => client.delete(`/contacts/${contactId}`),
@@ -304,13 +324,13 @@ export default function ElevatorDetailPage() {
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
                   <Checkbox
-                    label="קודן — מעלית עם קוד כניסה"
+                    label="קוד כניסה לבניין"
                     checked={form.is_coded ?? false}
                     onChange={e => set('is_coded', e.target.checked)}
                     mt="sm"
                   />
                 ) : (
-                  <Field label="קודן">
+                  <Field label="קוד כניסה לבניין">
                     {elevator.is_coded ? <Badge color="grape">כן</Badge> : <Text fw={500}>לא</Text>}
                   </Field>
                 )}
@@ -480,9 +500,6 @@ export default function ElevatorDetailPage() {
         {/* ── CONTACTS ── */}
         <Tabs.Panel value="contacts" pt="md">
           <Stack gap="md">
-            {!elevator.building_id && (
-              <Alert color="yellow">מעלית זו לא משויכת לבניין — לא ניתן להוסיף אנשי קשר</Alert>
-            )}
 
             {/* ועד הבית */}
             <Paper withBorder p="md" radius="md">
@@ -491,9 +508,7 @@ export default function ElevatorDetailPage() {
                   <Text fw={700}>ועד הבית</Text>
                   <Badge color="blue" size="xs" variant="light">{contacts.filter(c => c.role === 'VAAD').length}</Badge>
                 </Group>
-                {elevator.building_id && (
-                  <Button size="xs" variant="light" onClick={() => openAddContact('VAAD')}>+ הוסף ועד</Button>
-                )}
+                <Button size="xs" variant="light" onClick={() => openAddContact('VAAD')}>+ הוסף ועד</Button>
               </Group>
               {contacts.filter(c => c.role === 'VAAD').length === 0 ? (
                 <Text size="sm" c="dimmed">אין אנשי ועד רשומים</Text>
@@ -528,9 +543,7 @@ export default function ElevatorDetailPage() {
                       {residentsExpanded ? '▲ צמצם' : '▼ הצג הכל'}
                     </Button>
                   )}
-                  {elevator.building_id && (
-                    <Button size="xs" variant="light" color="teal" onClick={() => openAddContact('RESIDENT')}>+ הוסף דייר</Button>
-                  )}
+                  <Button size="xs" variant="light" color="teal" onClick={() => openAddContact('RESIDENT')}>+ הוסף דייר</Button>
                 </Group>
               </Group>
               {contacts.filter(c => c.role === 'RESIDENT').length === 0 ? (
@@ -563,14 +576,14 @@ export default function ElevatorDetailPage() {
             </Paper>
 
             {/* אחרים — חייגן, ניהול, אחר */}
-            {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).length > 0 && (
-              <Paper withBorder p="md" radius="md">
-                <Group justify="space-between" mb="sm">
-                  <Text fw={700}>אנשי קשר נוספים</Text>
-                  {elevator.building_id && (
-                    <Button size="xs" variant="subtle" onClick={() => openAddContact('OTHER')}>+ הוסף</Button>
-                  )}
-                </Group>
+            <Paper withBorder p="md" radius="md">
+              <Group justify="space-between" mb="sm">
+                <Text fw={700}>אנשי קשר נוספים</Text>
+                <Button size="xs" variant="subtle" onClick={() => openAddContact('OTHER')}>+ הוסף</Button>
+              </Group>
+              {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).length === 0 ? (
+                <Text size="sm" c="dimmed">אין אנשי קשר נוספים</Text>
+              ) : (
                 <Stack gap="xs">
                   {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).map(c => (
                     <Group key={c.id} justify="space-between" p="xs" style={{ borderRadius: 8, background: 'var(--mantine-color-gray-0)' }}>
@@ -588,8 +601,8 @@ export default function ElevatorDetailPage() {
                     </Group>
                   ))}
                 </Stack>
-              </Paper>
-            )}
+              )}
+            </Paper>
           </Stack>
         </Tabs.Panel>
 
@@ -622,15 +635,22 @@ export default function ElevatorDetailPage() {
                 )}
               </Grid.Col>
               <Grid.Col span={12}>
-                {editing ? (
-                  <TextInput label="קישור להסכם (Google Drive)" placeholder="https://drive.google.com/..." value={form.drive_link ?? ''} onChange={e => set('drive_link', e.target.value || null)} />
-                ) : (
-                  <Field label="הסכם שירות">
-                    {elevator.drive_link
-                      ? <Anchor href={elevator.drive_link} target="_blank" size="sm">📄 פתח הסכם</Anchor>
-                      : <Text fw={500}>—</Text>}
-                  </Field>
-                )}
+                <Field label="הסכם שירות">
+                  <Group gap="xs" wrap="nowrap">
+                    {editing
+                      ? <TextInput placeholder="https://drive.google.com/..." value={form.drive_link ?? ''} onChange={e => set('drive_link', e.target.value || null)} style={{ flex: 1 }} />
+                      : elevator.drive_link
+                        ? <Anchor href={elevator.drive_link} target="_blank" size="sm">📄 פתח הסכם</Anchor>
+                        : <Text fw={500} size="sm">—</Text>
+                    }
+                    <FileInput
+                      placeholder="העלה PDF"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      size="xs"
+                      onChange={f => f && uploadFile('drive_link', f)}
+                    />
+                  </Group>
+                </Field>
               </Grid.Col>
             </Grid>
           </Paper>
@@ -694,15 +714,22 @@ export default function ElevatorDetailPage() {
                 )}
               </Grid.Col>
               <Grid.Col span={12}>
-                {editing ? (
-                  <TextInput label="קישור לתסקיר אחרון (Google Drive / PDF)" placeholder="https://..." value={form.last_inspection_report_url ?? ''} onChange={e => set('last_inspection_report_url', e.target.value || null)} />
-                ) : (
-                  <Field label="תסקיר אחרון">
-                    {elevator.last_inspection_report_url
-                      ? <Anchor href={elevator.last_inspection_report_url} target="_blank" size="sm">📋 פתח תסקיר</Anchor>
-                      : <Text fw={500}>—</Text>}
-                  </Field>
-                )}
+                <Field label="תסקיר אחרון">
+                  <Group gap="xs" wrap="nowrap">
+                    {editing
+                      ? <TextInput placeholder="https://..." value={form.last_inspection_report_url ?? ''} onChange={e => set('last_inspection_report_url', e.target.value || null)} style={{ flex: 1 }} />
+                      : elevator.last_inspection_report_url
+                        ? <Anchor href={elevator.last_inspection_report_url} target="_blank" size="sm">📋 פתח תסקיר</Anchor>
+                        : <Text fw={500} size="sm">—</Text>
+                    }
+                    <FileInput
+                      placeholder="העלה PDF"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      size="xs"
+                      onChange={f => f && uploadFile('last_inspection_report_url', f)}
+                    />
+                  </Group>
+                </Field>
               </Grid.Col>
             </Grid>
           </Paper>
