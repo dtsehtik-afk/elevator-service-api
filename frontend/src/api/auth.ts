@@ -15,3 +15,11 @@ export async function getMe(): Promise<Technician> {
   const { data } = await client.get<Technician>('/auth/me')
   return data
 }
+
+export async function forgotPassword(phone: string): Promise<void> {
+  await client.post('/auth/forgot-password', { phone })
+}
+
+export async function resetPassword(phone: string, otp: string, newPassword: string): Promise<void> {
+  await client.post('/auth/reset-password', { phone, otp, new_password: newPassword })
+}
