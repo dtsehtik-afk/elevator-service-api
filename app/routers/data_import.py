@@ -28,10 +28,26 @@ router = APIRouter(prefix="/import", tags=["Data Import"])
 
 # Cities known from the data — used to split "address city" strings
 _KNOWN_CITIES = [
-    "עפולה", "נצרת", "יוקנעם עלית", "יוקנעם", "טירת כרמל", "קרית שמואל",
-    "חיפה", "תל אביב", "ירושלים", "באר שבע", "אשדוד", "אשקלון",
-    "יפיע", "שפרעם", "סחנין", "עראבה", "מגדל העמק", "בית שאן",
-    "אור עקיבא", "זכרון יעקב", "פרדס חנה", "בנימינה", "קיסריה",
+    # North
+    "נוף הגליל", "נצרת עילית", "נצרת", "עפולה", "יוקנעם עלית", "יוקנעם",
+    "כרמיאל", "עכו", "נהריה", "טבריה", "צפת", "קצרין", "מגדל העמק",
+    "בית שאן", "קריית שמונה", "ראש פינה", "חצור הגלילית",
+    "יפיע", "שפרעם", "סחנין", "עראבה", "טמרה", "באקה אל גרביה",
+    "אום אל פחם", "ג'לג'וליה", "טייבה", "קלנסווה",
+    # Haifa area
+    "חיפה", "טירת כרמל", "קרית ים", "קרית ביאליק", "קרית מוצקין",
+    "קרית אתא", "נשר", "קרית שמואל", "זכרון יעקב", "פרדס חנה כרכור",
+    "פרדס חנה", "בנימינה", "קיסריה", "חדרה", "אור עקיבא",
+    # Center
+    "תל אביב", "רמת גן", "בני ברק", "פתח תקווה", "גבעתיים", "חולון",
+    "בת ים", "ראשון לציון", "רמלה", "לוד", "רחובות", "נס ציונה",
+    "מודיעין", "מודיעין עילית", "ראש העין", "הרצליה", "רעננה",
+    "כפר סבא", "נתניה", "הוד השרון", "אלעד", "יהוד",
+    # Jerusalem area
+    "ירושלים", "בית שמש", "מעלה אדומים", "גבעת זאב", "ביתר עילית",
+    # South
+    "באר שבע", "אשדוד", "אשקלון", "קרית גת", "נתיבות", "שדרות",
+    "אופקים", "דימונה", "ערד", "אילת",
 ]
 
 _DUMMY_DATES = {"01/01/51", "1/1/51", "01/01/2051", "1/1/2051"}
@@ -104,34 +120,59 @@ def _geocode_nominatim(address: str, city: str) -> tuple[Optional[float], Option
     return None, None
 
 
+def _parse_excel(content: bytes) -> list[dict]:
+    """Parse .xlsx / .xls binary into list of row dicts."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    ws = wb.active
+    rows_raw = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows_raw:
+        return []
+    header = [str(h).strip() if h is not None else f"col{i}" for i, h in enumerate(rows_raw[0])]
+    result = []
+    for row in rows_raw[1:]:
+        if not any(cell is not None for cell in row):
+            continue
+        row_dict = {header[i]: (str(row[i]).strip() if row[i] is not None else "") for i in range(len(header))}
+        result.append(row_dict)
+    return result
+
+
 def _parse_tsv(content: bytes) -> list[dict]:
-    """Parse tab-separated or whitespace-delimited content into list of row dicts."""
+    """Parse tab-separated or comma-separated text into list of row dicts."""
     text = content.decode("utf-8-sig", errors="replace")
     lines = [l for l in text.splitlines() if l.strip()]
     if not lines:
         return []
-
-    # Detect delimiter
-    delimiter = "\t" if "\t" in lines[0] else None
+    # Detect delimiter: tab > comma > whitespace
+    if "\t" in lines[0]:
+        delimiter = "\t"
+    elif "," in lines[0]:
+        delimiter = ","
+    else:
+        delimiter = None
 
     rows = []
     header = None
     for line in lines:
-        if delimiter:
-            parts = line.split("\t")
-        else:
-            parts = line.split()
-
+        parts = line.split(delimiter) if delimiter else line.split()
         if header is None:
             header = [p.strip() for p in parts]
             continue
         if len(parts) < 2:
             continue
-        row = {}
-        for i, h in enumerate(header):
-            row[h] = parts[i].strip() if i < len(parts) else ""
+        row = {header[i]: (parts[i].strip() if i < len(parts) else "") for i in range(len(header))}
         rows.append(row)
     return rows
+
+
+def _parse_file(content: bytes, filename: str) -> list[dict]:
+    """Route to correct parser based on file extension."""
+    name = (filename or "").lower()
+    if name.endswith(".xlsx") or name.endswith(".xls"):
+        return _parse_excel(content)
+    return _parse_tsv(content)
 
 
 def _process_file1(rows: list[dict]) -> dict[str, dict]:
@@ -223,12 +264,12 @@ def preview_import(
     Dry-run: parse both files and return what would be imported.
     Does NOT write to DB.
     """
-    rows1 = _parse_tsv(file1.file.read())
+    rows1 = _parse_file(file1.file.read(), file1.filename or "")
     data1 = _process_file1(rows1)
 
     data2 = {}
     if file2:
-        rows2 = _parse_tsv(file2.file.read())
+        rows2 = _parse_file(file2.file.read(), file2.filename or "")
         data2 = _process_file2(rows2)
 
     # Merge
@@ -285,12 +326,12 @@ def commit_import(
     - Creates Contact records for ועד contacts
     - Optionally geocodes new elevators via Nominatim (free)
     """
-    rows1 = _parse_tsv(file1.file.read())
+    rows1 = _parse_file(file1.file.read(), file1.filename or "")
     data1 = _process_file1(rows1)
 
     data2 = {}
     if file2:
-        rows2 = _parse_tsv(file2.file.read())
+        rows2 = _parse_file(file2.file.read(), file2.filename or "")
         data2 = _process_file2(rows2)
 
     # Merge: file2 wins for fields it provides
