@@ -1241,6 +1241,22 @@ def _poll_email_calls():
         db.close()
 
 
+def _poll_inspection_emails():
+    """Scan Gmail every hour for inspection report attachments (PDFs / images)."""
+    from app.database import SessionLocal
+    from app.services.inspection_email_poller import poll_inspection_emails
+
+    db = SessionLocal()
+    try:
+        count = poll_inspection_emails(db)
+        if count:
+            logger.info("📄 Inspection email scan — %d report(s) processed", count)
+    except Exception as exc:
+        logger.error("📄 Inspection email scan job failed: %s", exc)
+    finally:
+        db.close()
+
+
 def _check_location_reminders():
     """
     Every 5 minutes during working hours: if a technician opened the tracking page
@@ -1379,6 +1395,7 @@ def start_scheduler():
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
+    _scheduler.add_job(_poll_inspection_emails,              "interval", hours=1)
     # _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)  # disabled
     _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
     _scheduler.start()

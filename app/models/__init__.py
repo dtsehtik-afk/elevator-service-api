@@ -10,6 +10,7 @@ from app.models.assignment import Assignment, AuditLog
 from app.models.maintenance import MaintenanceSchedule
 from app.models.incoming_call import IncomingCallLog
 from app.models.inspection_report import InspectionReport
+from app.models.inspection_email_scan import InspectionEmailScan
 
 __all__ = [
     "Building",
@@ -23,4 +24,5 @@ __all__ = [
     "MaintenanceSchedule",
     "IncomingCallLog",
     "InspectionReport",
+    "InspectionEmailScan",
 ]

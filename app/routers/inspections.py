@@ -90,6 +90,25 @@ def list_inspections(
     return result
 
 
+@router.post("/scan-emails", summary="Manually trigger Gmail inspection email scan (admin)")
+def trigger_email_scan(
+    since_days: int = Query(90, ge=1, le=365, description="How many days back to scan"),
+    db: Session = Depends(get_db),
+    _=Depends(require_dispatcher_or_admin),
+):
+    """
+    Manually trigger a scan of Gmail for inspection report emails.
+    By default scans the last 90 days; use since_days to adjust.
+    Emails are kept unread.
+    """
+    from datetime import date, timedelta
+    from app.services.inspection_email_poller import poll_inspection_emails
+
+    since = date.today() - timedelta(days=since_days)
+    count = poll_inspection_emails(db, since_date=since)
+    return {"reports_processed": count, "scanned_since": since.isoformat()}
+
+
 @router.post("/{report_id}/confirm", summary="Confirm elevator match for a pending inspection report")
 def confirm_inspection_match(
     report_id: str,
