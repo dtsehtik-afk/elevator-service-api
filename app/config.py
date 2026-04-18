@@ -62,13 +62,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_secrets(self):
-        import logging
-        _log = logging.getLogger(__name__)
         if self.environment == "production":
             if not self.secret_key:
                 raise ValueError("SECRET_KEY must be set in production")
             if not self.webhook_secret:
-                _log.warning("WEBHOOK_SECRET is not set — webhook endpoints are unprotected")
+                raise ValueError("WEBHOOK_SECRET must be set in production")
         return self
 
     @property

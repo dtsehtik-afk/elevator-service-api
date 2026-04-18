@@ -6,6 +6,7 @@ import {
   Checkbox, Textarea, Anchor, Modal, Divider,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
+import { FileInput } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { getElevator, updateElevator, getElevatorCalls } from '../api/elevators'
@@ -66,6 +67,12 @@ export default function ElevatorDetailPage() {
   const [addContactOpen, setAddContactOpen] = useState(false)
   const [newContact, setNewContact] = useState({ name: '', phone: '', email: '', role: 'VAAD' })
   const [residentsExpanded, setResidentsExpanded] = useState(false)
+  const [assignBuildingOpen, setAssignBuildingOpen] = useState(false)
+  const [assignCompanyOpen, setAssignCompanyOpen] = useState(false)
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null)
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
+  const [addToGroupOpen, setAddToGroupOpen] = useState(false)
+  const [elevatorSearch, setElevatorSearch] = useState('')
 
   const set = (key: string, value: any) => setForm(s => ({ ...s, [key]: value }))
   const dateSet = (key: string, d: Date | null) => set(key, toISODate(d))
@@ -114,6 +121,43 @@ export default function ElevatorDetailPage() {
   })
   const siblings: any[] = (buildingDetail?.elevators ?? []).filter((e: any) => e.id !== id)
 
+  const { data: buildingsList = [] } = useQuery({
+    queryKey: ['buildings-list'],
+    queryFn: async () => (await client.get('/buildings?limit=500')).data,
+    enabled: assignBuildingOpen,
+  })
+
+  const { data: companiesList = [] } = useQuery({
+    queryKey: ['companies-list'],
+    queryFn: async () => (await client.get('/management-companies')).data,
+    enabled: assignCompanyOpen,
+  })
+
+  const { data: companyDetail } = useQuery({
+    queryKey: ['company-detail', elevator?.management_company_id],
+    queryFn: async () => (await client.get(`/management-companies/${elevator!.management_company_id}`)).data,
+    enabled: !!elevator?.management_company_id,
+  })
+
+  const { data: potentialSiblings = [] } = useQuery<any[]>({
+    queryKey: ['potential-siblings', id],
+    queryFn: async () => {
+      const res = await client.get(`/elevators?city=${encodeURIComponent(elevator!.city)}&limit=100`)
+      return res.data.filter((e: any) =>
+        e.id !== id &&
+        e.address === elevator!.address &&
+        (!e.building_id || e.building_id !== elevator!.building_id)
+      )
+    },
+    enabled: !!elevator,
+    staleTime: 60000,
+  })
+
+  const { data: allElevatorsForSearch = [] } = useQuery<any[]>({
+    queryKey: ['elevators'],
+    enabled: addToGroupOpen,
+  })
+
   const updateMutation = useMutation({
     mutationFn: (payload: any) => updateElevator(id!, payload),
     onSuccess: () => {
@@ -126,18 +170,93 @@ export default function ElevatorDetailPage() {
   })
 
   const addContactMutation = useMutation({
-    mutationFn: (d: any) => client.post('/contacts', d),
+    mutationFn: async (contactData: any) => {
+      let buildingId = elevator!.building_id
+      if (!buildingId) {
+        const bRes = await client.post('/buildings', { address: elevator!.address, city: elevator!.city })
+        buildingId = bRes.data.id
+        await updateElevator(id!, { building_id: buildingId } as any)
+      }
+      return client.post('/contacts', { ...contactData, building_id: buildingId })
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['elevator-contacts', elevator?.building_id] })
+      qc.invalidateQueries({ queryKey: ['elevator', id] })
+      qc.invalidateQueries({ queryKey: ['elevator-contacts'] })
       setAddContactOpen(false)
       setNewContact({ name: '', phone: '', email: '', role: 'VAAD' })
       notifications.show({ message: 'איש קשר נוסף', color: 'green' })
     },
   })
 
+  async function uploadFile(field: 'drive_link' | 'last_inspection_report_url', file: File) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const { data } = await client.post(`/elevators/${id}/upload-file?field=${field}`, fd)
+    set(field, data.url)
+    await updateElevator(id!, { [field]: data.url } as any)
+    qc.invalidateQueries({ queryKey: ['elevator', id] })
+    notifications.show({ message: 'הקובץ הועלה', color: 'green' })
+  }
+
   const deleteContactMutation = useMutation({
     mutationFn: (contactId: string) => client.delete(`/contacts/${contactId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['elevator-contacts', elevator?.building_id] }),
+  })
+
+  const assignBuildingMutation = useMutation({
+    mutationFn: (buildingId: string | null) => updateElevator(id!, { building_id: buildingId } as any),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['elevator', id] })
+      qc.invalidateQueries({ queryKey: ['building-detail'] })
+      qc.invalidateQueries({ queryKey: ['potential-siblings', id] })
+      setAssignBuildingOpen(false)
+      setSelectedBuildingId(null)
+      notifications.show({ message: 'שיוך הבניין עודכן', color: 'green' })
+    },
+  })
+
+  const assignCompanyMutation = useMutation({
+    mutationFn: (companyId: string | null) => updateElevator(id!, { management_company_id: companyId } as any),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['elevator', id] })
+      qc.invalidateQueries({ queryKey: ['company-detail'] })
+      setAssignCompanyOpen(false)
+      setSelectedCompanyId(null)
+      notifications.show({ message: 'שיוך חברת הניהול עודכן', color: 'green' })
+    },
+  })
+
+  const addElevatorToGroupMutation = useMutation({
+    mutationFn: (otherElevatorId: string) =>
+      client.put(`/elevators/${otherElevatorId}`, { building_id: elevator!.building_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['building-detail', elevator!.building_id] })
+      qc.invalidateQueries({ queryKey: ['elevators'] })
+      setAddToGroupOpen(false)
+      setElevatorSearch('')
+      notifications.show({ message: 'מעלית נוספה לקבוצה', color: 'green' })
+    },
+  })
+
+  const autoGroupMutation = useMutation({
+    mutationFn: async () => {
+      let buildingId = elevator!.building_id
+      if (!buildingId) {
+        const bRes = await client.post('/buildings', { address: elevator!.address, city: elevator!.city })
+        buildingId = bRes.data.id
+        await updateElevator(id!, { building_id: buildingId } as any)
+      }
+      await Promise.all(potentialSiblings.map((s: any) =>
+        client.put(`/elevators/${s.id}`, { building_id: buildingId })
+      ))
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['elevator', id] })
+      qc.invalidateQueries({ queryKey: ['building-detail'] })
+      qc.invalidateQueries({ queryKey: ['potential-siblings', id] })
+      qc.invalidateQueries({ queryKey: ['elevators'] })
+      notifications.show({ message: `${potentialSiblings.length + 1} מעליות קושרו לקבוצה`, color: 'green' })
+    },
   })
 
   if (isLoading) return <Center h={400}><Loader /></Center>
@@ -200,6 +319,106 @@ export default function ElevatorDetailPage() {
         </Stack>
       </Modal>
 
+      {/* Assign building modal */}
+      <Modal opened={assignBuildingOpen} onClose={() => { setAssignBuildingOpen(false); setSelectedBuildingId(null) }} title="שיוך לקבוצה / בניין" dir="rtl">
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">בחר בניין קיים כדי לשתף אנשי קשר עם מעליות אחרות, או צור קבוצה חדשה לכתובת זו.</Text>
+          <Select
+            label="בניין קיים"
+            placeholder="חפש לפי כתובת..."
+            searchable clearable
+            data={(buildingsList as any[]).map((b: any) => ({
+              value: b.id,
+              label: `${b.address}, ${b.city}${b.elevator_count > 0 ? ` (${b.elevator_count} מעליות)` : ''}`,
+            }))}
+            value={selectedBuildingId}
+            onChange={setSelectedBuildingId}
+          />
+          <Button
+            disabled={!selectedBuildingId}
+            loading={assignBuildingMutation.isPending}
+            onClick={() => assignBuildingMutation.mutate(selectedBuildingId!)}
+          >
+            שייך לבניין הנבחר
+          </Button>
+          <Divider label="או" labelPosition="center" />
+          <Button variant="outline" loading={assignBuildingMutation.isPending}
+            onClick={async () => {
+              const bRes = await client.post('/buildings', { address: elevator!.address, city: elevator!.city })
+              assignBuildingMutation.mutate(bRes.data.id)
+            }}
+          >
+            צור קבוצה חדשה לכתובת זו
+          </Button>
+        </Stack>
+      </Modal>
+
+      {/* Assign company modal */}
+      <Modal opened={assignCompanyOpen} onClose={() => { setAssignCompanyOpen(false); setSelectedCompanyId(null) }} title="שיוך לחברת ניהול" dir="rtl">
+        <Stack gap="sm">
+          <Select
+            label="חברת ניהול"
+            placeholder="חפש חברה..."
+            searchable clearable
+            data={(companiesList as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+            value={selectedCompanyId}
+            onChange={setSelectedCompanyId}
+          />
+          <Button
+            disabled={!selectedCompanyId}
+            loading={assignCompanyMutation.isPending}
+            onClick={() => assignCompanyMutation.mutate(selectedCompanyId!)}
+          >
+            שייך
+          </Button>
+        </Stack>
+      </Modal>
+
+      {/* Add elevator to group modal */}
+      <Modal opened={addToGroupOpen} onClose={() => { setAddToGroupOpen(false); setElevatorSearch('') }} title="הוסף מעלית לקבוצה" dir="rtl">
+        <Stack gap="sm">
+          <TextInput
+            label="חפש מעלית"
+            placeholder="כתובת, מס׳ סידורי, עיר..."
+            value={elevatorSearch}
+            onChange={e => setElevatorSearch(e.target.value)}
+          />
+          <Stack gap="xs" style={{ maxHeight: 300, overflowY: 'auto' }}>
+            {(allElevatorsForSearch as any[])
+              .filter((e: any) =>
+                e.id !== id &&
+                elevatorSearch.length > 1 &&
+                (e.address?.includes(elevatorSearch) || e.city?.includes(elevatorSearch) ||
+                  (e.internal_number ?? '').includes(elevatorSearch) || (e.serial_number ?? '').includes(elevatorSearch))
+              )
+              .slice(0, 15)
+              .map((e: any) => (
+                <Paper key={e.id} withBorder p="xs" radius="sm"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => addElevatorToGroupMutation.mutate(e.id)}
+                >
+                  <Group justify="space-between">
+                    <Stack gap={0}>
+                      <Text size="sm" fw={500}>{e.address}, {e.city}</Text>
+                      {e.internal_number && <Text size="xs" c="dimmed">#{e.internal_number}</Text>}
+                    </Stack>
+                    <Badge color={e.building_id ? 'orange' : 'gray'} size="xs" variant="light">
+                      {e.building_id ? 'כבר בקבוצה' : 'ללא קבוצה'}
+                    </Badge>
+                  </Group>
+                </Paper>
+              ))}
+            {elevatorSearch.length > 1 && (allElevatorsForSearch as any[]).filter((e: any) =>
+              e.id !== id &&
+              (e.address?.includes(elevatorSearch) || e.city?.includes(elevatorSearch) ||
+                (e.internal_number ?? '').includes(elevatorSearch))
+            ).length === 0 && (
+              <Text size="sm" c="dimmed" ta="center">לא נמצאו תוצאות</Text>
+            )}
+          </Stack>
+        </Stack>
+      </Modal>
+
       <Group>
         <ActionIcon variant="subtle" onClick={() => navigate('/elevators')}>←</ActionIcon>
         <Title order={2}>
@@ -241,6 +460,15 @@ export default function ElevatorDetailPage() {
         </Alert>
       )}
 
+      {potentialSiblings.length > 0 && !elevator.building_id && (
+        <Alert color="orange" title="מעליות שאינן בקבוצה" icon="🏢">
+          נמצאו {potentialSiblings.length} מעליות נוספות בכתובת {elevator.address} שאינן משויכות לאותו בניין.{' '}
+          <Button size="xs" variant="white" loading={autoGroupMutation.isPending} onClick={() => autoGroupMutation.mutate()}>
+            קישור אוטומטי
+          </Button>
+        </Alert>
+      )}
+
       <Tabs defaultValue="details">
         <Tabs.List>
           <Tabs.Tab value="details">פרטים</Tabs.Tab>
@@ -249,6 +477,12 @@ export default function ElevatorDetailPage() {
           <Tabs.Tab value="contract">חוזה</Tabs.Tab>
           <Tabs.Tab value="inspection">ביקורת</Tabs.Tab>
           <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>
+          {elevator.building_id && (
+            <Tabs.Tab value="group">קבוצה {siblings.length > 0 && `(${siblings.length + 1})`}</Tabs.Tab>
+          )}
+          {elevator.management_company_id && (
+            <Tabs.Tab value="management">חברת ניהול</Tabs.Tab>
+          )}
         </Tabs.List>
 
         {/* ── DETAILS ── */}
@@ -304,13 +538,13 @@ export default function ElevatorDetailPage() {
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
                   <Checkbox
-                    label="קודן — מעלית עם קוד כניסה"
+                    label="קוד כניסה לבניין"
                     checked={form.is_coded ?? false}
                     onChange={e => set('is_coded', e.target.checked)}
                     mt="sm"
                   />
                 ) : (
-                  <Field label="קודן">
+                  <Field label="קוד כניסה לבניין">
                     {elevator.is_coded ? <Badge color="grape">כן</Badge> : <Text fw={500}>לא</Text>}
                   </Field>
                 )}
@@ -369,35 +603,40 @@ export default function ElevatorDetailPage() {
                 ) : null}
               </Grid.Col>
 
-              {/* Building siblings */}
-              {siblings.length > 0 && (
-                <>
-                  <Grid.Col span={12}><Divider label={`מעליות אחיות בבניין (${siblings.length})`} labelPosition="right" mt="xs" /></Grid.Col>
-                  <Grid.Col span={12}>
-                    <Stack gap="xs">
-                      {siblings.map((s: any) => (
-                        <Paper
-                          key={s.id} withBorder p="xs" radius="sm"
-                          style={{ cursor: 'pointer' }}
-                          onClick={() => navigate(`/elevators/${s.id}`)}
-                        >
-                          <Group justify="space-between" wrap="nowrap">
-                            <Group gap="xs">
-                              <Text size="sm" fw={600}>
-                                {s.internal_number ? `#${s.internal_number}` : s.id.slice(0, 8)}
-                              </Text>
-                              <Text size="sm" c="dimmed">{s.building_name || s.address}</Text>
-                            </Group>
-                            <Badge color={ELEVATOR_STATUS_COLORS[s.status]} size="xs" variant="light">
-                              {ELEVATOR_STATUS_LABELS[s.status]}
-                            </Badge>
-                          </Group>
-                        </Paper>
-                      ))}
-                    </Stack>
-                  </Grid.Col>
-                </>
-              )}
+              {/* Group & management company checkboxes */}
+              <Grid.Col span={12}>
+                <Divider label="שיוכים" labelPosition="right" mt="sm" mb="sm" />
+                <Group gap="xl">
+                  <Checkbox
+                    label="מעלית בקבוצה"
+                    checked={!!elevator.building_id}
+                    onChange={() => {
+                      if (elevator.building_id) {
+                        assignBuildingMutation.mutate(null)
+                      } else {
+                        setAssignBuildingOpen(true)
+                      }
+                    }}
+                  />
+                  <Checkbox
+                    label="תחת חברת ניהול"
+                    checked={!!elevator.management_company_id}
+                    onChange={() => {
+                      if (elevator.management_company_id) {
+                        assignCompanyMutation.mutate(null)
+                      } else {
+                        setAssignCompanyOpen(true)
+                      }
+                    }}
+                  />
+                </Group>
+                {elevator.building_id && (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    {siblings.length > 0 ? `${siblings.length} מעליות נוספות בקבוצה זו` : 'מעלית זו היחידה בקבוצה'}
+                    {elevator.management_company_id && ` · ${elevator.management_company_name ?? 'חברת ניהול'}`}
+                  </Text>
+                )}
+              </Grid.Col>
             </Grid>
           </Paper>
         </Tabs.Panel>
@@ -480,9 +719,6 @@ export default function ElevatorDetailPage() {
         {/* ── CONTACTS ── */}
         <Tabs.Panel value="contacts" pt="md">
           <Stack gap="md">
-            {!elevator.building_id && (
-              <Alert color="yellow">מעלית זו לא משויכת לבניין — לא ניתן להוסיף אנשי קשר</Alert>
-            )}
 
             {/* ועד הבית */}
             <Paper withBorder p="md" radius="md">
@@ -491,9 +727,7 @@ export default function ElevatorDetailPage() {
                   <Text fw={700}>ועד הבית</Text>
                   <Badge color="blue" size="xs" variant="light">{contacts.filter(c => c.role === 'VAAD').length}</Badge>
                 </Group>
-                {elevator.building_id && (
-                  <Button size="xs" variant="light" onClick={() => openAddContact('VAAD')}>+ הוסף ועד</Button>
-                )}
+                <Button size="xs" variant="light" onClick={() => openAddContact('VAAD')}>+ הוסף ועד</Button>
               </Group>
               {contacts.filter(c => c.role === 'VAAD').length === 0 ? (
                 <Text size="sm" c="dimmed">אין אנשי ועד רשומים</Text>
@@ -528,9 +762,7 @@ export default function ElevatorDetailPage() {
                       {residentsExpanded ? '▲ צמצם' : '▼ הצג הכל'}
                     </Button>
                   )}
-                  {elevator.building_id && (
-                    <Button size="xs" variant="light" color="teal" onClick={() => openAddContact('RESIDENT')}>+ הוסף דייר</Button>
-                  )}
+                  <Button size="xs" variant="light" color="teal" onClick={() => openAddContact('RESIDENT')}>+ הוסף דייר</Button>
                 </Group>
               </Group>
               {contacts.filter(c => c.role === 'RESIDENT').length === 0 ? (
@@ -563,14 +795,14 @@ export default function ElevatorDetailPage() {
             </Paper>
 
             {/* אחרים — חייגן, ניהול, אחר */}
-            {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).length > 0 && (
-              <Paper withBorder p="md" radius="md">
-                <Group justify="space-between" mb="sm">
-                  <Text fw={700}>אנשי קשר נוספים</Text>
-                  {elevator.building_id && (
-                    <Button size="xs" variant="subtle" onClick={() => openAddContact('OTHER')}>+ הוסף</Button>
-                  )}
-                </Group>
+            <Paper withBorder p="md" radius="md">
+              <Group justify="space-between" mb="sm">
+                <Text fw={700}>אנשי קשר נוספים</Text>
+                <Button size="xs" variant="subtle" onClick={() => openAddContact('OTHER')}>+ הוסף</Button>
+              </Group>
+              {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).length === 0 ? (
+                <Text size="sm" c="dimmed">אין אנשי קשר נוספים</Text>
+              ) : (
                 <Stack gap="xs">
                   {contacts.filter(c => !['VAAD', 'RESIDENT'].includes(c.role)).map(c => (
                     <Group key={c.id} justify="space-between" p="xs" style={{ borderRadius: 8, background: 'var(--mantine-color-gray-0)' }}>
@@ -588,8 +820,8 @@ export default function ElevatorDetailPage() {
                     </Group>
                   ))}
                 </Stack>
-              </Paper>
-            )}
+              )}
+            </Paper>
           </Stack>
         </Tabs.Panel>
 
@@ -622,15 +854,22 @@ export default function ElevatorDetailPage() {
                 )}
               </Grid.Col>
               <Grid.Col span={12}>
-                {editing ? (
-                  <TextInput label="קישור להסכם (Google Drive)" placeholder="https://drive.google.com/..." value={form.drive_link ?? ''} onChange={e => set('drive_link', e.target.value || null)} />
-                ) : (
-                  <Field label="הסכם שירות">
-                    {elevator.drive_link
-                      ? <Anchor href={elevator.drive_link} target="_blank" size="sm">📄 פתח הסכם</Anchor>
-                      : <Text fw={500}>—</Text>}
-                  </Field>
-                )}
+                <Field label="הסכם שירות">
+                  <Group gap="xs" wrap="nowrap">
+                    {editing
+                      ? <TextInput placeholder="https://drive.google.com/..." value={form.drive_link ?? ''} onChange={e => set('drive_link', e.target.value || null)} style={{ flex: 1 }} />
+                      : elevator.drive_link
+                        ? <Anchor href={elevator.drive_link} target="_blank" size="sm">📄 פתח הסכם</Anchor>
+                        : <Text fw={500} size="sm">—</Text>
+                    }
+                    <FileInput
+                      placeholder="העלה PDF"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      size="xs"
+                      onChange={f => f && uploadFile('drive_link', f)}
+                    />
+                  </Group>
+                </Field>
               </Grid.Col>
             </Grid>
           </Paper>
@@ -694,15 +933,22 @@ export default function ElevatorDetailPage() {
                 )}
               </Grid.Col>
               <Grid.Col span={12}>
-                {editing ? (
-                  <TextInput label="קישור לתסקיר אחרון (Google Drive / PDF)" placeholder="https://..." value={form.last_inspection_report_url ?? ''} onChange={e => set('last_inspection_report_url', e.target.value || null)} />
-                ) : (
-                  <Field label="תסקיר אחרון">
-                    {elevator.last_inspection_report_url
-                      ? <Anchor href={elevator.last_inspection_report_url} target="_blank" size="sm">📋 פתח תסקיר</Anchor>
-                      : <Text fw={500}>—</Text>}
-                  </Field>
-                )}
+                <Field label="תסקיר אחרון">
+                  <Group gap="xs" wrap="nowrap">
+                    {editing
+                      ? <TextInput placeholder="https://..." value={form.last_inspection_report_url ?? ''} onChange={e => set('last_inspection_report_url', e.target.value || null)} style={{ flex: 1 }} />
+                      : elevator.last_inspection_report_url
+                        ? <Anchor href={elevator.last_inspection_report_url} target="_blank" size="sm">📋 פתח תסקיר</Anchor>
+                        : <Text fw={500} size="sm">—</Text>
+                    }
+                    <FileInput
+                      placeholder="העלה PDF"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      size="xs"
+                      onChange={f => f && uploadFile('last_inspection_report_url', f)}
+                    />
+                  </Group>
+                </Field>
               </Grid.Col>
             </Grid>
           </Paper>
@@ -738,6 +984,140 @@ export default function ElevatorDetailPage() {
               </Table>
             )}
           </Paper>
+        </Tabs.Panel>
+
+        {/* ── GROUP ── */}
+        <Tabs.Panel value="group" pt="md">
+          <Stack gap="md">
+            <Group justify="space-between">
+              <Text fw={700}>מעליות בקבוצה ({siblings.length + 1})</Text>
+              <Button size="xs" onClick={() => setAddToGroupOpen(true)}>+ הוסף מעלית לקבוצה</Button>
+            </Group>
+
+            {/* Current elevator */}
+            <Paper withBorder p="xs" radius="sm" style={{ background: 'var(--mantine-color-blue-0)' }}>
+              <Group justify="space-between" wrap="nowrap">
+                <Group gap="xs">
+                  <Text size="sm" fw={600} c="blue">
+                    {elevator.internal_number ? `#${elevator.internal_number}` : elevator.id.slice(0, 8)}
+                  </Text>
+                  <Text size="sm" c="dimmed">{elevator.building_name || elevator.address}</Text>
+                  <Badge size="xs" color="blue" variant="dot">נוכחית</Badge>
+                </Group>
+                <Badge color={ELEVATOR_STATUS_COLORS[elevator.status]} size="xs" variant="light">
+                  {ELEVATOR_STATUS_LABELS[elevator.status]}
+                </Badge>
+              </Group>
+            </Paper>
+
+            {siblings.map((s: any) => (
+              <Paper key={s.id} withBorder p="xs" radius="sm" style={{ cursor: 'pointer' }} onClick={() => navigate(`/elevators/${s.id}`)}>
+                <Group justify="space-between" wrap="nowrap">
+                  <Group gap="xs">
+                    <Text size="sm" fw={500}>{s.internal_number ? `#${s.internal_number}` : s.id.slice(0, 8)}</Text>
+                    <Text size="sm" c="dimmed">{s.building_name || s.address}</Text>
+                  </Group>
+                  <Group gap="xs">
+                    <Badge color={ELEVATOR_STATUS_COLORS[s.status]} size="xs" variant="light">
+                      {ELEVATOR_STATUS_LABELS[s.status]}
+                    </Badge>
+                    <ActionIcon size="xs" color="red" variant="subtle"
+                      onClick={e => {
+                        e.stopPropagation()
+                        client.put(`/elevators/${s.id}`, { building_id: null }).then(() => {
+                          qc.invalidateQueries({ queryKey: ['building-detail', elevator.building_id] })
+                        })
+                      }}
+                    >✕</ActionIcon>
+                  </Group>
+                </Group>
+              </Paper>
+            ))}
+
+            {siblings.length === 0 && (
+              <Text size="sm" c="dimmed">אין מעליות נוספות בקבוצה זו. לחץ "+ הוסף מעלית לקבוצה" כדי לשייך מעלית.</Text>
+            )}
+
+            <Divider />
+            <Button variant="subtle" color="red" size="xs" onClick={() => assignBuildingMutation.mutate(null)}>
+              הסר מעלית זו מהקבוצה
+            </Button>
+          </Stack>
+        </Tabs.Panel>
+
+        {/* ── MANAGEMENT COMPANY ── */}
+        <Tabs.Panel value="management" pt="md">
+          <Stack gap="md">
+            {companyDetail ? (
+              <Paper withBorder p="md" radius="md">
+                <Group justify="space-between" mb="sm" align="flex-start">
+                  <Stack gap={2}>
+                    <Text fw={700} size="lg">{companyDetail.name}</Text>
+                    {companyDetail.contact_name && <Text size="sm" c="dimmed">{companyDetail.contact_name}</Text>}
+                  </Stack>
+                  <Button size="xs" variant="light" onClick={() => navigate('/management-companies')}>
+                    לדף חברות הניהול ←
+                  </Button>
+                </Group>
+                <Grid>
+                  {companyDetail.phone && (
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                      <Field label="טלפון">
+                        <Anchor href={`tel:${companyDetail.phone}`} size="sm">{companyDetail.phone}</Anchor>
+                      </Field>
+                    </Grid.Col>
+                  )}
+                  {companyDetail.email && (
+                    <Grid.Col span={{ base: 12, sm: 6 }}>
+                      <Field label="מייל">
+                        <Anchor href={`mailto:${companyDetail.email}`} size="sm">{companyDetail.email}</Anchor>
+                      </Field>
+                    </Grid.Col>
+                  )}
+                  {companyDetail.notes && (
+                    <Grid.Col span={12}>
+                      <Field label="הערות" value={companyDetail.notes} />
+                    </Grid.Col>
+                  )}
+                </Grid>
+              </Paper>
+            ) : (
+              <Text size="sm" c="dimmed">טוען פרטי חברה...</Text>
+            )}
+
+            {/* Other elevators under same company */}
+            {(companyDetail?.elevators ?? []).filter((e: any) => e.id !== id).length > 0 && (
+              <Stack gap="xs">
+                <Text fw={600}>
+                  מעליות נוספות תחת חברה זו ({(companyDetail?.elevators ?? []).filter((e: any) => e.id !== id).length})
+                </Text>
+                {(companyDetail?.elevators ?? []).filter((e: any) => e.id !== id).map((e: any) => (
+                  <Paper key={e.id} withBorder p="xs" radius="sm"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/elevators/${e.id}`)}
+                  >
+                    <Group justify="space-between">
+                      <Stack gap={0}>
+                        <Text size="sm" fw={500}>{e.address}</Text>
+                        <Text size="xs" c="dimmed">{e.city}</Text>
+                      </Stack>
+                      <Badge color={ELEVATOR_STATUS_COLORS[e.status ?? 'ACTIVE']} size="xs" variant="light">
+                        {ELEVATOR_STATUS_LABELS[e.status ?? 'ACTIVE']}
+                      </Badge>
+                    </Group>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+
+            <Divider />
+            <Button variant="subtle" color="red" size="xs"
+              loading={assignCompanyMutation.isPending}
+              onClick={() => assignCompanyMutation.mutate(null)}
+            >
+              הסר מחברת הניהול
+            </Button>
+          </Stack>
         </Tabs.Panel>
       </Tabs>
     </Stack>
