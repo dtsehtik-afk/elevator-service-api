@@ -127,6 +127,11 @@ class Elevator(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # ── Computed helpers ──────────────────────────────────────────────────────
+    @property
+    def management_company_name(self) -> Optional[str]:
+        return self.management_company.name if self.management_company else None
+
     # ── Relationships ─────────────────────────────────────────────────────────
     building: Mapped[Optional["Building"]] = relationship(  # noqa: F821
         "Building", back_populates="elevators", foreign_keys=[building_id]

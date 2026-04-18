@@ -2,9 +2,9 @@
 
 import uuid
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ElevatorBase(BaseModel):
@@ -76,6 +76,22 @@ class ElevatorUpdate(BaseModel):
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
     # Grouping
     management_company_id: Optional[uuid.UUID] = None
+
+    @field_validator(
+        'address', 'city', 'building_name', 'notes', 'internal_number',
+        'labor_file_number', 'model', 'manufacturer', 'serial_number',
+        'warranty_end', 'entry_code', 'contact_phone', 'intercom_phone',
+        'service_type', 'service_contract', 'drive_link', 'inspector_name',
+        'inspector_phone', 'inspector_mobile', 'inspector_email',
+        'last_inspection_report_url',
+        mode='before',
+    )
+    @classmethod
+    def empty_str_to_none(cls, v: Any) -> Any:
+        """Convert empty strings to None so unique-column constraints aren't violated."""
+        if v == '':
+            return None
+        return v
 
 
 class ElevatorResponse(BaseModel):

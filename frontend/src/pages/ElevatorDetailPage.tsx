@@ -166,7 +166,10 @@ export default function ElevatorDetailPage() {
       notifications.show({ message: 'פרטי המעלית עודכנו', color: 'green' })
       setEditing(false)
     },
-    onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
+    onError: (err: any) => notifications.show({
+      message: err?.response?.data?.detail ?? 'שגיאה בעדכון',
+      color: 'red',
+    }),
   })
 
   const addContactMutation = useMutation({

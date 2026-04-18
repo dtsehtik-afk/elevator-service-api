@@ -128,6 +128,9 @@ def update_elevator(
     Returns:
         Updated Elevator or None if not found.
     """
+    from sqlalchemy.exc import IntegrityError
+    from fastapi import HTTPException
+
     elevator = get_elevator(db, elevator_id)
     if not elevator:
         return None
@@ -137,7 +140,14 @@ def update_elevator(
     # Auto-recalculate next_service_date unless it was explicitly set in this call
     if "next_service_date" not in updates:
         _recalculate_next_service(elevator)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="שגיאת שמירה — ערך כפול בשדה ייחודי (מספר סידורי, מס״ד, וכד׳)",
+        ) from exc
     db.refresh(elevator)
     return elevator
 
