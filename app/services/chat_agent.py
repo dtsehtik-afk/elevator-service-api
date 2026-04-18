@@ -93,7 +93,9 @@ _GEMINI_TOOLS = [{
     ]
 }]
 
-_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+_GEMINI_PRIMARY = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+_GEMINI_FALLBACK = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+_GEMINI_URL = _GEMINI_PRIMARY
 
 
 # ── DB query functions (called when Claude invokes a tool) ────────────────────
@@ -524,7 +526,15 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
                 "contents": contents,
                 "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600},
             }
-            resp = client.post(f"{_GEMINI_URL}?key={s.gemini_api_key}", json=payload)
+            # Try primary model, fall back to gemini-1.5-flash on quota/503
+            for url in (_GEMINI_PRIMARY, _GEMINI_FALLBACK):
+                resp = client.post(f"{url}?key={s.gemini_api_key}", json=payload)
+                if resp.status_code not in (429, 503):
+                    break
+                logger.warning("Gemini %s returned %s, trying fallback", url, resp.status_code)
+            if not resp.is_success:
+                logger.error("Gemini API error %s: %s", resp.status_code, resp.text[:500])
+                raise httpx.HTTPStatusError(f"Gemini {resp.status_code}", request=resp.request, response=resp)
             resp.raise_for_status()
             data = resp.json()
 
