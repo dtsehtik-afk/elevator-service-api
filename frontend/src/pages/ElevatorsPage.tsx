@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, TextInput, Select, Badge, Text, Button,
   Paper, Table, Loader, Center, Pagination, Modal, NumberInput, ScrollArea,
-  Popover, Checkbox, ActionIcon, Tooltip,
+  Popover, Checkbox, ActionIcon, Tooltip, Accordion, SegmentedControl,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -58,6 +58,7 @@ export default function ElevatorsPage() {
   const xlsxInputRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
   const [importingXl, setImportingXl] = useState(false)
+  const [viewMode, setViewMode] = useState<'list' | 'groups'>('list')
 
   const [newElev, setNewElev] = useState({
     address: '', city: '', floor_count: 1,
@@ -83,6 +84,24 @@ export default function ElevatorsPage() {
   }, [elevators, search, statusFilter])
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  const groupedByBuilding = useMemo(() => {
+    if (viewMode !== 'groups') return { groups: [], ungrouped: [] as typeof elevators }
+    const byBuilding: Record<string, typeof elevators> = {}
+    const ungrouped: typeof elevators = []
+    for (const e of elevators) {
+      if (e.building_id) {
+        if (!byBuilding[e.building_id]) byBuilding[e.building_id] = []
+        byBuilding[e.building_id].push(e)
+      } else {
+        ungrouped.push(e)
+      }
+    }
+    const groups = Object.entries(byBuilding)
+      .filter(([, list]) => list.length >= 1)
+      .sort(([, a], [, b]) => b.length - a.length)
+    return { groups, ungrouped }
+  }, [elevators, viewMode])
 
   const createMutation = useMutation({
     mutationFn: createElevator,
@@ -144,7 +163,18 @@ export default function ElevatorsPage() {
   return (
     <Stack gap="lg">
       <Group justify="space-between">
-        <Title order={2}>מעליות ({filtered.length})</Title>
+        <Group gap="md">
+          <Title order={2}>מעליות ({filtered.length})</Title>
+          <SegmentedControl
+            size="xs"
+            value={viewMode}
+            onChange={v => setViewMode(v as 'list' | 'groups')}
+            data={[
+              { label: 'רשימה', value: 'list' },
+              { label: 'מעליות בקבוצה', value: 'groups' },
+            ]}
+          />
+        </Group>
         <Group>
           <input ref={xlsxInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleExcelImport} />
           <Button variant="filled" color="teal" loading={importingXl} onClick={() => xlsxInputRef.current?.click()}>יבוא מ-Excel</Button>
@@ -198,7 +228,7 @@ export default function ElevatorsPage() {
         </Popover>
       </Group>
 
-      <Paper withBorder radius="md">
+      {viewMode === 'list' && <Paper withBorder radius="md">
         {isLoading ? (
           <Center h={200}><Loader /></Center>
         ) : (
@@ -261,12 +291,80 @@ export default function ElevatorsPage() {
             </Table>
           </ScrollArea>
         )}
-      </Paper>
+      </Paper>}
 
-      {filtered.length > PAGE_SIZE && (
+      {viewMode === 'list' && filtered.length > PAGE_SIZE && (
         <Group justify="center">
           <Pagination total={Math.ceil(filtered.length / PAGE_SIZE)} value={page} onChange={setPage} />
         </Group>
+      )}
+
+      {/* ── Groups view ── */}
+      {viewMode === 'groups' && (
+        <Stack gap="md">
+          <Text fw={600} size="sm" c="dimmed">
+            {groupedByBuilding.groups.length} קבוצות · {groupedByBuilding.ungrouped.length} מעליות ללא קבוצה
+          </Text>
+          <Accordion multiple chevronPosition="right">
+            {groupedByBuilding.groups.map(([buildingId, list]) => {
+              const rep = list[0]
+              return (
+                <Accordion.Item key={buildingId} value={buildingId}>
+                  <Accordion.Control>
+                    <Group gap="xs">
+                      <Text fw={600}>{rep.address}, {rep.city}</Text>
+                      <Badge size="xs" color="blue" variant="light">{list.length} מעליות</Badge>
+                      {rep.building_name && <Text size="xs" c="dimmed">· {rep.building_name}</Text>}
+                    </Group>
+                  </Accordion.Control>
+                  <Accordion.Panel>
+                    <Stack gap="xs">
+                      {list.map(e => (
+                        <Paper key={e.id} withBorder p="xs" radius="sm"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/elevators/${e.id}`)}
+                        >
+                          <Group justify="space-between">
+                            <Group gap="xs">
+                              <Text size="sm" fw={500}>{e.serial_number ? `#${e.serial_number}` : e.id.slice(0, 8)}</Text>
+                              {e.building_name && <Text size="sm" c="dimmed">{e.building_name}</Text>}
+                            </Group>
+                            <Badge color={ELEVATOR_STATUS_COLORS[e.status]} size="xs" variant="light">
+                              {ELEVATOR_STATUS_LABELS[e.status]}
+                            </Badge>
+                          </Group>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  </Accordion.Panel>
+                </Accordion.Item>
+              )
+            })}
+          </Accordion>
+          {groupedByBuilding.ungrouped.length > 0 && (
+            <Paper withBorder p="md" radius="md">
+              <Text fw={600} mb="sm">ללא קבוצה ({groupedByBuilding.ungrouped.length})</Text>
+              <Stack gap="xs">
+                {groupedByBuilding.ungrouped.slice(0, 50).map(e => (
+                  <Paper key={e.id} withBorder p="xs" radius="sm"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/elevators/${e.id}`)}
+                  >
+                    <Group justify="space-between">
+                      <Text size="sm">{e.address}, {e.city}</Text>
+                      <Badge color={ELEVATOR_STATUS_COLORS[e.status]} size="xs" variant="light">
+                        {ELEVATOR_STATUS_LABELS[e.status]}
+                      </Badge>
+                    </Group>
+                  </Paper>
+                ))}
+                {groupedByBuilding.ungrouped.length > 50 && (
+                  <Text size="xs" c="dimmed" ta="center">+ {groupedByBuilding.ungrouped.length - 50} נוספות</Text>
+                )}
+              </Stack>
+            </Paper>
+          )}
+        </Stack>
       )}
 
       {/* ── Add elevator modal ── */}
