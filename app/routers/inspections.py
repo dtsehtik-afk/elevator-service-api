@@ -91,7 +91,11 @@ def list_inspections(
             "match_status": getattr(r, "match_status", "AUTO_MATCHED"),
             "match_score": getattr(r, "match_score", None),
             "processed_at": r.processed_at.isoformat() if r.processed_at else None,
-            "file_url": f"/inspections/{r.id}/file" if getattr(r, "file_path", None) else None,
+            "file_url": (
+                f"https://drive.google.com/file/d/{r.drive_file_id}/view"
+                if getattr(r, "drive_file_id", None)
+                else (f"/inspections/{r.id}/file" if getattr(r, "file_path", None) else None)
+            ),
             "report_status": getattr(r, "report_status", "NA"),
             "assigned_technician_id": str(r.assigned_technician_id) if getattr(r, "assigned_technician_id", None) else None,
             "assigned_technician_name": tech.name if tech else None,

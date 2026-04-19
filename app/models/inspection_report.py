@@ -35,4 +35,6 @@ class InspectionReport(Base):
     report_status: Mapped[str] = mapped_column(String(20), nullable=False, default="NA")
     # Technician who claimed this report for remediation
     assigned_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Google Drive file ID — when set, file_path is ignored and Drive URL is used
+    drive_file_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 

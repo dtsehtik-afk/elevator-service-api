@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     # Google Gemini — used for email parsing and WhatsApp chat agent
     gemini_api_key: str = ""
 
+    # Google Drive integration — optional, falls back to local storage if unset
+    # GOOGLE_SERVICE_ACCOUNT_JSON: full JSON content of the service account key file
+    google_service_account_json: str = ""
+    # GOOGLE_DRIVE_FOLDER_ID: ID from the Drive folder URL
+    google_drive_folder_id: str = ""
+    # How often (minutes) to scan Drive folder for new inspection reports
+    google_drive_scan_interval: int = 15
+
     @model_validator(mode="after")
     def _validate_secrets(self):
         if self.environment == "production":

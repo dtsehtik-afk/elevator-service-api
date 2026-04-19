@@ -1423,6 +1423,58 @@ def _check_monitoring_calls():
         db.close()
 
 
+def _scan_drive_inspections():
+    """Scan Google Drive folder for new inspection PDFs and process them."""
+    from app.services import drive_service
+    if not drive_service.is_configured():
+        return
+    try:
+        from app.database import SessionLocal
+        from app.models.inspection_report import InspectionReport
+        from app.services.inspection_service import process_inspection_report
+
+        db = SessionLocal()
+        try:
+            # Collect already-processed Drive file IDs
+            processed = {
+                r.drive_file_id
+                for r in db.query(InspectionReport.drive_file_id)
+                .filter(InspectionReport.drive_file_id.isnot(None))
+                .all()
+            }
+            new_files = drive_service.list_folder_files(processed)
+            if not new_files:
+                return
+            logger.info("Drive scan: %d new file(s) found", len(new_files))
+            for f in new_files:
+                fid = f["id"]
+                fname = f.get("name", "")
+                mime = f.get("mimeType", "application/octet-stream")
+                # Only process PDFs and images
+                if not any(mime.startswith(t) for t in ("application/pdf", "image/")):
+                    continue
+                content = drive_service.get_download_bytes(fid)
+                if not content:
+                    continue
+                result = process_inspection_report(db, content, mime, fname, source="drive")
+                if result.get("report_id"):
+                    # Patch the drive_file_id onto the already-saved report
+                    # (process_inspection_report uploads and saves — but from Drive scan
+                    #  the file is already in Drive, so overwrite drive_file_id)
+                    report = db.query(InspectionReport).filter(
+                        InspectionReport.id == result["report_id"]
+                    ).first()
+                    if report:
+                        report.drive_file_id = fid
+                        report.file_path = None
+                        db.commit()
+                logger.info("Drive scan processed: %s → %s", fname, result.get("status"))
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error("Drive scan failed: %s", exc)
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -1437,6 +1489,7 @@ def start_scheduler():
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
     _scheduler.add_job(_poll_inspection_emails,              "interval", hours=1)
+    _scheduler.add_job(_scan_drive_inspections,              "interval", minutes=15)
     # _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)  # disabled
     _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
     _scheduler.start()

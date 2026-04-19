@@ -62,6 +62,10 @@ const REPORT_STATUS_COLOR: Record<string, string> = { NA: 'gray', OPEN: 'red', P
 const REPORT_STATUS_LABEL: Record<string, string> = { NA: 'תקין', OPEN: 'פתוח', PARTIAL: 'בטיפול', CLOSED: 'טופל' }
 
 async function openReportFile(fileUrl: string) {
+  if (fileUrl.startsWith('https://drive.google.com')) {
+    window.open(fileUrl, '_blank')
+    return
+  }
   const { data } = await client.get(fileUrl, { responseType: 'blob' })
   const blobUrl = URL.createObjectURL(data)
   window.open(blobUrl, '_blank')

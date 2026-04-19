@@ -56,6 +56,11 @@ async function uploadInspection(file: File): Promise<any> {
 }
 
 async function openReportFile(fileUrl: string, fileName: string | null) {
+  // Drive URLs open directly; local files need authenticated fetch
+  if (fileUrl.startsWith('https://drive.google.com')) {
+    window.open(fileUrl, '_blank')
+    return
+  }
   const { data } = await client.get(fileUrl, { responseType: 'blob' })
   const blobUrl = URL.createObjectURL(data)
   window.open(blobUrl, '_blank')

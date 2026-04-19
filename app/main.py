@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS file_path VARCHAR(500)",
             "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS report_status VARCHAR(20) NOT NULL DEFAULT 'NA'",
             "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS assigned_technician_id UUID",
+            "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS drive_file_id VARCHAR(200)",
             # management_companies — caller_phones may be missing on older DBs
             "ALTER TABLE management_companies ADD COLUMN IF NOT EXISTS caller_phones TEXT[] DEFAULT '{}'",
         ]:

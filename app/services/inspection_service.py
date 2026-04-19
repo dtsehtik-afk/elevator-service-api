@@ -102,12 +102,17 @@ def process_inspection_report(
     if not settings.gemini_api_key:
         return {"status": "error", "message": "Gemini API key not configured"}
 
-    # Save file to disk before processing so it persists even if Gemini fails
+    # Save file — prefer Drive, fall back to local disk
+    from app.services import drive_service
     _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     ext = Path(file_name).suffix.lower() if file_name else ".bin"
     saved_name = f"{_uuid_mod.uuid4().hex}{ext}"
     saved_path = _UPLOADS_DIR / saved_name
     saved_path.write_bytes(file_bytes)
+
+    from datetime import datetime as _dt
+    year_folder = str(_dt.now().year)
+    drive_file_id = drive_service.upload_file(file_bytes, file_name or saved_name, mime_type, subfolder=year_folder)
 
     parsed = _call_gemini_vision(file_bytes, mime_type, settings.gemini_api_key)
     if not parsed:
@@ -203,7 +208,8 @@ def process_inspection_report(
         suggested_elevator_id=suggested_elevator.id if suggested_elevator else None,
         source=source,
         file_name=file_name,
-        file_path=str(saved_path),
+        file_path=None if drive_file_id else str(saved_path),
+        drive_file_id=drive_file_id,
         raw_address=address,
         raw_street=street,
         raw_city=city,
