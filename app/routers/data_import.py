@@ -148,29 +148,36 @@ def _cell_str(c) -> str:
     return s
 
 
+_KNOWN_HEADERS = {"sysnumber", "sysname", "technumber", "sherut", "lastinspect", "shcut3"}
+
+
 def _parse_xlsx(content: bytes) -> list[dict]:
-    """Parse .xlsx (openpyxl) or .xls (xlrd) into list of row dicts."""
+    """Parse .xlsx (openpyxl) or .xls (xlrd) into list of row dicts.
+    Skips leading title/timestamp rows until the real header row is found.
+    """
     import io
     try:
         import openpyxl
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
         ws = wb.active
-        rows_iter = list(ws.iter_rows(values_only=True))
+        raw_rows = list(ws.iter_rows(values_only=True))
     except Exception:
-        # Fallback for legacy .xls
         import xlrd
         wb = xlrd.open_workbook(file_contents=content)
         ws = wb.sheet_by_index(0)
-        rows_iter = [ws.row_values(i) for i in range(ws.nrows)]
+        raw_rows = [ws.row_values(i) for i in range(ws.nrows)]
 
     header = None
     rows = []
-    for row in rows_iter:
+    for row in raw_rows:
         values = [_cell_str(c) for c in row]
         if not any(values):
             continue
         if header is None:
-            header = values
+            # Accept this row as header only if it contains known column names
+            low = {v.lower().strip() for v in values}
+            if low & _KNOWN_HEADERS:
+                header = [v.strip() for v in values]
             continue
         rows.append(dict(zip(header, values)))
     return rows
