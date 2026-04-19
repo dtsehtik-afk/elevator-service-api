@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, TextInput, Select, Badge, Text, Button,
@@ -8,7 +8,7 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { listElevators, createElevator, importElevatorsFromPdf, importElevatorsFromExcel } from '../api/elevators'
+import { listElevators, createElevator } from '../api/elevators'
 import { ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS } from '../utils/constants'
 import { formatDate } from '../utils/dates'
 
@@ -54,10 +54,6 @@ export default function ElevatorsPage() {
   const [opened, { open, close }] = useDisclosure()
   const [colsOpened, setColsOpened] = useState(false)
   const [visibleCols, setVisibleCols] = useState<Set<string>>(loadVisibleCols)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const xlsxInputRef = useRef<HTMLInputElement>(null)
-  const [importing, setImporting] = useState(false)
-  const [importingXl, setImportingXl] = useState(false)
   const [viewMode, setViewMode] = useState<'list' | 'groups'>('list')
 
   const [newElev, setNewElev] = useState({
@@ -123,40 +119,6 @@ export default function ElevatorsPage() {
     })
   }
 
-  async function handleExcelImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setImportingXl(true)
-    try {
-      const stats = await importElevatorsFromExcel(file)
-      qc.invalidateQueries({ queryKey: ['elevators'] })
-      notifications.show({
-        message: `יובאו ${stats.total_parsed} מעליות — נוצרו: ${stats.created}, עודכנו: ${stats.updated}, דולגו: ${stats.skipped}`,
-        color: 'teal', autoClose: 8000,
-      })
-    } catch (err: any) {
-      notifications.show({ message: `שגיאה ביבוא: ${err?.response?.data?.detail ?? 'שגיאה לא ידועה'}`, color: 'red' })
-    } finally { setImportingXl(false) }
-  }
-
-  async function handlePdfImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setImporting(true)
-    try {
-      const stats = await importElevatorsFromPdf(file)
-      qc.invalidateQueries({ queryKey: ['elevators'] })
-      notifications.show({
-        message: `יובאו ${stats.total_parsed} מעליות — נוצרו: ${stats.created}, עודכנו: ${stats.updated}, דולגו: ${stats.skipped}`,
-        color: 'teal', autoClose: 8000,
-      })
-    } catch (err: any) {
-      notifications.show({ message: `שגיאה ביבוא: ${err?.response?.data?.detail ?? 'שגיאה לא ידועה'}`, color: 'red' })
-    } finally { setImporting(false) }
-  }
-
   const visibleDefs = ALL_COLUMNS.filter(c => visibleCols.has(c.key))
   const show = (key: string) => visibleCols.has(key)
 
@@ -176,10 +138,6 @@ export default function ElevatorsPage() {
           />
         </Group>
         <Group>
-          <input ref={xlsxInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleExcelImport} />
-          <Button variant="filled" color="teal" loading={importingXl} onClick={() => xlsxInputRef.current?.click()}>יבוא מ-Excel</Button>
-          <input ref={fileInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handlePdfImport} />
-          <Button variant="outline" color="teal" loading={importing} onClick={() => fileInputRef.current?.click()}>יבוא מ-PDF</Button>
           <Button onClick={open}>+ הוסף מעלית</Button>
         </Group>
       </Group>

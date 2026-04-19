@@ -161,14 +161,14 @@ def _record_scan(db, message_id: str, uid: str, subject: str, sender: str,
 
 def _default_since_date(db) -> date:
     """
-    First run (empty scan log): go back 3 months.
-    Subsequent runs: last 7 days (the dedup table prevents re-processing).
+    First run (empty scan log): start from today (no retroactive backfill).
+    Subsequent runs: last 7 days (dedup table prevents re-processing).
     """
     from app.models.inspection_email_scan import InspectionEmailScan
     has_any = db.query(InspectionEmailScan.message_id).limit(1).first()
     if has_any is None:
-        logger.info("📄 First inspection email scan — backfilling 3 months")
-        return date.today() - timedelta(days=90)
+        logger.info("📄 First inspection email scan — starting from today")
+        return date.today()
     return date.today() - timedelta(days=7)
 
 
