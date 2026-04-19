@@ -32,3 +32,4 @@ class InspectionReport(Base):
     match_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)

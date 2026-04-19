@@ -1,8 +1,10 @@
 """Inspection report endpoints."""
 import logging
 import uuid
+from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.auth.dependencies import require_dispatcher_or_admin, get_current_user
 from app.database import get_db
@@ -86,8 +88,48 @@ def list_inspections(
             "match_status": getattr(r, "match_status", "AUTO_MATCHED"),
             "match_score": getattr(r, "match_score", None),
             "processed_at": r.processed_at.isoformat() if r.processed_at else None,
+            "file_url": f"/inspections/{r.id}/file" if getattr(r, "file_path", None) else None,
         })
     return result
+
+
+@router.get("/search-elevators", summary="Search elevators by address for inspection matching")
+def search_elevators_for_match(
+    q: str = Query("", min_length=1),
+    db: Session = Depends(get_db),
+    _=Depends(require_dispatcher_or_admin),
+):
+    from app.models.elevator import Elevator
+    results = (
+        db.query(Elevator)
+        .filter(
+            (Elevator.address.ilike(f"%{q}%")) |
+            (Elevator.city.ilike(f"%{q}%")) |
+            (Elevator.internal_number.ilike(f"%{q}%"))
+        )
+        .limit(10)
+        .all()
+    )
+    return [
+        {"id": str(e.id), "label": f"{e.address}, {e.city}" + (f" (#{e.internal_number})" if e.internal_number else "")}
+        for e in results
+    ]
+
+
+@router.get("/{report_id}/file", summary="Download the original inspection report file")
+def download_inspection_file(
+    report_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    from app.models.inspection_report import InspectionReport
+    report = db.query(InspectionReport).filter(InspectionReport.id == uuid.UUID(report_id)).first()
+    if not report or not getattr(report, "file_path", None):
+        raise HTTPException(status_code=404, detail="File not found")
+    path = Path(report.file_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(path, filename=report.file_name or path.name)
 
 
 @router.post("/scan-emails", summary="Manually trigger Gmail inspection email scan (admin)")

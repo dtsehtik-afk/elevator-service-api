@@ -28,6 +28,14 @@ async def lifespan(app: FastAPI):
     import app.models  # register all models
     Base.metadata.create_all(bind=engine)  # creates any missing tables
     Path("uploads/elevators").mkdir(parents=True, exist_ok=True)
+    Path("uploads/inspections").mkdir(parents=True, exist_ok=True)
+    # Migrate: add file_path column if it doesn't exist yet
+    from sqlalchemy import text as _text
+    with engine.connect() as _conn:
+        _conn.execute(_text(
+            "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS file_path VARCHAR(500)"
+        ))
+        _conn.commit()
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield

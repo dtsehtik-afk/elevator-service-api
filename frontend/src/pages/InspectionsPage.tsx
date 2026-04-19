@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
   FileInput, Center, Collapse, Card, Loader, Alert, Modal, TextInput, ActionIcon,
+  Autocomplete, Divider, Anchor,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -16,6 +17,7 @@ interface InspectionReport {
   suggested_elevator_address: string | null
   raw_address: string | null
   file_name: string | null
+  file_url: string | null
   inspection_date: string | null
   result: 'PASS' | 'FAIL' | 'UNKNOWN'
   deficiency_count: number
@@ -25,6 +27,11 @@ interface InspectionReport {
   match_status: 'AUTO_MATCHED' | 'PENDING_REVIEW' | 'MANUALLY_CONFIRMED' | 'UNMATCHED'
   match_score: number | null
   processed_at: string | null
+}
+
+interface ElevatorOption {
+  id: string
+  label: string
 }
 
 async function fetchInspections(): Promise<InspectionReport[]> {
@@ -58,7 +65,10 @@ export default function InspectionsPage() {
   const [file, setFile] = useState<File | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [confirmReport, setConfirmReport] = useState<InspectionReport | null>(null)
-  const [overrideElevId, setOverrideElevId] = useState('')
+  const [elevSearch, setElevSearch] = useState('')
+  const [elevOptions, setElevOptions] = useState<ElevatorOption[]>([])
+  const [selectedElevId, setSelectedElevId] = useState('')
+  const [createMode, setCreateMode] = useState(false)
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ['inspections'],
@@ -98,11 +108,20 @@ export default function InspectionsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inspections'] })
       setConfirmReport(null)
-      setOverrideElevId('')
+      setElevSearch('')
+      setSelectedElevId('')
+      setCreateMode(false)
       notifications.show({ message: '✅ הדוח אושר ושויך למעלית', color: 'green' })
     },
     onError: () => notifications.show({ message: 'שגיאה באישור', color: 'red' }),
   })
+
+  async function searchElevators(q: string) {
+    setElevSearch(q)
+    if (q.length < 2) { setElevOptions([]); return }
+    const { data } = await client.get(`/inspections/search-elevators?q=${encodeURIComponent(q)}`)
+    setElevOptions(data)
+  }
 
   const rejectMutation = useMutation({
     mutationFn: (reportId: string) => client.post(`/inspections/${reportId}/reject`),
@@ -222,9 +241,11 @@ export default function InspectionsPage() {
                 {r.inspector_name && (
                   <Text size="sm" c="dimmed">👤 {r.inspector_name}</Text>
                 )}
-                {r.file_name && (
+                {r.file_url ? (
+                  <Anchor href={r.file_url} target="_blank" size="sm">📄 הצג תסקיר</Anchor>
+                ) : r.file_name ? (
                   <Text size="sm" c="dimmed">📄 {r.file_name}</Text>
-                )}
+                ) : null}
               </Group>
 
               {r.service_call_id && (
@@ -259,38 +280,73 @@ export default function InspectionsPage() {
       {/* Confirm match modal */}
       <Modal
         opened={!!confirmReport}
-        onClose={() => { setConfirmReport(null); setOverrideElevId('') }}
+        onClose={() => { setConfirmReport(null); setElevSearch(''); setSelectedElevId(''); setCreateMode(false) }}
         title="אישור שיוך דוח ביקורת"
         dir="rtl"
+        size="md"
       >
         {confirmReport && (
           <Stack gap="md">
-            <Text size="sm">כתובת בדוח: <strong>{confirmReport.raw_address}</strong></Text>
+            <Paper withBorder p="sm" radius="sm" bg="gray.0">
+              <Text size="sm">כתובת בדוח: <strong>{confirmReport.raw_address || '—'}</strong></Text>
+              {confirmReport.inspector_name && <Text size="xs" c="dimmed">בודק: {confirmReport.inspector_name}</Text>}
+              {confirmReport.file_url && (
+                <Anchor href={confirmReport.file_url} target="_blank" size="xs">📄 פתח תסקיר מקורי</Anchor>
+              )}
+            </Paper>
+
             {confirmReport.suggested_elevator_address && (
-              <Text size="sm">מעלית מוצעת: <strong>{confirmReport.suggested_elevator_address}</strong></Text>
+              <>
+                <Text size="sm" fw={600}>מעלית מוצעת על-ידי המערכת:</Text>
+                <Text size="sm">{confirmReport.suggested_elevator_address}</Text>
+                <Button
+                  color="green"
+                  loading={confirmMutation.isPending}
+                  onClick={() => confirmMutation.mutate({ reportId: confirmReport.id })}
+                >
+                  ✅ אשר מעלית זו
+                </Button>
+                <Divider label="— או —" labelPosition="center" />
+              </>
             )}
-            <Button
-              color="green"
-              loading={confirmMutation.isPending}
-              onClick={() => confirmMutation.mutate({ reportId: confirmReport.id })}
-            >
-              ✅ אשר מעלית מוצעת
-            </Button>
-            <Text size="xs" c="dimmed" ta="center">— או שייך למעלית אחרת —</Text>
-            <TextInput
-              placeholder="UUID של מעלית אחרת"
-              value={overrideElevId}
-              onChange={e => setOverrideElevId(e.target.value)}
-              label="ID מעלית"
+
+            <Text size="sm" fw={600}>חיפוש מעלית אחרת:</Text>
+            <Autocomplete
+              placeholder="הקלד כתובת, עיר או מס׳ מעלית..."
+              value={elevSearch}
+              onChange={v => { searchElevators(v); setSelectedElevId('') }}
+              onOptionSubmit={v => {
+                const opt = elevOptions.find(o => o.label === v)
+                if (opt) setSelectedElevId(opt.id)
+                setElevSearch(v)
+              }}
+              data={elevOptions.map(o => o.label)}
             />
             <Button
               variant="light"
-              disabled={!overrideElevId.trim()}
+              disabled={!selectedElevId}
               loading={confirmMutation.isPending}
-              onClick={() => confirmMutation.mutate({ reportId: confirmReport.id, elevatorId: overrideElevId.trim() })}
+              onClick={() => confirmMutation.mutate({ reportId: confirmReport.id, elevatorId: selectedElevId })}
             >
-              שייך למעלית אחרת
+              שייך למעלית שנבחרה
             </Button>
+
+            <Divider label="— לא מצאת? —" labelPosition="center" />
+            <Button
+              variant="subtle"
+              color="blue"
+              onClick={() => setCreateMode(c => !c)}
+            >
+              {createMode ? '▲ ביטול' : '+ הוסף מעלית חדשה על בסיס הדוח'}
+            </Button>
+            {createMode && (
+              <Paper withBorder p="sm" radius="sm">
+                <Text size="xs" c="dimmed">
+                  לחץ "הוסף מעלית" בדף המעליות עם הכתובת: <strong>{confirmReport.raw_address}</strong>
+                  <br />לאחר יצירתה, חזור לכאן וחפש אותה לפי כתובת.
+                </Text>
+              </Paper>
+            )}
           </Stack>
         )}
       </Modal>

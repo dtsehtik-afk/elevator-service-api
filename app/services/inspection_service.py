@@ -8,11 +8,15 @@ import base64
 import json
 import logging
 import re
+import uuid as _uuid_mod
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import httpx
 from sqlalchemy.orm import Session
+
+_UPLOADS_DIR = Path("uploads/inspections")
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +101,13 @@ def process_inspection_report(
     settings = get_settings()
     if not settings.gemini_api_key:
         return {"status": "error", "message": "Gemini API key not configured"}
+
+    # Save file to disk before processing so it persists even if Gemini fails
+    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    ext = Path(file_name).suffix.lower() if file_name else ".bin"
+    saved_name = f"{_uuid_mod.uuid4().hex}{ext}"
+    saved_path = _UPLOADS_DIR / saved_name
+    saved_path.write_bytes(file_bytes)
 
     parsed = _call_gemini_vision(file_bytes, mime_type, settings.gemini_api_key)
     if not parsed:
@@ -192,6 +203,7 @@ def process_inspection_report(
         suggested_elevator_id=suggested_elevator.id if suggested_elevator else None,
         source=source,
         file_name=file_name,
+        file_path=str(saved_path),
         raw_address=address,
         raw_street=street,
         raw_city=city,
