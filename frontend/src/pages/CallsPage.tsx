@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   Stack, Title, Group, Select, Badge, Text, Button, Paper, TextInput,
   Modal, Textarea, Pagination, Table, ScrollArea, Loader, Center,
@@ -19,6 +19,19 @@ import { formatDateTime } from '../utils/dates'
 import { ServiceCall, CallDetail } from '../types'
 
 const PAGE_SIZE = 20
+
+const rescueStyle: React.CSSProperties = {
+  animation: 'rescue-blink 1.2s ease-in-out infinite',
+  backgroundColor: 'rgba(255,50,50,0.08)',
+}
+
+// inject keyframes once
+if (typeof document !== 'undefined' && !document.getElementById('rescue-blink-style')) {
+  const s = document.createElement('style')
+  s.id = 'rescue-blink-style'
+  s.textContent = `@keyframes rescue-blink { 0%,100%{background-color:rgba(255,50,50,0.08)} 50%{background-color:rgba(255,50,50,0.24)} }`
+  document.head.appendChild(s)
+}
 
 const ASSIGNMENT_STATUS_LABELS: Record<string, string> = {
   PENDING_CONFIRMATION: 'ממתין לאישור',
@@ -67,6 +80,9 @@ export default function CallsPage() {
   })
   const [updateForm, setUpdateForm] = useState({
     status: '',
+    priority: '',
+    fault_type: '',
+    description: '',
     resolution_notes: '',
     quote_needed: false,
   })
@@ -238,6 +254,9 @@ export default function CallsPage() {
     setSelectedCall(call)
     setUpdateForm({
       status: call.status,
+      priority: call.priority,
+      fault_type: call.fault_type,
+      description: call.description,
       resolution_notes: call.resolution_notes ?? '',
       quote_needed: call.quote_needed ?? false,
     })
@@ -303,35 +322,48 @@ export default function CallsPage() {
                   <Table.Tr>
                     <Table.Td colSpan={7}><Center h={100}><Text c="dimmed">לא נמצאו קריאות</Text></Center></Table.Td>
                   </Table.Tr>
-                ) : paginated.map(c => (
-                  <Table.Tr key={c.id} onClick={() => openDetailModal(c)}>
-                    <Table.Td><Badge color={PRIORITY_COLORS[c.priority]} size="sm">{PRIORITY_LABELS[c.priority]}</Badge></Table.Td>
-                    <Table.Td>
-                      <Stack gap={0}>
-                        <Text size="sm" lineClamp={1}>{c.description}</Text>
+                ) : paginated.map(c => {
+                  const isRescue = c.fault_type === 'RESCUE'
+                  return (
+                    <Table.Tr
+                      key={c.id}
+                      onClick={() => openDetailModal(c)}
+                      style={isRescue && !['RESOLVED','CLOSED'].includes(c.status) ? rescueStyle : undefined}
+                    >
+                      <Table.Td>
                         <Group gap={4}>
-                          {c.is_recurring && <Text size="xs" c="orange">🔁 חוזרת</Text>}
-                          {c.quote_needed && <Text size="xs" c="yellow">💰 הצעת מחיר</Text>}
+                          {isRescue && <Text size="sm">🚨</Text>}
+                          <Badge color={PRIORITY_COLORS[c.priority]} size="sm">{PRIORITY_LABELS[c.priority]}</Badge>
                         </Group>
-                      </Stack>
-                    </Table.Td>
-                    <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[c.fault_type]}</Text></Table.Td>
-                    <Table.Td><StatusBadge status={c.status} /></Table.Td>
-                    <Table.Td><Text size="sm">{c.reported_by}</Text></Table.Td>
-                    <Table.Td><Text size="xs" c="dimmed">{formatDateTime(c.created_at)}</Text></Table.Td>
-                    <Table.Td onClick={e => e.stopPropagation()}>
-                      <Group gap="xs">
-                        <Button size="xs" variant="light" onClick={() => openUpdateModal(c)}>עדכן</Button>
-                        {isAdmin && (
-                          <ActionIcon
-                            size="sm" color="red" variant="subtle"
-                            onClick={() => { if (window.confirm('למחוק קריאה זו?')) deleteCallMutation.mutate(c.id) }}
-                          >🗑️</ActionIcon>
-                        )}
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
+                      </Table.Td>
+                      <Table.Td>
+                        <Stack gap={0}>
+                          <Text size="sm" lineClamp={1} fw={isRescue ? 700 : undefined}>{c.description}</Text>
+                          <Group gap={4}>
+                            {isRescue && <Text size="xs" c="red" fw={700}>🚨 חילוץ</Text>}
+                            {c.is_recurring && <Text size="xs" c="orange">🔁 חוזרת</Text>}
+                            {c.quote_needed && <Text size="xs" c="yellow">💰 הצעת מחיר</Text>}
+                          </Group>
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[c.fault_type]}</Text></Table.Td>
+                      <Table.Td><StatusBadge status={c.status} /></Table.Td>
+                      <Table.Td><Text size="sm">{c.reported_by}</Text></Table.Td>
+                      <Table.Td><Text size="xs" c="dimmed">{formatDateTime(c.created_at)}</Text></Table.Td>
+                      <Table.Td onClick={e => e.stopPropagation()}>
+                        <Group gap="xs">
+                          <Button size="xs" variant="light" onClick={() => openUpdateModal(c)}>עדכן</Button>
+                          {isAdmin && (
+                            <ActionIcon
+                              size="sm" color="red" variant="subtle"
+                              onClick={() => { if (window.confirm('למחוק קריאה זו?')) deleteCallMutation.mutate(c.id) }}
+                            >🗑️</ActionIcon>
+                          )}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  )
+                })}
               </Table.Tbody>
             </Table>
           </ScrollArea>
@@ -585,7 +617,8 @@ export default function CallsPage() {
               data={[
                 { value: 'MECHANICAL', label: 'מכאני' }, { value: 'ELECTRICAL', label: 'חשמלי' },
                 { value: 'SOFTWARE', label: 'תוכנה' }, { value: 'STUCK', label: 'תקועה' },
-                { value: 'DOOR', label: 'דלת' }, { value: 'OTHER', label: 'אחר' },
+                { value: 'DOOR', label: 'דלת' }, { value: 'RESCUE', label: '🚨 חילוץ' },
+                { value: 'OTHER', label: 'אחר' },
               ]}
               value={newForm.fault_type}
               onChange={v => setNewForm(s => ({ ...s, fault_type: v ?? 'OTHER' }))}
@@ -673,14 +706,41 @@ export default function CallsPage() {
       </Modal>
 
       {/* ── Update modal ── */}
-      <Modal opened={updateOpened} onClose={closeUpdate} title="עדכן קריאת שירות">
+      <Modal opened={updateOpened} onClose={closeUpdate} title="✏️ עריכת קריאת שירות" size="lg">
         <Stack gap="sm">
+          <Textarea
+            label="תיאור התקלה" required minRows={3}
+            value={updateForm.description}
+            onChange={e => setUpdateForm(s => ({ ...s, description: e.target.value }))}
+          />
+          <Group grow>
+            <Select
+              label="עדיפות"
+              data={[
+                { value: 'CRITICAL', label: 'קריטי' }, { value: 'HIGH', label: 'גבוה' },
+                { value: 'MEDIUM', label: 'בינוני' }, { value: 'LOW', label: 'נמוך' },
+              ]}
+              value={updateForm.priority}
+              onChange={v => setUpdateForm(s => ({ ...s, priority: v ?? 'MEDIUM' }))}
+            />
+            <Select
+              label="סוג תקלה"
+              data={[
+                { value: 'MECHANICAL', label: 'מכאני' }, { value: 'ELECTRICAL', label: 'חשמלי' },
+                { value: 'SOFTWARE', label: 'תוכנה' }, { value: 'STUCK', label: 'תקועה' },
+                { value: 'DOOR', label: 'דלת' }, { value: 'RESCUE', label: '🚨 חילוץ' },
+                { value: 'OTHER', label: 'אחר' },
+              ]}
+              value={updateForm.fault_type}
+              onChange={v => setUpdateForm(s => ({ ...s, fault_type: v ?? 'OTHER' }))}
+            />
+          </Group>
           <Select
             label="סטטוס"
             data={[
               { value: 'OPEN', label: 'פתוחה' }, { value: 'ASSIGNED', label: 'שובצה' },
               { value: 'IN_PROGRESS', label: 'בטיפול' }, { value: 'RESOLVED', label: 'נפתרה' },
-              { value: 'CLOSED', label: 'סגורה' },
+              { value: 'CLOSED', label: 'סגורה' }, { value: 'MONITORING', label: 'במעקב' },
             ]}
             value={updateForm.status}
             onChange={v => setUpdateForm(s => ({ ...s, status: v ?? '' }))}
@@ -699,10 +759,14 @@ export default function CallsPage() {
             <Button variant="default" onClick={closeUpdate}>ביטול</Button>
             <Button
               loading={updateMutation.isPending}
+              disabled={!updateForm.description}
               onClick={() => selectedCall && updateMutation.mutate({
                 id: selectedCall.id,
                 payload: {
                   status: updateForm.status || undefined,
+                  priority: updateForm.priority || undefined,
+                  fault_type: updateForm.fault_type || undefined,
+                  description: updateForm.description || undefined,
                   resolution_notes: updateForm.resolution_notes || undefined,
                   quote_needed: updateForm.quote_needed,
                 },

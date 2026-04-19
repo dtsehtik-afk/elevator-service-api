@@ -50,6 +50,7 @@ export const FAULT_TYPE_LABELS: Record<string, string> = {
   SOFTWARE: 'תוכנה',
   STUCK: 'תקועה',
   DOOR: 'דלת',
+  RESCUE: 'חילוץ',
   OTHER: 'אחר',
 }
 

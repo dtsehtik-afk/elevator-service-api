@@ -13,14 +13,15 @@ class ServiceCallCreate(BaseModel):
     reported_by: str = Field(..., min_length=2, max_length=150)
     description: str = Field(..., min_length=5)
     priority: str = Field("MEDIUM", pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
-    fault_type: str = Field("OTHER", pattern="^(MECHANICAL|ELECTRICAL|SOFTWARE|STUCK|DOOR|OTHER)$")
+    fault_type: str = Field("OTHER", pattern="^(MECHANICAL|ELECTRICAL|SOFTWARE|STUCK|DOOR|RESCUE|OTHER)$")
 
 
 class ServiceCallUpdate(BaseModel):
     """Schema for PATCH /calls/{id} — all fields optional."""
-    status: Optional[str] = Field(None, pattern="^(OPEN|ASSIGNED|IN_PROGRESS|RESOLVED|CLOSED)$")
+    status: Optional[str] = Field(None, pattern="^(OPEN|ASSIGNED|IN_PROGRESS|RESOLVED|CLOSED|MONITORING)$")
     priority: Optional[str] = Field(None, pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
-    fault_type: Optional[str] = Field(None, pattern="^(MECHANICAL|ELECTRICAL|SOFTWARE|STUCK|DOOR|OTHER)$")
+    fault_type: Optional[str] = Field(None, pattern="^(MECHANICAL|ELECTRICAL|SOFTWARE|STUCK|DOOR|RESCUE|OTHER)$")
+    description: Optional[str] = Field(None, min_length=1)
     resolution_notes: Optional[str] = None
     quote_needed: Optional[bool] = None
 
