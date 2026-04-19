@@ -107,17 +107,28 @@ def list_elevators(
 
 
 def _recalculate_next_service(elevator: Elevator) -> None:
-    """Auto-fill next_service_date from last_service_date + service_contract interval.
+    """Auto-fill next_service_date from last_service_date + maintenance interval.
 
-    ANNUAL_6  → 6 treatments/year  → every ~61 days
-    ANNUAL_12 → 12 treatments/year → every ~30 days
-    Only fills next_service_date when both fields are set and next_service_date
-    was not explicitly provided in the same update.
+    Priority:
+    1. maintenance_interval_days (explicit, set from import or edit)
+    2. service_contract: ANNUAL_6 → 60 days, ANNUAL_12 → 30 days
+    3. service_type: COMPREHENSIVE → 30 days, REGULAR → 60 days
+    4. Default: 60 days
     """
     from datetime import timedelta
-    if elevator.last_service_date and elevator.service_contract:
-        interval = timedelta(days=61 if elevator.service_contract == "ANNUAL_6" else 30)
-        elevator.next_service_date = elevator.last_service_date + interval
+    if not elevator.last_service_date:
+        return
+    if elevator.maintenance_interval_days:
+        days = elevator.maintenance_interval_days
+    elif elevator.service_contract == "ANNUAL_12":
+        days = 30
+    elif elevator.service_contract == "ANNUAL_6":
+        days = 60
+    elif elevator.service_type == "COMPREHENSIVE":
+        days = 30
+    else:
+        days = 60
+    elevator.next_service_date = elevator.last_service_date + timedelta(days=days)
 
 
 def update_elevator(
@@ -137,8 +148,10 @@ def update_elevator(
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(elevator, field, value)
-    # Auto-recalculate next_service_date unless it was explicitly set in this call
+    # Always recalculate next_service_date unless it was explicitly overridden in this call
     if "next_service_date" not in updates:
+        _recalculate_next_service(elevator)
+    elif "last_service_date" in updates and "next_service_date" not in updates:
         _recalculate_next_service(elevator)
     try:
         db.commit()

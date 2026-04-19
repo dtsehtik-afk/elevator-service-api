@@ -140,6 +140,24 @@ def rank_technicians(
             .all()
         )
 
+    # Preload last-visit times for tie-breaking (technician who last visited this elevator gets priority)
+    from app.models.assignment import Assignment as _Assignment
+    last_visit: dict = {}
+    if elevator:
+        visits = (
+            db.query(_Assignment.technician_id, _Assignment.assigned_at)
+            .filter(
+                _Assignment.service_call_id.in_(
+                    db.query(ServiceCall.id).filter(ServiceCall.elevator_id == elevator.id)
+                ),
+                _Assignment.status.in_(["CONFIRMED", "AUTO_ASSIGNED"]),
+            )
+            .all()
+        )
+        for tech_id, visited_at in visits:
+            if tech_id not in last_visit or visited_at > last_visit[tech_id]:
+                last_visit[tech_id] = visited_at
+
     scored: list[CandidateScore] = []
     for tech in candidates:
         daily = _daily_calls(db, tech.id)
@@ -155,7 +173,12 @@ def rank_technicians(
         score = _score_candidate(travel, daily, tech.max_daily_calls, has_spec, priority)
         scored.append(CandidateScore(tech, travel, daily, score))
 
-    scored.sort(key=lambda c: c.score)
+    # Sort: primary = score (lower=better), tie-break = last visited this elevator (more recent=better)
+    import datetime as _dt
+    scored.sort(key=lambda c: (
+        c.score,
+        -(last_visit.get(c.technician.id, _dt.datetime.min.replace(tzinfo=_dt.timezone.utc)).timestamp()),
+    ))
     logger.warning(
         "📊 Ranking for call (working_hours=%s): %s",
         is_working_hours(),
@@ -352,25 +375,24 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
     # Confirmation message back to technician
     addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
     whatsapp_service.notify_dispatcher(f"✅ *{tech.name}* אישר קבלת הקריאה ב{addr}")
-    maps_url = (
-        f"https://maps.google.com/?q={elevator.latitude},{elevator.longitude}"
-        if elevator and elevator.latitude else
-        f"https://maps.google.com/?q={elevator.address}+{elevator.city}"
-    )
     waze_url = (
-        f"https://waze.com/ul?ll={elevator.latitude},{elevator.longitude}"
+        f"https://waze.com/ul?ll={elevator.latitude},{elevator.longitude}&navigate=yes"
         if elevator and elevator.latitude else
-        f"https://waze.com/ul?q={elevator.address}+{elevator.city}"
+        f"https://waze.com/ul?q={elevator.address}+{elevator.city}&navigate=yes"
     )
+    from app.config import get_settings as _gs2
+    _s2 = _gs2()
+    base_url = getattr(_s2, "base_url", "").rstrip("/")
+    tech_portal = f"{base_url}/app/tech/{tech.id}" if base_url else ""
     _send_message(
         phone_out,
         f"✅ *קיבלת את הקריאה!*\n"
         f"────────────────────\n"
         f"📍 {addr}\n"
         f"🚗 זמן נסיעה: ~{assignment.travel_minutes or '?'} דקות\n"
-        f"🗺 גוגל מפות:\n{maps_url}\n"
         f"🚘 Waze:\n{waze_url}\n"
-        f"────────────────────\n"
+        + (f"📱 ממשק טכנאי:\n{tech_portal}\n" if tech_portal else "")
+        + f"────────────────────\n"
         f"בסיום הטיפול שלח: *דוח* + תיאור קצר"
     )
 
@@ -521,22 +543,22 @@ def confirm_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Opt
     db.commit()
 
     addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
-    maps_url = (
-        f"https://maps.google.com/?q={elevator.address}+{elevator.city}"
+    waze_url2 = (
+        f"https://waze.com/ul?q={elevator.address}+{elevator.city}&navigate=yes"
         if elevator else ""
     )
-    waze_url = (
-        f"https://waze.com/ul?q={elevator.address}+{elevator.city}"
-        if elevator else ""
-    )
+    from app.config import get_settings as _gs3
+    _s3 = _gs3()
+    _base3 = getattr(_s3, "base_url", "").rstrip("/")
+    _portal3 = f"{_base3}/app/tech/{tech.id}" if _base3 else ""
     phone_out = tech.whatsapp_number or tech.phone
     _send_message(phone_out,
         f"✅ *קיבלת את הקריאה!*\n"
         f"📍 {addr}\n"
         f"🚗 ~{assignment.travel_minutes or '?'} דקות\n"
-        f"🗺 גוגל מפות:\n{maps_url}\n"
-        f"🚘 Waze:\n{waze_url}\n"
-        f"בסיום שלח: *דוח* + תיאור קצר"
+        + (f"🚘 Waze:\n{waze_url2}\n" if waze_url2 else "")
+        + (f"📱 ממשק טכנאי:\n{_portal3}\n" if _portal3 else "")
+        + f"בסיום שלח: *דוח* + תיאור קצר"
     )
     # Send updated route if technician already has GPS
     if tech.current_latitude and tech.current_longitude:

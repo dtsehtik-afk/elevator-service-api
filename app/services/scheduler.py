@@ -59,21 +59,56 @@ def _transcribe_voice(msg_data: dict, settings) -> str:
 
 
 def _run_nightly_maintenance():
-    """Nightly job: mark overdue maintenances and send 30-day reminders."""
+    """Nightly job: mark overdue maintenances, auto-open service calls for 5-day-overdue elevators."""
+    from datetime import date, timedelta
     from app.database import SessionLocal
-    from app.services.maintenance_service import (
-        mark_overdue_maintenances,
-        send_upcoming_reminders,
-    )
+    from app.services.maintenance_service import mark_overdue_maintenances
+    from app.models.elevator import Elevator
+    from app.models.service_call import ServiceCall
 
     db = SessionLocal()
     try:
         overdue_count = mark_overdue_maintenances(db)
-        reminder_count = send_upcoming_reminders(db)
+
+        # Auto-open service call for elevators ≤5 days until next service (or already overdue)
+        today = date.today()
+        threshold = today + timedelta(days=5)
+        critical_elevators = (
+            db.query(Elevator)
+            .filter(
+                Elevator.next_service_date.isnot(None),
+                Elevator.next_service_date <= threshold,
+                Elevator.status == "ACTIVE",
+            )
+            .all()
+        )
+        opened = 0
+        for elev in critical_elevators:
+            # Skip if there's already an open/assigned maintenance call for this elevator
+            existing = db.query(ServiceCall).filter(
+                ServiceCall.elevator_id == elev.id,
+                ServiceCall.fault_type == "MAINTENANCE",
+                ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]),
+            ).first()
+            if existing:
+                continue
+            days_left = (elev.next_service_date - today).days
+            sc = ServiceCall(
+                elevator_id=elev.id,
+                reported_by="מערכת — טיפול מונע",
+                description=f"טיפול מונע {'מתוכנן ל-' + elev.next_service_date.strftime('%d/%m/%Y') if days_left >= 0 else 'באיחור ' + str(-days_left) + ' ימים'}",
+                priority="HIGH" if days_left <= 0 else "MEDIUM",
+                fault_type="MAINTENANCE",
+                status="OPEN",
+            )
+            db.add(sc)
+            opened += 1
+        if opened:
+            db.commit()
+
         logger.info(
-            "Nightly maintenance job: %d overdue, %d reminders sent",
-            overdue_count,
-            reminder_count,
+            "Nightly maintenance: %d overdue marked, %d maintenance calls opened",
+            overdue_count, opened,
         )
     except Exception as exc:
         logger.error("Nightly maintenance job failed: %s", exc)
@@ -1033,7 +1068,7 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
         _send_message(phone, "⚠️ שגיאה בעיבוד השאלה — נסה שוב מאוחר יותר.")
 
 
-_REMINDER_AFTER_MINUTES  = 10   # send reminder if no reply after 10 min
+_REMINDER_AFTER_MINUTES  = 15   # send reminder if no reply after 15 min
 _ESCALATE_AFTER_MINUTES  = 20   # reassign if still no reply after 20 min
 
 
@@ -1210,11 +1245,16 @@ def _check_pending_assignment_timeouts():
                     tech.name, assignment.id, age_minutes,
                 )
                 if phone:
+                    from app.config import get_settings as _gs
+                    _s = _gs()
+                    base_url = getattr(_s, "base_url", "").rstrip("/")
+                    tech_link = f"{base_url}/app/tech/{tech.id}" if base_url else ""
                     _send_message(
                         phone,
-                        f"🔔 *תזכורת — קריאה ממתינה לאישורך*\n"
-                        f"📍 {addr}\n\n"
-                        f"השב *1* לקבלה ✅ או *2* לדחייה ❌\n"
+                        f"🔔 {tech.name}, להזכירך — קריאה ממתינה לאישורך\n"
+                        f"📍 {addr}\n"
+                        + (f"🔗 {tech_link}\n" if tech_link else "")
+                        + f"\nהשב *1* לקבלה ✅ או *2* לדחייה ❌\n"
                         f"_(אי-מענה תוך {_ESCALATE_AFTER_MINUTES - _REMINDER_AFTER_MINUTES} דקות יעביר את הקריאה לטכנאי אחר)_"
                     )
                 assignment.reminder_sent_at = now
@@ -1390,7 +1430,8 @@ def start_scheduler():
     # All cron times are in Israel local time (Asia/Jerusalem)
     _scheduler = BackgroundScheduler(timezone=ZoneInfo("Asia/Jerusalem"))
     _scheduler.add_job(_run_nightly_maintenance,             "cron",     hour=0,  minute=5)
-    _scheduler.add_job(_send_morning_location_requests,      "cron",     hour=7,  minute=45)
+    # Morning location requests disabled — technicians use the app now
+    # _scheduler.add_job(_send_morning_location_requests,   "cron",     hour=7,  minute=45)
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
