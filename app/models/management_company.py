@@ -21,7 +21,7 @@ class ManagementCompany(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     # Known phone numbers used when calling about elevators in this company
-    caller_phones: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
+    caller_phones: Mapped[list] = mapped_column(_FlexArray, nullable=True, default=list)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
