@@ -889,15 +889,28 @@ def my_calls_page(tech_id: str, db: Session = Depends(get_db)):
     text-decoration: none; color: #333;
   }}
   #empty {{ text-align: center; padding: 40px 20px; color: #888; font-size: 16px; }}
+  #footer {{ padding: 12px; text-align: center; }}
+  .btn-reject-all {{
+    width: 100%; padding: 12px; border: none; border-radius: 10px;
+    background: #7f8c8d; color: white; font-size: 14px; cursor: pointer; font-weight: 600;
+  }}
 </style>
 </head>
 <body>
 <div id="header">
   <h1>קריאות ממתינות לאישורך</h1>
   <p id="count-label">טוען...</p>
+  <a id="app-link" href="{base_url}/app/tech/{tech_id}"
+     style="display:inline-block;margin-top:8px;padding:6px 14px;background:rgba(255,255,255,0.2);
+            color:white;border-radius:20px;text-decoration:none;font-size:13px;">
+    📱 כנס לאפליקציית טכנאי
+  </a>
 </div>
 <div id="map"></div>
 <div id="list"></div>
+<div id="footer">
+  <button class="btn-reject-all" onclick="rejectAll()">❌ דחה את כל הקריאות הממתינות</button>
+</div>
 
 <script>
 const TECH_ID = "{tech_id}";
@@ -978,6 +991,19 @@ async function action(aid, type) {{
     if (card) card.style.opacity = '1';
     alert('בעיית חיבור');
   }}
+}}
+
+async function rejectAll() {{
+  if (!confirm('לדחות את כל הקריאות הממתינות?')) return;
+  const pending = CALLS.filter(c => !c._done);
+  for (const c of pending) {{
+    try {{
+      await fetch(`${{BASE_URL}}/webhooks/my-calls/${{TECH_ID}}/reject/${{c.assignment_id}}`, {{method:'POST'}});
+      c._done = true;
+      if (markers[c.assignment_id]) map.removeLayer(markers[c.assignment_id]);
+    }} catch(e) {{}}
+  }}
+  renderList();
 }}
 
 // Build map

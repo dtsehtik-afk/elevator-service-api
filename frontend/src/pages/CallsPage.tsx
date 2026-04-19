@@ -116,6 +116,7 @@ export default function CallsPage() {
 
   const filtered = useMemo(() => {
     return calls.filter(c => {
+      if (c.fault_type === 'MAINTENANCE') return false
       const matchStatus = !statusFilter || c.status === statusFilter
       const matchPriority = !priorityFilter || c.priority === priorityFilter
       return matchStatus && matchPriority

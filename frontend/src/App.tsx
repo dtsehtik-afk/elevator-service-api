@@ -13,6 +13,7 @@ import InspectionsPage from './pages/InspectionsPage'
 import PendingCallsPage from './pages/PendingCallsPage'
 import ManagementCompaniesPage from './pages/ManagementCompaniesPage'
 import ImportPage from './pages/ImportPage'
+import MapPage from './pages/MapPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -44,6 +45,7 @@ export default function App() {
                   <Route path="/pending-calls" element={<PendingCallsPage />} />
                   <Route path="/management-companies" element={<ManagementCompaniesPage />} />
                   <Route path="/import" element={<ImportPage />} />
+                  <Route path="/map" element={<MapPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Shell>

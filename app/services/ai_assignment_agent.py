@@ -284,23 +284,37 @@ def assign_with_confirmation(
                 )
                 .count()
             )
-            # If tech already has unanswered calls → send map page link
-            tech_id_for_map = str(tech.id) if existing_pending >= 1 else ""
 
-            sent = whatsapp_service.notify_technician_new_call(
-                phone=phone,
-                technician_name=tech.name,
-                call_id=str(service_call.id),
-                address=elevator.address,
-                city=elevator.city,
-                fault_type=service_call.fault_type,
-                priority=service_call.priority,
-                caller_name=caller_name,
-                caller_phone=caller_phone,
-                travel_minutes=best.travel_minutes,
-                description=service_call.description or "",
-                tech_id=tech_id_for_map,
-            )
+            if existing_pending >= 1:
+                # Cancel old individual links — send a consolidated queue message instead
+                from app.config import get_settings
+                base_url = get_settings().app_base_url
+                my_calls_url = f"{base_url}/webhooks/my-calls/{tech.id}"
+                tech_app_url = f"{base_url}/app/tech/{tech.id}"
+                total = existing_pending + 1
+                cancel_msg = (
+                    f"📋 *{tech.name}* — יש לך *{total} קריאות* ממתינות לאישור\n"
+                    f"הלינק הקודם כבר לא תקף — נא לפתוח את רשימת הקריאות:\n\n"
+                    f"{my_calls_url}\n\n"
+                    f"או כנס לאפליקציית הטכנאי:\n{tech_app_url}"
+                )
+                whatsapp_service._send_message(phone, cancel_msg)
+                sent = True
+            else:
+                sent = whatsapp_service.notify_technician_new_call(
+                    phone=phone,
+                    technician_name=tech.name,
+                    call_id=str(service_call.id),
+                    address=elevator.address,
+                    city=elevator.city,
+                    fault_type=service_call.fault_type,
+                    priority=service_call.priority,
+                    caller_name=caller_name,
+                    caller_phone=caller_phone,
+                    travel_minutes=best.travel_minutes,
+                    description=service_call.description or "",
+                    tech_id="",
+                )
         else:
             sent = whatsapp_service.notify_technician_auto_assigned(
                 phone=phone,

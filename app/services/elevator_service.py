@@ -131,6 +131,14 @@ def _recalculate_next_service(elevator: Elevator) -> None:
     elevator.next_service_date = elevator.last_service_date + timedelta(days=days)
 
 
+def _recalculate_contract_renewal(elevator: Elevator) -> None:
+    """Auto-set contract_renewal = contract_start + 1 year when not explicitly given."""
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+    if elevator.contract_start and not elevator.contract_renewal:
+        elevator.contract_renewal = elevator.contract_start + relativedelta(years=1)
+
+
 def update_elevator(
     db: Session, elevator_id: uuid.UUID, data: ElevatorUpdate
 ) -> Optional[Elevator]:
@@ -153,6 +161,10 @@ def update_elevator(
         _recalculate_next_service(elevator)
     elif "last_service_date" in updates and "next_service_date" not in updates:
         _recalculate_next_service(elevator)
+    # Auto-calculate contract_renewal when contract_start is set but renewal is not
+    if "contract_start" in updates and "contract_renewal" not in updates:
+        elevator.contract_renewal = None  # force recalc
+        _recalculate_contract_renewal(elevator)
     try:
         db.commit()
     except IntegrityError as exc:

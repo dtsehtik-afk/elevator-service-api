@@ -64,7 +64,7 @@ export interface ServiceCall {
   description: string
   priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   status: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'
-  fault_type: 'MECHANICAL' | 'ELECTRICAL' | 'SOFTWARE' | 'STUCK' | 'DOOR' | 'RESCUE' | 'OTHER'
+  fault_type: 'MECHANICAL' | 'ELECTRICAL' | 'SOFTWARE' | 'STUCK' | 'DOOR' | 'RESCUE' | 'MAINTENANCE' | 'OTHER'
   is_recurring: boolean
   resolution_notes: string | null
   quote_needed: boolean

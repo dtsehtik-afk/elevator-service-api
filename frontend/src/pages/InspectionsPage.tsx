@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
   FileInput, Center, Collapse, Card, Loader, Alert, Modal, ActionIcon,
@@ -74,6 +75,7 @@ const REPORT_STATUS_LABEL: Record<string, string> = { NA: 'תקין', OPEN: 'פ�
 
 export default function InspectionsPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const userRole = useAuthStore(s => s.userRole)
   const isAdmin = userRole === 'ADMIN'
   const [file, setFile] = useState<File | null>(null)
@@ -265,7 +267,15 @@ export default function InspectionsPage() {
                   </Group>
                 </Stack>
               ) : (
-                <Text fw={600}>📍 {r.elevator_address}</Text>
+                <Group gap="sm" align="center">
+                  <Text fw={600}>📍 {r.elevator_address}</Text>
+                  {r.elevator_id && (
+                    <Button size="xs" variant="subtle" color="blue"
+                      onClick={() => navigate(`/elevators/${r.elevator_id}`)}>
+                      🏢 פתח מעלית
+                    </Button>
+                  )}
+                </Group>
               )}
 
               <Group gap="md" mt={4} wrap="wrap">
