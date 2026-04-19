@@ -5,6 +5,7 @@ import {
   NumberInput, Select, Tabs, Table, Loader, Center, ActionIcon, Alert,
   Checkbox, Textarea, Anchor, Modal, Divider,
 } from '@mantine/core'
+import { useAuthStore } from '../stores/authStore'
 import { DateInput } from '@mantine/dates'
 import { FileInput } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -61,6 +62,8 @@ export default function ElevatorDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const userRole = useAuthStore(s => s.userRole)
+  const isAdmin = userRole === 'ADMIN'
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Partial<Elevator>>({})
   const [sensitiveField, setSensitiveField] = useState<string | null>(null)
@@ -170,6 +173,15 @@ export default function ElevatorDetailPage() {
       message: err?.response?.data?.detail ?? 'שגיאה בעדכון',
       color: 'red',
     }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => client.delete(`/elevators/${id}`),
+    onSuccess: () => {
+      notifications.show({ message: 'המעלית נמחקה', color: 'green' })
+      navigate('/elevators')
+    },
+    onError: () => notifications.show({ message: 'שגיאה במחיקה', color: 'red' }),
   })
 
   const addContactMutation = useMutation({
@@ -443,6 +455,13 @@ export default function ElevatorDetailPage() {
             <Button variant="default" size="xs" onClick={() => setEditing(false)}>ביטול</Button>
             <Button size="xs" loading={updateMutation.isPending} onClick={() => updateMutation.mutate(form)}>שמור</Button>
           </Group>
+        )}
+        {isAdmin && (
+          <Button
+            size="xs" color="red" variant="subtle"
+            loading={deleteMutation.isPending}
+            onClick={() => { if (window.confirm('למחוק את המעלית לצמיתות?')) deleteMutation.mutate() }}
+          >🗑️ מחק מעלית</Button>
         )}
       </Group>
 

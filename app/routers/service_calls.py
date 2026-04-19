@@ -380,3 +380,24 @@ def get_call_details(
         assignments=assignment_details,
         audit_logs=audit_raw,
     )
+
+
+@router.delete(
+    "/{call_id}",
+    status_code=200,
+    summary="Delete a service call (admin only)",
+)
+def delete_call(
+    call_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    if current_user.role not in ("ADMIN", "MANAGER"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.models.service_call import ServiceCall
+    call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Service call not found")
+    db.delete(call)
+    db.commit()
+    return {"ok": True}

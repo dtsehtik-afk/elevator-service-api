@@ -211,6 +211,18 @@ export default function CallsPage() {
     onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה בעדכון כתובת', color: 'red' }),
   })
 
+  const userRole = useAuthStore(s => s.userRole)
+  const isAdmin = userRole === 'ADMIN'
+
+  const deleteCallMutation = useMutation({
+    mutationFn: (id: string) => client.delete(`/service-calls/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      notifications.show({ message: 'הקריאה נמחקה', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה במחיקה', color: 'red' }),
+  })
+
   function openDetailModal(call: ServiceCall) {
     setDetailCall(call as CallDetail)
     openDetail()
@@ -302,9 +314,15 @@ export default function CallsPage() {
                     <Table.Td><Text size="sm">{c.reported_by}</Text></Table.Td>
                     <Table.Td><Text size="xs" c="dimmed">{formatDateTime(c.created_at)}</Text></Table.Td>
                     <Table.Td onClick={e => e.stopPropagation()}>
-                      <Button size="xs" variant="light" onClick={() => openUpdateModal(c)}>
-                        עדכן
-                      </Button>
+                      <Group gap="xs">
+                        <Button size="xs" variant="light" onClick={() => openUpdateModal(c)}>עדכן</Button>
+                        {isAdmin && (
+                          <ActionIcon
+                            size="sm" color="red" variant="subtle"
+                            onClick={() => { if (window.confirm('למחוק קריאה זו?')) deleteCallMutation.mutate(c.id) }}
+                          >🗑️</ActionIcon>
+                        )}
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}

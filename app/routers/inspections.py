@@ -146,6 +146,22 @@ def confirm_inspection_match(
     return {"ok": True, "elevator_address": f"{elevator.address}, {elevator.city}", **result}
 
 
+@router.delete("/{report_id}", summary="Delete inspection report (admin only)")
+def delete_inspection_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(require_dispatcher_or_admin),
+):
+    import uuid as _uuid
+    from app.models.inspection_report import InspectionReport
+    report = db.query(InspectionReport).filter(InspectionReport.id == _uuid.UUID(report_id)).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    db.delete(report)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{report_id}/reject", summary="Reject the suggested elevator match")
 def reject_inspection_match(
     report_id: str,

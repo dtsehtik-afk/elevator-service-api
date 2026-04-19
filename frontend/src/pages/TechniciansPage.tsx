@@ -7,6 +7,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { listTechnicians, createTechnician, updateTechnician, setOnCallTechnician } from '../api/technicians'
+import client from '../api/client'
 import { Technician } from '../types'
 import { useAuthStore } from '../stores/authStore'
 
@@ -115,6 +116,15 @@ export default function TechniciansPage() {
     },
   })
 
+  const deleteTechMutation = useMutation({
+    mutationFn: (id: string) => client.delete(`/technicians/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['technicians'] })
+      notifications.show({ message: 'הטכנאי נמחק', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה במחיקה', color: 'red' }),
+  })
+
   const openEditModal = (tech: Technician) => {
     setSelected(tech)
     setEditForm({
@@ -204,6 +214,12 @@ export default function TechniciansPage() {
                   <Button size="xs" variant="light" onClick={() => openEditModal(tech)}>
                     ✏️ עריכה
                   </Button>
+                  {userRole === 'ADMIN' && (
+                    <Button
+                      size="xs" color="red" variant="subtle"
+                      onClick={() => { if (window.confirm(`למחוק את ${tech.name}?`)) deleteTechMutation.mutate(tech.id) }}
+                    >🗑️</Button>
+                  )}
                 </Group>
               </Group>
 

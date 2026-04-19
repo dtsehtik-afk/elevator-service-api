@@ -178,3 +178,21 @@ def get_schedule(
     if result is None:
         raise HTTPException(status_code=404, detail="Technician not found")
     return result
+
+
+@router.delete(
+    "/{technician_id}",
+    status_code=200,
+    summary="Delete technician (admin only)",
+)
+def delete_technician(
+    technician_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(require_admin),
+):
+    tech = db.query(Technician).filter(Technician.id == technician_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    db.delete(tech)
+    db.commit()
+    return {"ok": True}

@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
-  FileInput, Center, Collapse, Card, Loader, Alert, Modal, TextInput,
+  FileInput, Center, Collapse, Card, Loader, Alert, Modal, TextInput, ActionIcon,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
+import { useAuthStore } from '../stores/authStore'
 
 interface InspectionReport {
   id: string
@@ -52,6 +53,8 @@ const MATCH_LABEL: Record<string, string> = {
 
 export default function InspectionsPage() {
   const qc = useQueryClient()
+  const userRole = useAuthStore(s => s.userRole)
+  const isAdmin = userRole === 'ADMIN'
   const [file, setFile] = useState<File | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [confirmReport, setConfirmReport] = useState<InspectionReport | null>(null)
@@ -108,6 +111,15 @@ export default function InspectionsPage() {
       notifications.show({ message: 'הדוח סומן כ"לא שויך"', color: 'orange' })
     },
     onError: () => notifications.show({ message: 'שגיאה בדחייה', color: 'red' }),
+  })
+
+  const deleteReportMutation = useMutation({
+    mutationFn: (reportId: string) => client.delete(`/inspections/${reportId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      notifications.show({ message: 'הדוח נמחק', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה במחיקה', color: 'red' }),
   })
 
   return (
@@ -168,9 +180,17 @@ export default function InspectionsPage() {
                     <Badge color="red" variant="light" size="sm">{r.deficiency_count} ליקויים</Badge>
                   )}
                 </Group>
-                <Text size="xs" c="dimmed">
-                  {r.processed_at ? new Date(r.processed_at).toLocaleDateString('he-IL') : ''}
-                </Text>
+                <Group gap="xs">
+                  <Text size="xs" c="dimmed">
+                    {r.processed_at ? new Date(r.processed_at).toLocaleDateString('he-IL') : ''}
+                  </Text>
+                  {isAdmin && (
+                    <ActionIcon
+                      size="sm" color="red" variant="subtle"
+                      onClick={() => { if (window.confirm('למחוק דוח זה?')) deleteReportMutation.mutate(r.id) }}
+                    >🗑️</ActionIcon>
+                  )}
+                </Group>
               </Group>
 
               {r.match_status === 'PENDING_REVIEW' ? (

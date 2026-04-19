@@ -224,3 +224,22 @@ async def upload_elevator_file(
     setattr(elev, field, url)
     db.commit()
     return {"url": url, "field": field}
+
+
+@router.delete(
+    "/{elevator_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Delete elevator (admin only)",
+)
+def delete_elevator(
+    elevator_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(require_admin),
+):
+    from app.models.elevator import Elevator
+    elev = db.query(Elevator).filter(Elevator.id == elevator_id).first()
+    if not elev:
+        raise HTTPException(status_code=404, detail="Elevator not found")
+    db.delete(elev)
+    db.commit()
+    return {"ok": True}
