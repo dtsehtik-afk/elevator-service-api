@@ -281,7 +281,11 @@ def preview_import(
     Does NOT write to DB.
     """
     rows1 = _parse_file(file1.file.read(), file1.filename or "")
+    logger.info("Import preview: parsed %d rows, cols=%s", len(rows1), list(rows1[0].keys()) if rows1 else [])
+    if rows1:
+        logger.info("Import preview: sample row=%s", dict(list(rows1[0].items())[:5]))
     data1 = _process_file1(rows1)
+    logger.info("Import preview: _process_file1 returned %d entries", len(data1))
 
     data2 = {}
     if file2:
