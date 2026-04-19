@@ -1,3 +1,6 @@
+import sys
+sys.path.insert(0, '/app')
+
 from app.database import SessionLocal
 from app.services.inspection_email_poller import poll_inspection_emails
 from datetime import date, timedelta
