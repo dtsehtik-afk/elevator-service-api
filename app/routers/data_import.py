@@ -163,6 +163,10 @@ def _process_file1(rows: list[dict]) -> dict[str, dict]:
             service_num = 1
         service_type = "COMPREHENSIVE" if service_num == 2 else "REGULAR"
 
+        # shcut3 = labor file number (מ.ע)
+        labor_raw = str(row.get("shcut3", "")).strip()
+        labor = labor_raw if labor_raw and labor_raw != "0" and labor_raw.isdigit() else None
+
         result[num] = {
             "internal_number": num,
             "address": address,
@@ -170,8 +174,11 @@ def _process_file1(rows: list[dict]) -> dict[str, dict]:
             "building_name": building_name or None,
             "contact_name": row.get("contactName", "").strip() or None,
             "main_phone": _normalize_phone(row.get("mainPhone", "")),
+            "labor_file_number": labor,
             "last_service_date": _parse_date(row.get("lastprev", "")),
             "last_inspection_date": _parse_date(row.get("lastinspect", "")),
+            "contract_start": _parse_date(row.get("begineservice", "")),
+            "installation_date": _parse_date(row.get("installdate", "")),
             "service_type": service_type,
             "service_contract": "ANNUAL_12" if service_type == "COMPREHENSIVE" else "ANNUAL_6",
             "maintenance_interval_days": 30 if service_type == "COMPREHENSIVE" else 60,
@@ -330,18 +337,11 @@ def commit_import(
 
             if existing:
                 # UPDATE — only fill missing fields
-                if not existing.labor_file_number and d.get("labor_file_number"):
-                    existing.labor_file_number = d["labor_file_number"]
-                if not existing.last_service_date and d.get("last_service_date"):
-                    existing.last_service_date = d["last_service_date"]
-                if not existing.last_inspection_date and d.get("last_inspection_date"):
-                    existing.last_inspection_date = d["last_inspection_date"]
-                if not existing.next_service_date and d.get("next_service_date"):
-                    existing.next_service_date = d["next_service_date"]
-                if not existing.contract_start and d.get("contract_start"):
-                    existing.contract_start = d["contract_start"]
-                if not existing.warranty_end and d.get("warranty_end"):
-                    existing.warranty_end = d["warranty_end"]
+                for field in ("labor_file_number", "last_service_date", "last_inspection_date",
+                              "next_service_date", "contract_start", "warranty_end",
+                              "installation_date"):
+                    if not getattr(existing, field, None) and d.get(field):
+                        setattr(existing, field, d[field])
                 if not existing.service_type and d.get("service_type"):
                     existing.service_type = d["service_type"]
                     existing.service_contract = d.get("service_contract")
@@ -372,6 +372,7 @@ def commit_import(
                     next_service_date=d.get("next_service_date"),
                     contract_start=d.get("contract_start"),
                     warranty_end=d.get("warranty_end"),
+                    installation_date=d.get("installation_date"),
                     floor_count=1,
                 )
                 db.add(elev)
