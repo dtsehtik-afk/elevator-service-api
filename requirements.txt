@@ -19,7 +19,8 @@ aiofiles>=23.0.0
 apscheduler>=3.10.0
 aiosqlite>=0.20.0        # SQLite async driver (used in tests)
 pdfplumber>=0.11.0       # PDF parsing for elevator import
-openpyxl>=3.1.0          # Excel parsing for elevator import
+openpyxl>=3.1.0          # Excel parsing for elevator import (.xlsx)
+xlrd>=2.0.1              # Legacy .xls format support
 # Gemini API called via httpx REST — no SDK needed
 
 # Test dependencies

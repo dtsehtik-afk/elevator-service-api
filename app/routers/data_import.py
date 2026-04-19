@@ -134,22 +134,43 @@ def _parse_tsv(content: bytes) -> list[dict]:
     return rows
 
 
+def _cell_str(c) -> str:
+    """Convert a cell value to a clean string, handling dates and floats."""
+    if c is None:
+        return ""
+    from datetime import datetime, date
+    if isinstance(c, (datetime, date)):
+        return c.strftime("%d/%m/%Y")
+    s = str(c).strip()
+    # Excel stores integers as floats: "121.0" → "121"
+    if s.endswith(".0") and s[:-2].lstrip("-").isdigit():
+        s = s[:-2]
+    return s
+
+
 def _parse_xlsx(content: bytes) -> list[dict]:
-    """Parse an .xlsx file into list of row dicts using first sheet headers."""
-    import openpyxl, io
-    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-    ws = wb.active
-    rows_iter = ws.iter_rows(values_only=True)
+    """Parse .xlsx (openpyxl) or .xls (xlrd) into list of row dicts."""
+    import io
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb.active
+        rows_iter = list(ws.iter_rows(values_only=True))
+    except Exception:
+        # Fallback for legacy .xls
+        import xlrd
+        wb = xlrd.open_workbook(file_contents=content)
+        ws = wb.sheet_by_index(0)
+        rows_iter = [ws.row_values(i) for i in range(ws.nrows)]
+
     header = None
     rows = []
     for row in rows_iter:
-        values = [str(c).strip() if c is not None else "" for c in row]
+        values = [_cell_str(c) for c in row]
         if not any(values):
             continue
         if header is None:
             header = values
-            continue
-        if len(values) < 2:
             continue
         rows.append(dict(zip(header, values)))
     return rows
