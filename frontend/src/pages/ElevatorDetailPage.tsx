@@ -58,6 +58,71 @@ function toISODate(d: Date | null): string | null {
   return d.toISOString().slice(0, 10)
 }
 
+const REPORT_STATUS_COLOR: Record<string, string> = { NA: 'gray', OPEN: 'red', PARTIAL: 'orange', CLOSED: 'green' }
+const REPORT_STATUS_LABEL: Record<string, string> = { NA: 'תקין', OPEN: 'פתוח', PARTIAL: 'בטיפול', CLOSED: 'טופל' }
+
+async function openReportFile(fileUrl: string) {
+  const { data } = await client.get(fileUrl, { responseType: 'blob' })
+  const blobUrl = URL.createObjectURL(data)
+  window.open(blobUrl, '_blank')
+}
+
+function InspectionHistory({ elevatorId }: { elevatorId: string }) {
+  const { data: reports = [], isLoading } = useQuery({
+    queryKey: ['inspections', elevatorId],
+    queryFn: async () => {
+      const { data } = await client.get(`/inspections?elevator_id=${elevatorId}&limit=50`)
+      return data
+    },
+  })
+
+  if (isLoading) return null
+  if (!reports.length) return (
+    <Paper withBorder p="md" radius="md" mt="md">
+      <Text size="sm" c="dimmed" ta="center">אין תסקירי ביקורת שמורים למעלית זו</Text>
+    </Paper>
+  )
+
+  return (
+    <Paper withBorder p="md" radius="md" mt="md">
+      <Text fw={600} mb="sm">היסטוריית תסקירים ({reports.length})</Text>
+      <Stack gap="xs">
+        {reports.map((r: any) => (
+          <Paper key={r.id} withBorder p="sm" radius="sm">
+            <Group justify="space-between">
+              <Group gap="xs">
+                <Badge size="xs" color={r.result === 'PASS' ? 'green' : r.result === 'FAIL' ? 'red' : 'gray'}>
+                  {r.result === 'PASS' ? 'תקין' : r.result === 'FAIL' ? 'ליקויים' : 'לא ידוע'}
+                </Badge>
+                {r.report_status !== 'NA' && (
+                  <Badge size="xs" color={REPORT_STATUS_COLOR[r.report_status]} variant="dot">
+                    {REPORT_STATUS_LABEL[r.report_status]}
+                  </Badge>
+                )}
+                <Text size="sm">
+                  {r.inspection_date ? new Date(r.inspection_date).toLocaleDateString('he-IL') : '—'}
+                </Text>
+                {r.inspector_name && <Text size="sm" c="dimmed">{r.inspector_name}</Text>}
+              </Group>
+              <Group gap="xs">
+                {r.deficiency_count > 0 && (
+                  <Badge size="xs" color="red" variant="light">{r.deficiency_count} ליקויים</Badge>
+                )}
+                {r.file_url && (
+                  <Anchor size="xs" style={{ cursor: 'pointer' }}
+                    onClick={() => openReportFile(r.file_url)}>
+                    📄 פתח
+                  </Anchor>
+                )}
+              </Group>
+            </Group>
+          </Paper>
+        ))}
+      </Stack>
+    </Paper>
+  )
+}
+
 export default function ElevatorDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -974,6 +1039,9 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
             </Grid>
           </Paper>
+
+          {/* ── Inspection history ── */}
+          <InspectionHistory elevatorId={id!} />
         </Tabs.Panel>
 
         {/* ── CALLS ── */}

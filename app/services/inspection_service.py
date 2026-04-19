@@ -268,15 +268,12 @@ def process_inspection_report(
 
 def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
     """
-    Apply a confirmed inspection report to an elevator:
-    - Update last_service_date
-    - Send WhatsApp notification
-    - Open a service call if deficiencies found
-    Called for both AUTO_MATCHED and MANUALLY_CONFIRMED reports.
+    Apply a confirmed inspection report to an elevator.
+    - Updates last_inspection_date on the elevator
+    - Sets report_status (NA / OPEN) and marks deficiencies with done=False
+    - Sends WhatsApp summary to managers only (no auto-assign, no service call)
     """
     from app.services.whatsapp_service import _send_message as send_whatsapp_message
-    from app.schemas.service_call import ServiceCallCreate
-    from app.services import service_call_service
     from app.config import get_settings
 
     settings = get_settings()
@@ -284,55 +281,50 @@ def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
     inspection_date = report.inspection_date
     inspector_name = report.inspector_name
 
-    # Enrich elevator with any new data learned from this report
     if getattr(report, "labor_file_number", None) and not elevator.labor_file_number:
         elevator.labor_file_number = report.labor_file_number
 
     if inspection_date:
-        elevator.last_service_date = inspection_date
-        db.commit()
+        elevator.last_inspection_date = inspection_date
 
     if not deficiencies or report.result == "PASS":
+        report.report_status = "NA"
+        db.commit()
         db.refresh(report)
-        msg = f"✅ ביקורת תקינה: {elevator.address}, {elevator.city}"
-        if inspection_date:
-            msg += f" ({inspection_date.strftime('%d/%m/%Y')})"
+        date_str = inspection_date.strftime('%d/%m/%Y') if inspection_date else "—"
+        msg = (
+            f"📋 *תסקיר בודק נקלט*\n"
+            f"📍 {elevator.address}, {elevator.city}\n"
+            f"📅 {date_str}  |  👤 {inspector_name or 'לא ידוע'}\n"
+            f"✅ תקין — אין ליקויים"
+        )
         for num in (settings.dispatcher_whatsapp or "").split(","):
             n = num.strip()
             if n:
                 send_whatsapp_message(n, msg)
         return {"status": "clean", "report_id": str(report.id), "elevator_id": str(elevator.id), "message": msg}
 
-    severities = [d.get("severity", "MEDIUM") for d in deficiencies]
-    priority = "HIGH" if "HIGH" in severities else ("MEDIUM" if "MEDIUM" in severities else "LOW")
-    deficiency_text = "\n".join(
+    # Deficiencies found — mark checklist items with done=False, set report OPEN
+    checklist = [
+        {**d, "done": False}
+        for d in deficiencies
+    ]
+    report.deficiencies = checklist
+    report.report_status = "OPEN"
+    db.commit()
+    db.refresh(report)
+
+    date_str = inspection_date.strftime('%d/%m/%Y') if inspection_date else "—"
+    deficiency_lines = "\n".join(
         f"• {d.get('description', '')} [{d.get('severity', 'MEDIUM')}]"
         for d in deficiencies
     )
-    call_data = ServiceCallCreate(
-        elevator_id=elevator.id,
-        reported_by=f"ביקורת תקינות — {inspector_name or 'בודק לא ידוע'}",
-        description=f"ליקויים שנמצאו בביקורת ({inspection_date or 'תאריך לא ידוע'}):\n{deficiency_text}",
-        priority=priority,
-        fault_type="OTHER",
-    )
-
-    call = None
-    try:
-        call = service_call_service.create_service_call(db, call_data, "inspection@system")
-        report.service_call_id = call.id
-        db.commit()
-        db.refresh(report)
-    except Exception as exc:
-        logger.error("Failed to create service call for inspection: %s", exc)
-        db.commit()
-        db.refresh(report)
-
     msg = (
-        f"🔍 דוח ביקורת — {elevator.address}, {elevator.city}\n"
-        f"נמצאו {len(deficiencies)} ליקויים (עדיפות: {priority}):\n"
-        f"{deficiency_text}\n"
-        f"{'נפתחה קריאת שירות אוטומטית' if call else 'שגיאה בפתיחת קריאה'}"
+        f"📋 *תסקיר בודק נקלט — נדרש טיפול*\n"
+        f"📍 {elevator.address}, {elevator.city}\n"
+        f"📅 {date_str}  |  👤 {inspector_name or 'לא ידוע'}\n"
+        f"⚠️ {len(deficiencies)} ליקויים:\n{deficiency_lines}\n\n"
+        f"הדוח ממתין לשיוך טכנאי בדשבורד › דוחות בודק"
     )
     for num in (settings.dispatcher_whatsapp or "").split(","):
         n = num.strip()
@@ -343,7 +335,6 @@ def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
         "status": "deficiencies_found",
         "report_id": str(report.id),
         "elevator_id": str(elevator.id),
-        "call_id": str(call.id) if call else None,
         "deficiency_count": len(deficiencies),
         "message": msg,
     }

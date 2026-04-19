@@ -49,30 +49,128 @@ def _get_tech_and_call(db: Session, tech_id: str):
 
 @router.get("/tech/{tech_id}", response_class=HTMLResponse, include_in_schema=False)
 def technician_portal(tech_id: str, db: Session = Depends(get_db)):
-    """Main technician portal — shows active call and report form."""
+    """Main technician portal — 3-column layout: active call / maintenance / inspector reports."""
+    import uuid
+    from datetime import date, timedelta
+    from app.models.elevator import Elevator
+    from app.models.inspection_report import InspectionReport
+
     tech, assignment, call = _get_tech_and_call(db, tech_id)
 
-    if not call:
-        return HTMLResponse(_no_call_page(tech.name))
+    # ── Section 1: Active service call ────────────────────────────────────────
+    call_html = ""
+    if call:
+        elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        address = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+        from app.utils.constants_server import FAULT_TYPE_HE, PRIORITY_HE
+        fault = FAULT_TYPE_HE.get(call.fault_type, call.fault_type)
+        priority = PRIORITY_HE.get(call.priority, call.priority)
+        travel = f"~{assignment.travel_minutes} דק׳" if assignment.travel_minutes else "—"
+        priority_class = "badge-red" if "קריטי" in priority else ("badge-orange" if "גבוה" in priority else "badge-blue")
+        call_html = f"""
+<div class="section-header">🔧 קריאת שירות פעילה</div>
+<div class="card">
+  <div class="row"><span class="label">📍 כתובת</span><span class="value">{address}</span></div>
+  <div class="row"><span class="label">⚡ תקלה</span><span class="value">{fault}</span></div>
+  <div class="row"><span class="label">⚠️ עדיפות</span><span class="badge {priority_class}">{priority}</span></div>
+  <div class="row"><span class="label">👤 מתקשר</span><span class="value">{call.reported_by or '—'}</span></div>
+  <div class="row"><span class="label">🚗 נסיעה</span><span class="value">{travel}</span></div>
+</div>
+<div class="card">
+  <h2>דו"ח סיום טיפול</h2>
+  <textarea id="notes" placeholder="תאר את הטיפול שבוצע, חלקים שהוחלפו וכו׳..."></textarea>
+  <div class="checkbox-row" onclick="document.getElementById('quote').click()">
+    <input type="checkbox" id="quote">
+    <label for="quote">💰 נדרשת הצעת מחיר ללקוח</label>
+  </div>
+  <button class="btn btn-green" onclick="submitReport(true)">✅ סיימתי — סגור קריאה</button>
+  <button class="btn btn-orange" onclick="submitReport(false)">🔧 עדיין בטיפול — שמור הערה</button>
+</div>
+<div class="card">
+  <button class="btn btn-gray" onclick="toggleReassign()">🏢 כתובת שגויה? שייך מחדש</button>
+  <div id="reassign-panel" style="display:none">
+    <p style="color:#555;font-size:.9rem;margin-bottom:10px">חפש את הכתובת הנכונה לפי רחוב, עיר או שם בניין:</p>
+    <input id="elev-q" class="search-input" type="text" placeholder="לדוגמה: הרצל תל אביב"
+           oninput="if(this.value.length>=2) searchElevators()">
+    <div id="elev-results"></div>
+  </div>
+</div>"""
+    else:
+        call_html = '<div class="card" style="text-align:center;color:#888;padding:30px">אין קריאות שירות פעילות</div>'
 
-    from app.models.elevator import Elevator
-    elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
-    address = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+    # ── Section 2: Preventive maintenance ─────────────────────────────────────
+    today = date.today()
+    upcoming = (
+        db.query(Elevator)
+        .filter(
+            Elevator.next_service_date.isnot(None),
+            Elevator.next_service_date <= today + timedelta(days=15),
+            Elevator.status == "ACTIVE",
+        )
+        .order_by(Elevator.next_service_date)
+        .limit(20)
+        .all()
+    )
 
-    from app.utils.constants_server import FAULT_TYPE_HE, PRIORITY_HE
-    fault = FAULT_TYPE_HE.get(call.fault_type, call.fault_type)
-    priority = PRIORITY_HE.get(call.priority, call.priority)
-    travel = f"~{assignment.travel_minutes} דק׳" if assignment.travel_minutes else "—"
+    if upcoming:
+        maint_rows = ""
+        for e in upcoming:
+            days_left = (e.next_service_date - today).days
+            if days_left <= 5:
+                color = "#dc2626"; bg = "#fee2e2"; dot = "🔴"
+            elif days_left <= 10:
+                color = "#ea580c"; bg = "#ffedd5"; dot = "🟠"
+            else:
+                color = "#16a34a"; bg = "#f0fdf4"; dot = "🟢"
+            maint_rows += (
+                f'<div style="background:{bg};border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+                f'<div style="font-weight:600;color:{color}">{dot} {e.address}, {e.city}</div>'
+                f'<div style="font-size:.85rem;color:#555;margin-top:3px">'
+                f'טיפול בעוד {days_left} ימים · {e.next_service_date.strftime("%d/%m/%Y")}</div>'
+                f'</div>'
+            )
+        maint_html = f'<div class="section-header">🛠️ טיפול מונע קרוב</div><div class="card">{maint_rows}</div>'
+    else:
+        maint_html = '<div class="section-header">🛠️ טיפול מונע קרוב</div><div class="card" style="text-align:center;color:#888;padding:20px">אין טיפולים קרובים ב-15 הימים הבאים</div>'
 
-    return HTMLResponse(_active_call_page(
-        tech_id=tech_id,
-        tech_name=tech.name,
-        call_id=str(call.id),
-        address=address,
-        fault=fault,
-        priority=priority,
-        reporter=call.reported_by,
-        travel=travel,
+    # ── Section 3: Open inspection reports ────────────────────────────────────
+    open_reports = (
+        db.query(InspectionReport)
+        .filter(InspectionReport.report_status.in_(["OPEN", "PARTIAL"]))
+        .order_by(InspectionReport.processed_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    if open_reports:
+        report_rows = ""
+        for r in open_reports:
+            elev = db.query(Elevator).filter(Elevator.id == r.elevator_id).first() if r.elevator_id else None
+            addr = f"{elev.address}, {elev.city}" if elev else (r.raw_address or "כתובת לא ידועה")
+            count = r.deficiency_count or 0
+            is_mine = str(getattr(r, 'assigned_technician_id', None)) == tech_id
+            status_label = "בטיפולי 🔧" if is_mine else ("בטיפול אחר" if r.assigned_technician_id else "פנוי")
+            bg = "#fffbeb" if is_mine else ("#f0fdf4" if not r.assigned_technician_id else "#f9fafb")
+            claim_btn = (
+                f'<button class="btn btn-green" style="margin-top:8px;padding:8px" '
+                f'onclick="claimReport(\'{r.id}\')">'
+                f'🙋 קח על עצמי</button>'
+            ) if not r.assigned_technician_id else ""
+            inspect_date = r.inspection_date.strftime("%d/%m/%Y") if r.inspection_date else "—"
+            report_rows += (
+                f'<div style="background:{bg};border-radius:8px;padding:12px;margin-bottom:10px;border:1px solid #e5e7eb">'
+                f'<div style="font-weight:600">{addr}</div>'
+                f'<div style="font-size:.85rem;color:#555;margin-top:3px">📅 {inspect_date} · ⚠️ {count} ליקויים · {status_label}</div>'
+                f'{claim_btn}'
+                f'</div>'
+            )
+        report_html = f'<div class="section-header">📋 דוחות בודק פתוחים</div><div class="card">{report_rows}</div>'
+    else:
+        report_html = '<div class="section-header">📋 דוחות בודק פתוחים</div><div class="card" style="text-align:center;color:#888;padding:20px">אין דוחות פתוחים לטיפול</div>'
+
+    return HTMLResponse(_portal_page(
+        tech_id=tech_id, tech_name=tech.name,
+        call_html=call_html, maint_html=maint_html, report_html=report_html,
     ))
 
 
@@ -228,6 +326,32 @@ def submit_report(tech_id: str, data: ReportSubmit, db: Session = Depends(get_db
     return HTMLResponse(_success_page(tech.name, data.resolved, data.quote_needed))
 
 
+@router.post("/tech/{tech_id}/claim-report/{report_id}", include_in_schema=False)
+def claim_report(tech_id: str, report_id: str, db: Session = Depends(get_db)):
+    """Technician claims an open inspection report from the portal."""
+    import uuid
+    from app.models.inspection_report import InspectionReport
+    from app.models.technician import Technician
+
+    try:
+        tid = uuid.UUID(tech_id)
+        rid = uuid.UUID(report_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID לא תקין")
+
+    tech = db.query(Technician).filter(Technician.id == tid).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
+
+    report = db.query(InspectionReport).filter(InspectionReport.id == rid).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="דוח לא נמצא")
+
+    report.assigned_technician_id = tid
+    db.commit()
+    return {"ok": True}
+
+
 # ── HTML templates ─────────────────────────────────────────────────────────────
 
 _BASE_STYLE = """
@@ -272,8 +396,94 @@ _BASE_STYLE = """
                    margin-bottom: 6px; cursor: pointer; font-size: .95rem; }
   .elevator-item:active { background: #dbeafe; }
   #reassign-panel { margin-top: 12px; }
+  .section-header { font-size: 1rem; font-weight: 700; color: #1a1a2e;
+                    margin: 16px 0 6px; padding-right: 4px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; }
+  .tab-btn { padding: 8px 14px; border: none; border-radius: 20px; font-size: .9rem;
+             font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .tab-active { background: #1a1a2e; color: white; }
+  .tab-inactive { background: #e5e7eb; color: #374151; }
+  .section { display: none; }
+  .section.active { display: block; }
 </style>
 """
+
+
+def _portal_page(tech_id: str, tech_name: str, call_html: str, maint_html: str, report_html: str) -> str:
+    return f"""<!DOCTYPE html><html><head>{_BASE_STYLE}<title>ממשק טכנאי</title></head><body>
+<div class="card" style="margin-bottom:12px">
+  <h1>שלום {tech_name} 👋</h1>
+</div>
+<div class="tabs">
+  <button class="tab-btn tab-active" onclick="showTab('calls',this)">🔧 קריאות</button>
+  <button class="tab-btn tab-inactive" onclick="showTab('maint',this)">🛠️ תחזוקה</button>
+  <button class="tab-btn tab-inactive" onclick="showTab('reports',this)">📋 בודק</button>
+</div>
+<div id="calls" class="section active">{call_html}</div>
+<div id="maint" class="section">{maint_html}</div>
+<div id="reports" class="section">{report_html}</div>
+<script>
+function showTab(id, btn) {{
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => {{ b.classList.remove('tab-active'); b.classList.add('tab-inactive'); }});
+  document.getElementById(id).classList.add('active');
+  btn.classList.remove('tab-inactive'); btn.classList.add('tab-active');
+}}
+
+function submitReport(resolved) {{
+  const notes = document.getElementById('notes').value.trim();
+  const quote_needed = document.getElementById('quote').checked;
+  if (resolved && !notes) {{ alert('נא למלא תיאור הטיפול לפני סגירת הקריאה'); return; }}
+  fetch('/app/tech/{tech_id}/report', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ notes: notes || '—', resolved, quote_needed }})
+  }}).then(r => r.text()).then(html => {{ document.open(); document.write(html); document.close(); }})
+    .catch(() => alert('שגיאה בשליחת הדו"ח, נסה שוב'));
+}}
+
+function toggleReassign() {{
+  const p = document.getElementById('reassign-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') document.getElementById('elev-q').focus();
+}}
+
+let _searchTimer = null;
+function searchElevators() {{
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => {{
+    const q = document.getElementById('elev-q').value.trim();
+    if (q.length < 2) return;
+    fetch('/app/tech/{tech_id}/elevators?q=' + encodeURIComponent(q))
+      .then(r => r.json())
+      .then(items => {{
+        const box = document.getElementById('elev-results');
+        if (!items.length) {{ box.innerHTML = '<p style="color:#888;font-size:.9rem;padding:6px 0">לא נמצאו תוצאות</p>'; return; }}
+        box.innerHTML = items.map(e => {{
+          const label = e.building_name ? `${{e.address}}, ${{e.city}} (${{e.building_name}})` : `${{e.address}}, ${{e.city}}`;
+          return `<button class="elevator-item" onclick="confirmReassign('${{e.id}}','${{label.replace(/'/g,"\\'")}}')"
+                  >📍 ${{label}}</button>`;
+        }}).join('');
+      }}).catch(() => {{}});
+  }}, 300);
+}}
+
+function confirmReassign(elevatorId, label) {{
+  if (!confirm('לשייך את הקריאה לכתובת:\\n' + label + '?')) return;
+  fetch('/app/tech/{tech_id}/reassign-elevator', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{ elevator_id: elevatorId }})
+  }}).then(r => r.text()).then(html => {{ document.open(); document.write(html); document.close(); }})
+    .catch(() => alert('שגיאה בעדכון הכתובת, נסה שוב'));
+}}
+
+function claimReport(reportId) {{
+  if (!confirm('לקחת על עצמך את הדוח לטיפול?')) return;
+  fetch(`/app/tech/{tech_id}/claim-report/${{reportId}}`, {{ method: 'POST' }})
+    .then(r => {{ if (r.ok) location.reload(); else alert('שגיאה בקבלת הדוח'); }})
+    .catch(() => alert('שגיאה'));
+}}
+</script>
+</body></html>"""
 
 
 def _active_call_page(tech_id, tech_name, call_id, address, fault, priority, reporter, travel):

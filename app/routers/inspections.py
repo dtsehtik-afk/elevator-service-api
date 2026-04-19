@@ -53,24 +53,27 @@ def upload_inspection(
 def list_inspections(
     skip: int = 0,
     limit: int = 50,
+    elevator_id: Optional[str] = None,
+    report_status: Optional[str] = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
     from app.models.inspection_report import InspectionReport
     from app.models.elevator import Elevator
+    from app.models.technician import Technician
 
-    reports = (
-        db.query(InspectionReport)
-        .order_by(InspectionReport.processed_at.desc())
-        .offset(skip)
-        .limit(min(limit, 100))
-        .all()
-    )
+    q = db.query(InspectionReport)
+    if elevator_id:
+        q = q.filter(InspectionReport.elevator_id == uuid.UUID(elevator_id))
+    if report_status:
+        q = q.filter(InspectionReport.report_status == report_status)
+    reports = q.order_by(InspectionReport.processed_at.desc()).offset(skip).limit(min(limit, 200)).all()
 
     result = []
     for r in reports:
         elevator = db.query(Elevator).filter(Elevator.id == r.elevator_id).first() if r.elevator_id else None
         suggested = db.query(Elevator).filter(Elevator.id == r.suggested_elevator_id).first() if r.suggested_elevator_id else None
+        tech = db.query(Technician).filter(Technician.id == r.assigned_technician_id).first() if getattr(r, "assigned_technician_id", None) else None
         result.append({
             "id": str(r.id),
             "elevator_address": f"{elevator.address}, {elevator.city}" if elevator else r.raw_address or "לא ידוע",
@@ -89,6 +92,9 @@ def list_inspections(
             "match_score": getattr(r, "match_score", None),
             "processed_at": r.processed_at.isoformat() if r.processed_at else None,
             "file_url": f"/inspections/{r.id}/file" if getattr(r, "file_path", None) else None,
+            "report_status": getattr(r, "report_status", "NA"),
+            "assigned_technician_id": str(r.assigned_technician_id) if getattr(r, "assigned_technician_id", None) else None,
+            "assigned_technician_name": tech.name if tech else None,
         })
     return result
 
@@ -149,6 +155,61 @@ def trigger_email_scan(
     since = date.today() - timedelta(days=since_days)
     count = poll_inspection_emails(db, since_date=since)
     return {"reports_processed": count, "scanned_since": since.isoformat()}
+
+
+@router.post("/claim/{report_id}", summary="Technician claims an open inspection report for remediation")
+def claim_inspection_report(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.models.inspection_report import InspectionReport
+    from app.models.technician import Technician
+
+    report = db.query(InspectionReport).filter(InspectionReport.id == uuid.UUID(report_id)).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if getattr(report, "report_status", "NA") not in ("OPEN", "PARTIAL"):
+        raise HTTPException(status_code=400, detail="Report is not open for claiming")
+
+    tech = db.query(Technician).filter(Technician.email == current_user.email).first()
+    if not tech:
+        raise HTTPException(status_code=400, detail="Technician record not found for this user")
+
+    report.assigned_technician_id = tech.id
+    db.commit()
+    return {"ok": True, "technician_name": tech.name}
+
+
+@router.patch("/checklist/{report_id}", summary="Update deficiency checklist items")
+def update_checklist(
+    report_id: str,
+    updates: list,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    updates: list of {index: int, done: bool}
+    When all items done → report_status = CLOSED; otherwise PARTIAL.
+    """
+    from app.models.inspection_report import InspectionReport
+
+    report = db.query(InspectionReport).filter(InspectionReport.id == uuid.UUID(report_id)).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    checklist = list(report.deficiencies or [])
+    for upd in updates:
+        idx = upd.get("index")
+        if idx is not None and 0 <= idx < len(checklist):
+            checklist[idx] = {**checklist[idx], "done": bool(upd.get("done", False))}
+
+    report.deficiencies = checklist
+    all_done = all(item.get("done", False) for item in checklist)
+    any_done = any(item.get("done", False) for item in checklist)
+    report.report_status = "CLOSED" if all_done else ("PARTIAL" if any_done else "OPEN")
+    db.commit()
+    return {"ok": True, "report_status": report.report_status}
 
 
 @router.post("/{report_id}/confirm", summary="Confirm elevator match for a pending inspection report")

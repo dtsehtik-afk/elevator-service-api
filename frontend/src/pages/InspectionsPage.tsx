@@ -1,13 +1,19 @@
 import { useState } from 'react'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
-  FileInput, Center, Collapse, Card, Loader, Alert, Modal, TextInput, ActionIcon,
-  Autocomplete, Divider, Anchor,
+  FileInput, Center, Collapse, Card, Loader, Alert, Modal, ActionIcon,
+  Autocomplete, Divider, Anchor, Checkbox, Tabs,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+
+interface Deficiency {
+  description: string
+  severity: string
+  done?: boolean
+}
 
 interface InspectionReport {
   id: string
@@ -21,21 +27,21 @@ interface InspectionReport {
   inspection_date: string | null
   result: 'PASS' | 'FAIL' | 'UNKNOWN'
   deficiency_count: number
-  deficiencies: { description: string; severity: string }[] | null
+  deficiencies: Deficiency[] | null
   inspector_name: string | null
   service_call_id: string | null
   match_status: 'AUTO_MATCHED' | 'PENDING_REVIEW' | 'MANUALLY_CONFIRMED' | 'UNMATCHED'
   match_score: number | null
   processed_at: string | null
+  report_status: 'NA' | 'OPEN' | 'PARTIAL' | 'CLOSED'
+  assigned_technician_id: string | null
+  assigned_technician_name: string | null
 }
 
-interface ElevatorOption {
-  id: string
-  label: string
-}
+interface ElevatorOption { id: string; label: string }
 
-async function fetchInspections(): Promise<InspectionReport[]> {
-  const { data } = await client.get('/inspections')
+async function fetchInspections(params?: string): Promise<InspectionReport[]> {
+  const { data } = await client.get(`/inspections${params ? `?${params}` : ''}`)
   return data
 }
 
@@ -48,6 +54,12 @@ async function uploadInspection(file: File): Promise<any> {
   return data
 }
 
+async function openReportFile(fileUrl: string, fileName: string | null) {
+  const { data } = await client.get(fileUrl, { responseType: 'blob' })
+  const blobUrl = URL.createObjectURL(data)
+  window.open(blobUrl, '_blank')
+}
+
 const RESULT_COLOR: Record<string, string> = { PASS: 'green', FAIL: 'red', UNKNOWN: 'gray' }
 const RESULT_LABEL: Record<string, string> = { PASS: '✅ תקין', FAIL: '❌ ליקויים', UNKNOWN: '❓ לא ידוע' }
 const SEVERITY_COLOR: Record<string, string> = { HIGH: 'red', MEDIUM: 'orange', LOW: 'yellow' }
@@ -57,6 +69,8 @@ const MATCH_COLOR: Record<string, string> = {
 const MATCH_LABEL: Record<string, string> = {
   AUTO_MATCHED: 'שויך אוטומטית', PENDING_REVIEW: '⚠️ ממתין לאישור', MANUALLY_CONFIRMED: '✓ אושר ידנית', UNMATCHED: 'לא שויך',
 }
+const REPORT_STATUS_COLOR: Record<string, string> = { NA: 'gray', OPEN: 'red', PARTIAL: 'orange', CLOSED: 'green' }
+const REPORT_STATUS_LABEL: Record<string, string> = { NA: 'תקין', OPEN: 'פתוח', PARTIAL: 'בטיפול', CLOSED: 'טופל' }
 
 export default function InspectionsPage() {
   const qc = useQueryClient()
@@ -69,13 +83,21 @@ export default function InspectionsPage() {
   const [elevOptions, setElevOptions] = useState<ElevatorOption[]>([])
   const [selectedElevId, setSelectedElevId] = useState('')
   const [createMode, setCreateMode] = useState(false)
+  const [activeTab, setActiveTab] = useState<string | null>('all')
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ['inspections'],
-    queryFn: fetchInspections,
+    queryFn: () => fetchInspections(),
   })
 
   const pendingCount = reports.filter(r => r.match_status === 'PENDING_REVIEW').length
+  const openCount = reports.filter(r => r.report_status === 'OPEN' || r.report_status === 'PARTIAL').length
+
+  const displayedReports = activeTab === 'open'
+    ? reports.filter(r => r.report_status === 'OPEN' || r.report_status === 'PARTIAL')
+    : activeTab === 'pending'
+    ? reports.filter(r => r.match_status === 'PENDING_REVIEW')
+    : reports
 
   const uploadMutation = useMutation({
     mutationFn: uploadInspection,
@@ -85,7 +107,7 @@ export default function InspectionsPage() {
       const msg = result.status === 'clean'
         ? '✅ ביקורת תקינה — יומן המעלית עודכן'
         : result.status === 'deficiencies_found'
-        ? `⚠️ נמצאו ${result.deficiency_count} ליקויים — נפתחה קריאת שירות`
+        ? `⚠️ נמצאו ${result.deficiency_count} ליקויים — הדוח נפתח לטיפול`
         : result.status === 'pending_review'
         ? '⚠️ כתובת לא ודאית — נשלחה בקשת אישור למוקד'
         : result.status === 'no_elevator'
@@ -94,11 +116,7 @@ export default function InspectionsPage() {
       notifications.show({ message: msg, color: result.status === 'clean' ? 'green' : 'orange', autoClose: 8000 })
     },
     onError: (e: any) => {
-      notifications.show({
-        message: e?.response?.data?.detail ?? 'שגיאה בעיבוד הדוח',
-        color: 'red',
-        autoClose: 8000,
-      })
+      notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה בעיבוד הדוח', color: 'red', autoClose: 8000 })
     },
   })
 
@@ -107,21 +125,11 @@ export default function InspectionsPage() {
       client.post(`/inspections/${reportId}/confirm${elevatorId ? `?elevator_id=${elevatorId}` : ''}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inspections'] })
-      setConfirmReport(null)
-      setElevSearch('')
-      setSelectedElevId('')
-      setCreateMode(false)
+      setConfirmReport(null); setElevSearch(''); setSelectedElevId(''); setCreateMode(false)
       notifications.show({ message: '✅ הדוח אושר ושויך למעלית', color: 'green' })
     },
     onError: () => notifications.show({ message: 'שגיאה באישור', color: 'red' }),
   })
-
-  async function searchElevators(q: string) {
-    setElevSearch(q)
-    if (q.length < 2) { setElevOptions([]); return }
-    const { data } = await client.get(`/inspections/search-elevators?q=${encodeURIComponent(q)}`)
-    setElevOptions(data)
-  }
 
   const rejectMutation = useMutation({
     mutationFn: (reportId: string) => client.post(`/inspections/${reportId}/reject`),
@@ -132,14 +140,42 @@ export default function InspectionsPage() {
     onError: () => notifications.show({ message: 'שגיאה בדחייה', color: 'red' }),
   })
 
+  const claimMutation = useMutation({
+    mutationFn: (reportId: string) => client.post(`/inspections/claim/${reportId}`),
+    onSuccess: (_, reportId) => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      notifications.show({ message: '✅ הדוח נלקח לטיפולך', color: 'teal' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בקבלת הדוח לטיפול', color: 'red' }),
+  })
+
+  const checklistMutation = useMutation({
+    mutationFn: ({ reportId, updates }: { reportId: string; updates: { index: number; done: boolean }[] }) =>
+      client.patch(`/inspections/checklist/${reportId}`, updates),
+    onSuccess: (res, { reportId }) => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      const status = res.data?.report_status
+      if (status === 'CLOSED') notifications.show({ message: '✅ כל הליקויים טופלו — הדוח נסגר', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בעדכון הרשימה', color: 'red' }),
+  })
+
   const deleteReportMutation = useMutation({
     mutationFn: (reportId: string) => client.delete(`/inspections/${reportId}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['inspections'] })
-      notifications.show({ message: 'הדוח נמחק', color: 'green' })
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inspections'] }); notifications.show({ message: 'הדוח נמחק', color: 'green' }) },
     onError: () => notifications.show({ message: 'שגיאה במחיקה', color: 'red' }),
   })
+
+  async function searchElevators(q: string) {
+    setElevSearch(q)
+    if (q.length < 2) { setElevOptions([]); return }
+    const { data } = await client.get(`/inspections/search-elevators?q=${encodeURIComponent(q)}`)
+    setElevOptions(data)
+  }
+
+  function toggleDeficiency(report: InspectionReport, idx: number, done: boolean) {
+    checklistMutation.mutate({ reportId: report.id, updates: [{ index: idx, done }] })
+  }
 
   return (
     <Stack gap="lg">
@@ -154,23 +190,11 @@ export default function InspectionsPage() {
       <Paper withBorder p="lg" radius="md">
         <Stack gap="sm">
           <Text fw={600}>העלאת דוח ביקורת חדש</Text>
-          <Text size="sm" c="dimmed">
-            תומך ב-PDF, תמונות (JPEG, PNG, WEBP). Gemini Vision יקרא את הדוח ויעדכן את המערכת אוטומטית.
-          </Text>
+          <Text size="sm" c="dimmed">תומך ב-PDF, תמונות (JPEG, PNG, WEBP). Gemini Vision יקרא את הדוח ויעדכן את המערכת אוטומטית.</Text>
           <Group align="flex-end">
-            <FileInput
-              label="בחר קובץ"
-              placeholder="PDF או תמונה..."
-              accept=".pdf,.jpg,.jpeg,.png,.webp"
-              value={file}
-              onChange={setFile}
-              style={{ flex: 1 }}
-            />
-            <Button
-              loading={uploadMutation.isPending}
-              disabled={!file}
-              onClick={() => file && uploadMutation.mutate(file)}
-            >
+            <FileInput label="בחר קובץ" placeholder="PDF או תמונה..."
+              accept=".pdf,.jpg,.jpeg,.png,.webp" value={file} onChange={setFile} style={{ flex: 1 }} />
+            <Button loading={uploadMutation.isPending} disabled={!file} onClick={() => file && uploadMutation.mutate(file)}>
               עבד דוח
             </Button>
           </Group>
@@ -179,22 +203,36 @@ export default function InspectionsPage() {
 
       {isLoading ? (
         <Center h={200}><Loader /></Center>
-      ) : reports.length === 0 ? (
-        <Text c="dimmed" ta="center" mt="xl">אין דוחות ביקורת עדיין</Text>
       ) : (
         <Stack gap="sm">
-          <Text size="sm" c="dimmed">{reports.length} דוחות</Text>
-          {reports.map(r => (
+          <Tabs value={activeTab} onChange={setActiveTab}>
+            <Tabs.List>
+              <Tabs.Tab value="all">הכל ({reports.length})</Tabs.Tab>
+              <Tabs.Tab value="open" color="red">פתוח לטיפול ({openCount})</Tabs.Tab>
+              <Tabs.Tab value="pending" color="orange">ממתין לאישור ({pendingCount})</Tabs.Tab>
+            </Tabs.List>
+          </Tabs>
+
+          {displayedReports.length === 0
+            ? <Text c="dimmed" ta="center" mt="xl">אין דוחות</Text>
+            : displayedReports.map(r => (
             <Card key={r.id} withBorder radius="md" p="md"
-              style={r.match_status === 'PENDING_REVIEW' ? { borderColor: 'var(--mantine-color-orange-4)', borderWidth: 2 } : undefined}
+              style={r.match_status === 'PENDING_REVIEW' ? { borderColor: 'var(--mantine-color-orange-4)', borderWidth: 2 }
+                : (r.report_status === 'OPEN') ? { borderColor: 'var(--mantine-color-red-4)', borderWidth: 2 }
+                : undefined}
             >
               <Group justify="space-between" mb={4}>
-                <Group gap="sm">
+                <Group gap="sm" wrap="wrap">
                   <Badge color={RESULT_COLOR[r.result]} size="md">{RESULT_LABEL[r.result]}</Badge>
                   <Badge color={MATCH_COLOR[r.match_status]} variant="light" size="sm">
                     {MATCH_LABEL[r.match_status]}
                     {r.match_score != null && r.match_status === 'PENDING_REVIEW' ? ` (${Math.round(r.match_score * 100)}%)` : ''}
                   </Badge>
+                  {r.report_status !== 'NA' && (
+                    <Badge color={REPORT_STATUS_COLOR[r.report_status]} variant="dot" size="sm">
+                      {REPORT_STATUS_LABEL[r.report_status]}
+                    </Badge>
+                  )}
                   {r.deficiency_count > 0 && (
                     <Badge color="red" variant="light" size="sm">{r.deficiency_count} ליקויים</Badge>
                   )}
@@ -204,10 +242,10 @@ export default function InspectionsPage() {
                     {r.processed_at ? new Date(r.processed_at).toLocaleDateString('he-IL') : ''}
                   </Text>
                   {isAdmin && (
-                    <ActionIcon
-                      size="sm" color="red" variant="subtle"
-                      onClick={() => { if (window.confirm('למחוק דוח זה?')) deleteReportMutation.mutate(r.id) }}
-                    >🗑️</ActionIcon>
+                    <ActionIcon size="sm" color="red" variant="subtle"
+                      onClick={() => { if (window.confirm('למחוק דוח זה?')) deleteReportMutation.mutate(r.id) }}>
+                      🗑️
+                    </ActionIcon>
                   )}
                 </Group>
               </Group>
@@ -219,13 +257,9 @@ export default function InspectionsPage() {
                     <Text size="sm">מעלית מוצעת: <strong>{r.suggested_elevator_address}</strong></Text>
                   )}
                   <Group gap="sm" mt={4}>
-                    <Button size="xs" color="green" onClick={() => setConfirmReport(r)}>
-                      ✅ אשר שיוך
-                    </Button>
+                    <Button size="xs" color="green" onClick={() => setConfirmReport(r)}>✅ אשר שיוך</Button>
                     <Button size="xs" color="red" variant="light"
-                      loading={rejectMutation.isPending}
-                      onClick={() => rejectMutation.mutate(r.id)}
-                    >
+                      loading={rejectMutation.isPending} onClick={() => rejectMutation.mutate(r.id)}>
                       ❌ דחה
                     </Button>
                   </Group>
@@ -234,43 +268,85 @@ export default function InspectionsPage() {
                 <Text fw={600}>📍 {r.elevator_address}</Text>
               )}
 
-              <Group gap="md" mt={4}>
+              <Group gap="md" mt={4} wrap="wrap">
                 {r.inspection_date && (
                   <Text size="sm" c="dimmed">📅 {new Date(r.inspection_date).toLocaleDateString('he-IL')}</Text>
                 )}
-                {r.inspector_name && (
-                  <Text size="sm" c="dimmed">👤 {r.inspector_name}</Text>
+                {r.inspector_name && <Text size="sm" c="dimmed">👤 {r.inspector_name}</Text>}
+                {r.assigned_technician_name && (
+                  <Text size="sm" c="teal">🔧 {r.assigned_technician_name}</Text>
                 )}
                 {r.file_url ? (
-                  <Anchor href={r.file_url} target="_blank" size="sm">📄 הצג תסקיר</Anchor>
+                  <Anchor size="sm" style={{ cursor: 'pointer' }}
+                    onClick={() => openReportFile(r.file_url!, r.file_name)}>
+                    📄 הצג תסקיר
+                  </Anchor>
                 ) : r.file_name ? (
                   <Text size="sm" c="dimmed">📄 {r.file_name}</Text>
                 ) : null}
               </Group>
 
-              {r.service_call_id && (
-                <Text size="sm" c="orange" mt={4}>🔧 קריאת שירות נפתחה</Text>
+              {/* Open/Partial reports: claim + checklist */}
+              {(r.report_status === 'OPEN' || r.report_status === 'PARTIAL') && (
+                <>
+                  <Group gap="sm" mt="sm">
+                    {!r.assigned_technician_id && (
+                      <Button size="xs" color="teal" variant="light"
+                        loading={claimMutation.isPending && claimMutation.variables === r.id}
+                        onClick={() => claimMutation.mutate(r.id)}>
+                        🙋 קח על עצמי
+                      </Button>
+                    )}
+                    <Button variant="subtle" size="xs"
+                      onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+                      {expanded === r.id ? 'הסתר ליקויים ▲' : `הצג ליקויים (${r.deficiency_count}) ▼`}
+                    </Button>
+                  </Group>
+                  <Collapse in={expanded === r.id}>
+                    <Stack gap={6} mt="xs" p="xs"
+                      style={{ background: 'var(--mantine-color-red-0)', borderRadius: 8 }}>
+                      {(r.deficiencies || []).map((d, i) => (
+                        <Checkbox
+                          key={i}
+                          checked={!!d.done}
+                          onChange={e => toggleDeficiency(r, i, e.target.checked)}
+                          label={
+                            <Group gap="xs">
+                              <Badge color={SEVERITY_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
+                              <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
+                                {d.description}
+                              </Text>
+                            </Group>
+                          }
+                        />
+                      ))}
+                    </Stack>
+                  </Collapse>
+                </>
               )}
 
-              {r.deficiencies && r.deficiencies.length > 0 && (
+              {/* Closed or clean: show checklist read-only */}
+              {r.report_status === 'CLOSED' && r.deficiencies && r.deficiencies.length > 0 && (
                 <>
-                  <Button
-                    variant="subtle" size="xs" mt="xs"
-                    onClick={() => setExpanded(expanded === r.id ? null : r.id)}
-                  >
-                    {expanded === r.id ? 'הסתר ליקויים ▲' : `הצג ליקויים (${r.deficiencies.length}) ▼`}
+                  <Button variant="subtle" size="xs" mt="xs"
+                    onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+                    {expanded === r.id ? 'הסתר ליקויים ▲' : `ליקויים שטופלו (${r.deficiency_count}) ▼`}
                   </Button>
                   <Collapse in={expanded === r.id}>
                     <Stack gap={4} mt="xs">
                       {r.deficiencies.map((d, i) => (
                         <Group key={i} gap="xs">
                           <Badge color={SEVERITY_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
-                          <Text size="sm">{d.description}</Text>
+                          <Text size="sm" td="line-through" c="dimmed">{d.description}</Text>
                         </Group>
                       ))}
                     </Stack>
                   </Collapse>
                 </>
+              )}
+
+              {r.service_call_id && (
+                <Text size="sm" c="orange" mt={4}>🔧 קריאת שירות נפתחה</Text>
               )}
             </Card>
           ))}
@@ -291,7 +367,10 @@ export default function InspectionsPage() {
               <Text size="sm">כתובת בדוח: <strong>{confirmReport.raw_address || '—'}</strong></Text>
               {confirmReport.inspector_name && <Text size="xs" c="dimmed">בודק: {confirmReport.inspector_name}</Text>}
               {confirmReport.file_url && (
-                <Anchor href={confirmReport.file_url} target="_blank" size="xs">📄 פתח תסקיר מקורי</Anchor>
+                <Anchor size="xs" style={{ cursor: 'pointer' }}
+                  onClick={() => openReportFile(confirmReport.file_url!, confirmReport.file_name)}>
+                  📄 פתח תסקיר מקורי
+                </Anchor>
               )}
             </Paper>
 
@@ -299,11 +378,8 @@ export default function InspectionsPage() {
               <>
                 <Text size="sm" fw={600}>מעלית מוצעת על-ידי המערכת:</Text>
                 <Text size="sm">{confirmReport.suggested_elevator_address}</Text>
-                <Button
-                  color="green"
-                  loading={confirmMutation.isPending}
-                  onClick={() => confirmMutation.mutate({ reportId: confirmReport.id })}
-                >
+                <Button color="green" loading={confirmMutation.isPending}
+                  onClick={() => confirmMutation.mutate({ reportId: confirmReport.id })}>
                   ✅ אשר מעלית זו
                 </Button>
                 <Divider label="— או —" labelPosition="center" />
@@ -322,21 +398,13 @@ export default function InspectionsPage() {
               }}
               data={elevOptions.map(o => o.label)}
             />
-            <Button
-              variant="light"
-              disabled={!selectedElevId}
-              loading={confirmMutation.isPending}
-              onClick={() => confirmMutation.mutate({ reportId: confirmReport.id, elevatorId: selectedElevId })}
-            >
+            <Button variant="light" disabled={!selectedElevId} loading={confirmMutation.isPending}
+              onClick={() => confirmMutation.mutate({ reportId: confirmReport.id, elevatorId: selectedElevId })}>
               שייך למעלית שנבחרה
             </Button>
 
             <Divider label="— לא מצאת? —" labelPosition="center" />
-            <Button
-              variant="subtle"
-              color="blue"
-              onClick={() => setCreateMode(c => !c)}
-            >
+            <Button variant="subtle" color="blue" onClick={() => setCreateMode(c => !c)}>
               {createMode ? '▲ ביטול' : '+ הוסף מעלית חדשה על בסיס הדוח'}
             </Button>
             {createMode && (

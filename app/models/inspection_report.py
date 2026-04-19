@@ -13,10 +13,10 @@ class InspectionReport(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     elevator_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
-    # When match is uncertain, this holds the best candidate for dispatcher to confirm
     suggested_elevator_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="upload")  # "email" | "upload"
     file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     raw_address: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     raw_street: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     raw_city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -27,9 +27,12 @@ class InspectionReport(Base):
     deficiency_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deficiencies: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     service_call_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
-    # Match status: AUTO_MATCHED | PENDING_REVIEW | MANUALLY_CONFIRMED | UNMATCHED
     match_status: Mapped[str] = mapped_column(String(20), nullable=False, default="AUTO_MATCHED")
     match_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # Report work status: NA (clean) | OPEN (has deficiencies) | PARTIAL | CLOSED
+    report_status: Mapped[str] = mapped_column(String(20), nullable=False, default="NA")
+    # Technician who claimed this report for remediation
+    assigned_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+
