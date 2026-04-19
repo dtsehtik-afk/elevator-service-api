@@ -243,36 +243,103 @@ def _process_file1(rows: list[dict]) -> dict[str, dict]:
     return result
 
 
-def _process_file2(rows: list[dict]) -> dict[str, dict]:
-    """Parse details file rows into dict keyed by internal_number."""
-    result = {}
-    for row in rows:
-        # Column names vary — try multiple
-        num = str(row.get("מעלית", row.get("sysnumber", ""))).strip()
-        if not num or not num.isdigit():
+_DATE_PAT = re.compile(r'^\d{1,2}/\d{1,2}/\d{2,4}$')
+_PHONE_PAT = re.compile(r'^0?\d{8,9}$')
+
+
+def _detect_contact_row(row: dict) -> Optional[dict]:
+    """
+    Smart column detector for headerless contact files.
+    Identifies sysnumber, contact_name, phone, dates by value patterns.
+    Returns None if no sysnumber found in this row.
+    """
+    sysnumber = None
+    contact_name = None
+    sysname = None
+    phone = None
+    dates = []
+    service_type = None
+
+    for v in row.values():
+        v = str(v).strip()
+        if not v:
             continue
+        digits_only = re.sub(r"[^\d]", "", v)
 
-        labor = str(row.get("מס' מע'", row.get("מס מע", ""))).strip()
-        if labor == "0" or not labor.isdigit():
-            labor = None
+        if _DATE_PAT.match(v):
+            dates.append(v)
+        elif v in ("מקיף",):
+            service_type = "COMPREHENSIVE"
+        elif v in ("רגיל",):
+            service_type = "REGULAR"
+        elif digits_only and len(digits_only) >= 9 and _PHONE_PAT.match(digits_only):
+            phone = digits_only if digits_only.startswith("0") else "0" + digits_only
+        elif v.isdigit() and 50 <= int(v) <= 9999:
+            sysnumber = v
+        elif any("\u05d0" <= c <= "\u05ea" for c in v):
+            # Hebrew text: address has digits, contact name typically doesn't
+            if re.search(r"\d", v):
+                sysname = v
+            elif contact_name is None:
+                contact_name = v
 
-        service_raw = str(row.get("סוג שרות", row.get("סוג שירות", "1"))).strip()
-        try:
-            service_num = int(service_raw)
-        except ValueError:
-            service_num = 1
-        service_type = "COMPREHENSIVE" if service_num == 2 else "REGULAR"
+    if not sysnumber:
+        return None
+    return {
+        "contact_name": contact_name,
+        "main_phone": phone,
+        "service_type": service_type,
+        "last_inspection_date": _parse_date(dates[0]) if len(dates) >= 1 else None,
+        "last_service_date": _parse_date(dates[1]) if len(dates) >= 2 else None,
+    }
 
-        result[num] = {
-            "labor_file_number": labor,
-            "last_inspection_date": _parse_date(row.get("ד. בודק", row.get("ד.בודק", ""))),
-            "next_service_date": _parse_date(row.get("ט.מ", "")),
-            "contract_start": _parse_date(row.get("תחילת חיוב", "")),
-            "warranty_end": _parse_date(row.get("תום אחריות", "")),
-            "service_type": service_type,
-            "service_contract": "ANNUAL_12" if service_type == "COMPREHENSIVE" else "ANNUAL_6",
-            "maintenance_interval_days": 30 if service_type == "COMPREHENSIVE" else 60,
-        }
+
+def _process_file2(rows: list[dict]) -> dict[str, dict]:
+    """Parse details file rows into dict keyed by internal_number.
+    Supports both named-header files and headerless contact files.
+    """
+    result = {}
+
+    # Check if first row has known Hebrew headers
+    if rows and any(k in ("מעלית", "מס' מע'", "ד. בודק", "ט.מ") for k in rows[0]):
+        # Named-header format (legacy file2)
+        for row in rows:
+            num = str(row.get("מעלית", row.get("sysnumber", ""))).strip()
+            if not num or not num.isdigit():
+                continue
+            labor = str(row.get("מס' מע'", row.get("מס מע", ""))).strip()
+            if labor == "0" or not labor.isdigit():
+                labor = None
+            service_raw = str(row.get("סוג שרות", row.get("סוג שירות", "1"))).strip()
+            try:
+                service_num = int(service_raw)
+            except ValueError:
+                service_num = 1
+            service_type = "COMPREHENSIVE" if service_num == 2 else "REGULAR"
+            result[num] = {
+                "labor_file_number": labor,
+                "last_inspection_date": _parse_date(row.get("ד. בודק", row.get("ד.בודק", ""))),
+                "next_service_date": _parse_date(row.get("ט.מ", "")),
+                "contract_start": _parse_date(row.get("תחילת חיוב", "")),
+                "warranty_end": _parse_date(row.get("תום אחריות", "")),
+                "service_type": service_type,
+                "service_contract": "ANNUAL_12" if service_type == "COMPREHENSIVE" else "ANNUAL_6",
+                "maintenance_interval_days": 30 if service_type == "COMPREHENSIVE" else 60,
+            }
+    else:
+        # Headerless contact file — detect columns by value patterns
+        for row in rows:
+            num = None
+            for v in row.values():
+                s = str(v).strip()
+                if s.isdigit() and 50 <= int(s) <= 9999:
+                    num = s
+                    break
+            if not num:
+                continue
+            detected = _detect_contact_row(row)
+            if detected:
+                result[num] = detected
     return result
 
 
@@ -413,6 +480,21 @@ def commit_import(
                     existing.service_type = d["service_type"]
                     existing.service_contract = d.get("service_contract")
                     existing.maintenance_interval_days = d.get("maintenance_interval_days")
+                # Save contact if provided and building exists
+                contact_name = d.get("contact_name")
+                main_phone = d.get("main_phone")
+                if contact_name and existing.building_id:
+                    exists = db.query(Contact).filter(
+                        Contact.building_id == existing.building_id,
+                        Contact.name == contact_name,
+                    ).first()
+                    if not exists:
+                        db.add(Contact(
+                            building_id=existing.building_id,
+                            name=contact_name,
+                            phone=main_phone,
+                            role="VAAD",
+                        ))
                 sp.commit()
                 updated += 1
             else:
