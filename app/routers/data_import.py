@@ -390,11 +390,17 @@ def commit_import(
         return b
 
     for num, d in sorted(merged.items(), key=lambda x: int(x[0])):
+        sp = db.begin_nested()  # savepoint — rollback only this elevator on failure
         try:
             address = (d.get("address") or "").strip()
             city = (d.get("city") or "").strip()
 
             existing = db.query(Elevator).filter(Elevator.internal_number == num).first()
+            # Also check by labor_file_number to avoid UniqueViolation
+            if not existing and d.get("labor_file_number"):
+                existing = db.query(Elevator).filter(
+                    Elevator.labor_file_number == d["labor_file_number"]
+                ).first()
 
             if existing:
                 # UPDATE — only fill missing fields
@@ -407,6 +413,7 @@ def commit_import(
                     existing.service_type = d["service_type"]
                     existing.service_contract = d.get("service_contract")
                     existing.maintenance_interval_days = d.get("maintenance_interval_days")
+                sp.commit()
                 updated += 1
             else:
                 # CREATE
@@ -455,13 +462,16 @@ def commit_import(
                             role="VAAD",
                         ))
 
+                sp.commit()
                 created += 1
 
         except Exception as exc:
+            sp.rollback()
+            # Remove stale building from cache so it gets re-created fresh next time
+            key = (address.lower().strip(), city.lower().strip())
+            building_cache.pop(key, None)
             logger.error("Import error for elevator %s: %s", num, exc)
-            errors.append({"internal_number": num, "error": str(exc)})
-            db.rollback()
-            continue
+            errors.append({"internal_number": num, "error": str(exc)[:200]})
 
     db.commit()
 
