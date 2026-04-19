@@ -134,6 +134,35 @@ def _parse_tsv(content: bytes) -> list[dict]:
     return rows
 
 
+def _parse_xlsx(content: bytes) -> list[dict]:
+    """Parse an .xlsx file into list of row dicts using first sheet headers."""
+    import openpyxl, io
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    ws = wb.active
+    rows_iter = ws.iter_rows(values_only=True)
+    header = None
+    rows = []
+    for row in rows_iter:
+        values = [str(c).strip() if c is not None else "" for c in row]
+        if not any(values):
+            continue
+        if header is None:
+            header = values
+            continue
+        if len(values) < 2:
+            continue
+        rows.append(dict(zip(header, values)))
+    return rows
+
+
+def _parse_file(content: bytes, filename: str) -> list[dict]:
+    """Dispatch to xlsx or tsv parser based on file extension."""
+    if filename.lower().endswith((".xlsx", ".xls")):
+        return _parse_xlsx(content)
+    return _parse_tsv(content)
+
+
+
 def _process_file1(rows: list[dict]) -> dict[str, dict]:
     """Parse main file rows into dict keyed by internal_number."""
     result = {}
@@ -230,12 +259,12 @@ def preview_import(
     Dry-run: parse both files and return what would be imported.
     Does NOT write to DB.
     """
-    rows1 = _parse_tsv(file1.file.read())
+    rows1 = _parse_file(file1.file.read(), file1.filename or "")
     data1 = _process_file1(rows1)
 
     data2 = {}
     if file2:
-        rows2 = _parse_tsv(file2.file.read())
+        rows2 = _parse_file(file2.file.read(), file2.filename or "")
         data2 = _process_file2(rows2)
 
     # Merge
@@ -292,12 +321,12 @@ def commit_import(
     - Creates Contact records for ועד contacts
     - Optionally geocodes new elevators via Nominatim (free)
     """
-    rows1 = _parse_tsv(file1.file.read())
+    rows1 = _parse_file(file1.file.read(), file1.filename or "")
     data1 = _process_file1(rows1)
 
     data2 = {}
     if file2:
-        rows2 = _parse_tsv(file2.file.read())
+        rows2 = _parse_file(file2.file.read(), file2.filename or "")
         data2 = _process_file2(rows2)
 
     # Merge: file2 wins for fields it provides
