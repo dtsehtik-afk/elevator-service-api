@@ -480,6 +480,9 @@ def commit_import(
                     existing.service_type = d["service_type"]
                     existing.service_contract = d.get("service_contract")
                     existing.maintenance_interval_days = d.get("maintenance_interval_days")
+                # Also persist phone directly on the elevator record
+                if d.get("main_phone") and not existing.contact_phone:
+                    existing.contact_phone = d["main_phone"]
                 # Save contact if provided and building exists
                 contact_name = d.get("contact_name")
                 main_phone = d.get("main_phone")
@@ -512,6 +515,7 @@ def commit_import(
                     address=address,
                     city=city,
                     building_name=d.get("building_name"),
+                    contact_phone=d.get("main_phone"),
                     latitude=lat,
                     longitude=lon,
                     service_type=d.get("service_type"),

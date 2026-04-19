@@ -17,18 +17,19 @@ const PAGE_SIZE = 20
 // ── Column definitions ────────────────────────────────────────────────────────
 
 const ALL_COLUMNS = [
-  { key: 'serial_number',    label: 'מס׳',          defaultVisible: true  },
-  { key: 'address',          label: 'כתובת',         defaultVisible: true  },
-  { key: 'city',             label: 'עיר',           defaultVisible: true  },
-  { key: 'contact_phone',    label: 'טלפון',         defaultVisible: true  },
-  { key: 'status',           label: 'סטטוס',         defaultVisible: true  },
-  { key: 'risk_score',       label: 'סיכון',         defaultVisible: true  },
-  { key: 'next_service_date',label: 'שירות הבא',     defaultVisible: true  },
-  { key: 'last_service_date',label: 'שירות אחרון',   defaultVisible: true  },
-  { key: 'building_name',    label: 'בניין',         defaultVisible: false },
-  { key: 'manufacturer',     label: 'יצרן',          defaultVisible: false },
-  { key: 'model',            label: 'דגם',           defaultVisible: false },
-  { key: 'floor_count',      label: 'קומות',         defaultVisible: false },
+  { key: 'internal_number',   label: 'מס"ד',          defaultVisible: true  },
+  { key: 'serial_number',     label: 'מס׳ סידורי',    defaultVisible: false },
+  { key: 'address',           label: 'כתובת',          defaultVisible: true  },
+  { key: 'city',              label: 'עיר',            defaultVisible: true  },
+  { key: 'contact_phone',     label: 'טלפון',          defaultVisible: true  },
+  { key: 'status',            label: 'סטטוס',          defaultVisible: true  },
+  { key: 'risk_score',        label: 'סיכון',          defaultVisible: true  },
+  { key: 'next_service_date', label: 'שירות הבא',      defaultVisible: true  },
+  { key: 'last_service_date', label: 'שירות אחרון',    defaultVisible: true  },
+  { key: 'building_name',     label: 'בניין',          defaultVisible: false },
+  { key: 'manufacturer',      label: 'יצרן',           defaultVisible: false },
+  { key: 'model',             label: 'דגם',            defaultVisible: false },
+  { key: 'floor_count',       label: 'קומות',          defaultVisible: false },
 ]
 
 const STORAGE_KEY = 'elevators_visible_cols'
@@ -206,6 +207,7 @@ export default function ElevatorsPage() {
                   </Table.Tr>
                 ) : paginated.map(e => (
                   <Table.Tr key={e.id} onClick={() => navigate(`/elevators/${e.id}`)} style={{ cursor: 'pointer' }}>
+                    {show('internal_number') && <Table.Td><Text size="sm" fw={500}>{e.internal_number ?? '—'}</Text></Table.Td>}
                     {show('serial_number') && <Table.Td><Text size="sm" fw={500}>{e.serial_number ?? '—'}</Text></Table.Td>}
                     {show('address') && (
                       <Table.Td>
