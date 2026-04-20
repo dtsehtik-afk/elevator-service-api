@@ -487,7 +487,7 @@ def poll_emails(db) -> int:
                     elevator_id=elevator.id,
                     reported_by=reported_by,
                     description=description,
-                    fault_type=fields["fault_type"],
+                    fault_type="RESCUE" if is_rescue else fields["fault_type"],
                     priority="CRITICAL" if is_rescue else "MEDIUM",
                     status="OPEN",
                     **({"created_at": email_date} if email_date else {}),
