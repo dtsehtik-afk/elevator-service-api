@@ -430,12 +430,30 @@ def poll_emails(db) -> int:
                 return f'(OR (FROM "{addresses[0]}") ({_or_chain(addresses[1:])}))'
             from_filter = _or_chain(senders)
 
+        # Diagnostic: total emails in folder today (any sender)
+        _, diag_all = mail.search(None, f'SINCE {since_str}')
+        diag_total = len(diag_all[0].split()) if diag_all[0] else 0
+
         _, all_ids = mail.search(None, f'({from_filter} SINCE {since_str})')
         _, ids = mail.search(None, f'(UNSEEN {from_filter} SINCE {since_str})')
         total_count = len(all_ids[0].split()) if all_ids[0] else 0
         unread_count = len(ids[0].split()) if ids[0] else 0
-        logger.warning("📧 [%s] service emails today: %d total, %d unread (senders: %s)",
-                       imap_folder, total_count, unread_count, ", ".join(senders))
+        logger.warning(
+            "📧 [%s] today(%s): %d total-in-folder | %d from-senders | %d unread-from-senders | senders=%s",
+            imap_folder, since_str, diag_total, total_count, unread_count, ", ".join(senders)
+        )
+
+        # If nothing from senders but folder has mail, log a sample of From headers for diagnosis
+        if total_count == 0 and diag_total > 0:
+            sample_ids = diag_all[0].split()[-5:]  # last 5 emails
+            for sid in sample_ids:
+                try:
+                    _, hdata = mail.fetch(sid, "(BODY[HEADER.FIELDS (FROM SUBJECT DATE)])")
+                    header_raw = hdata[0][1].decode("utf-8", errors="replace") if hdata[0] else ""
+                    logger.warning("📧 sample header: %s", header_raw.replace("\r\n", " | "))
+                except Exception:
+                    pass
+
         msg_ids = ids[0].split()
         if not msg_ids:
             mail.logout()
