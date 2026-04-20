@@ -50,14 +50,19 @@ class Settings(BaseSettings):
     # Public base URL for technician portal links (e.g. http://192.168.1.100:8000)
     app_base_url: str = "http://localhost:8000"
 
-    # Gmail IMAP polling (for direct email → service call ingestion)
+    # Gmail IMAP — shared fallback (used if the specific vars below are not set)
     gmail_user: str = ""
     gmail_app_password: str = ""
-    # IMAP folder to search — Gmail categorises automated emails into non-Primary tabs
-    # so INBOX misses them. Use '[Gmail]/All Mail' to catch everything.
+
+    # Service-call emails (beepertalk) — set GMAIL_USER_CALLS + GMAIL_APP_PASSWORD_CALLS
+    gmail_user_calls: str = ""
+    gmail_app_password_calls: str = ""
     gmail_imap_folder: str = "[Gmail]/All Mail"
-    # Comma-separated sender addresses to accept (leave empty to accept any sender)
     call_email_senders: str = "TELESERVICE@beepertalk.co.il"
+
+    # Inspection-report emails — set GMAIL_USER_REPORTS + GMAIL_APP_PASSWORD_REPORTS
+    gmail_user_reports: str = ""
+    gmail_app_password_reports: str = ""
 
     # OpenAI — used for Whisper voice transcription
     openai_api_key: str = ""

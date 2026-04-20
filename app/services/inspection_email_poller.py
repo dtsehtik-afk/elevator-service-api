@@ -183,8 +183,10 @@ def poll_inspection_emails(db, since_date: Optional[date] = None) -> int:
     from app.services.inspection_service import process_inspection_report
 
     s = get_settings()
-    if not s.gmail_user or not s.gmail_app_password:
-        logger.debug("Inspection email scan skipped — Gmail credentials not configured")
+    user = s.gmail_user_reports or s.gmail_user
+    password = s.gmail_app_password_reports or s.gmail_app_password
+    if not user or not password:
+        logger.debug("Inspection email scan skipped — GMAIL_USER_REPORTS / GMAIL_APP_PASSWORD_REPORTS not set")
         return 0
     if not s.gemini_api_key:
         logger.debug("Inspection email scan skipped — GEMINI_API_KEY not configured")
@@ -198,7 +200,7 @@ def poll_inspection_emails(db, since_date: Optional[date] = None) -> int:
 
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-        mail.login(s.gmail_user, s.gmail_app_password)
+        mail.login(user, password)
 
         # EXAMINE = read-only; emails are NOT marked \Seen when fetched
         mail.select("INBOX", readonly=True)

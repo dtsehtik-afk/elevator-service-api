@@ -396,18 +396,19 @@ def poll_emails(db) -> int:
     from app.config import get_settings
     s = get_settings()
 
-    if not s.gmail_user or not s.gmail_app_password:
-        logger.debug("Email polling skipped — GMAIL_USER / GMAIL_APP_PASSWORD not set")
+    user = s.gmail_user_calls or s.gmail_user
+    password = s.gmail_app_password_calls or s.gmail_app_password
+    if not user or not password:
+        logger.debug("Email polling skipped — GMAIL_USER_CALLS / GMAIL_APP_PASSWORD_CALLS not set")
         return 0
 
-    # Build sender list from settings (comma-separated)
-    senders = [addr.strip() for addr in getattr(s, "call_email_senders", SENDER_FILTER).split(",") if addr.strip()]
-    imap_folder = getattr(s, "gmail_imap_folder", "INBOX")
+    senders = [addr.strip() for addr in s.call_email_senders.split(",") if addr.strip()]
+    imap_folder = s.gmail_imap_folder
 
     created = 0
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-        mail.login(s.gmail_user, s.gmail_app_password)
+        mail.login(user, password)
 
         # Select folder — quoted to handle spaces in Gmail folder names
         status, resp = mail.select(f'"{imap_folder}"')
