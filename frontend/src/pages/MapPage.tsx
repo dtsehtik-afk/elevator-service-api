@@ -54,19 +54,33 @@ export default function MapPage() {
 
   // Init map once
   useEffect(() => {
-    ensureLeaflet(() => {
-      if (mapRef.current || !containerRef.current) return
+    let cancelled = false
+
+    function initMap() {
+      if (cancelled || mapRef.current || !containerRef.current) return
+      const container = containerRef.current
+      // Clear any stale Leaflet init flag (React StrictMode double-invoke)
+      if ((container as any)._leaflet_id) delete (container as any)._leaflet_id
       const L = (window as any).L
-      const map = L.map(containerRef.current, { zoomControl: true })
+      const map = L.map(container, { zoomControl: true })
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap',
       }).addTo(map)
       map.setView([32.08, 34.78], 9)
       mapRef.current = map
-      setMapReady(true)
-    })
+      if (!cancelled) setMapReady(true)
+    }
+
+    if ((window as any).L) {
+      initMap()
+    } else {
+      ensureLeaflet(initMap)
+    }
+
     return () => {
+      cancelled = true
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null }
+      setMapReady(false)
     }
   }, [])
 

@@ -15,7 +15,7 @@ const NAV_ITEMS = [
   { label: 'קריאות ממתינות', path: '/pending-calls', icon: '⚠️' },
   { label: 'טכנאים', path: '/technicians', icon: '👷' },
   { label: 'תחזוקה', path: '/maintenance', icon: '📅' },
-  { label: 'ביקורות תקינות', path: '/inspections', icon: '🔍' },
+  { label: 'דוחות בודק', path: '/inspections', icon: '🔍' },
   { label: 'מפת מעליות', path: '/map', icon: '🗺️' },
   { label: 'חברות ניהול', path: '/management-companies', icon: '🏗️' },
   { label: 'ייבוא נתונים', path: '/import', icon: '📥' },

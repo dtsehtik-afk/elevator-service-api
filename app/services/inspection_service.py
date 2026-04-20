@@ -293,6 +293,15 @@ def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
     if inspection_date:
         elevator.last_inspection_date = inspection_date
 
+    if inspector_name:
+        elevator.inspector_name = inspector_name
+
+    # Auto-update report link on elevator
+    if getattr(report, "drive_file_id", None):
+        elevator.last_inspection_report_url = f"https://drive.google.com/file/d/{report.drive_file_id}/view"
+    elif getattr(report, "file_path", None):
+        elevator.last_inspection_report_url = f"/inspections/{report.id}/file"
+
     if not deficiencies or report.result == "PASS":
         report.report_status = "NA"
         db.commit()
