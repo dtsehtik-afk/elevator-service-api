@@ -430,43 +430,36 @@ def poll_emails(db) -> int:
                 return f'(OR (FROM "{addresses[0]}") ({_or_chain(addresses[1:])}))'
             from_filter = _or_chain(senders)
 
-        # Diagnostic: total emails in folder today (any sender)
-        _, diag_all = mail.search(None, f'SINCE {since_str}')
-        diag_total = len(diag_all[0].split()) if diag_all[0] else 0
-
+        # Search ALL matching emails (not just UNSEEN) — filter by Message-ID in DB instead
+        # This prevents missing emails that were already read by a human before the poller ran
         _, all_ids = mail.search(None, f'({from_filter} SINCE {since_str})')
-        _, ids = mail.search(None, f'(UNSEEN {from_filter} SINCE {since_str})')
         total_count = len(all_ids[0].split()) if all_ids[0] else 0
-        unread_count = len(ids[0].split()) if ids[0] else 0
-        logger.warning(
-            "📧 [%s] today(%s): %d total-in-folder | %d from-senders | %d unread-from-senders | senders=%s",
-            imap_folder, since_str, diag_total, total_count, unread_count, ", ".join(senders)
-        )
+        logger.warning("📧 [%s] today(%s): %d from senders | senders=%s",
+                       imap_folder, since_str, total_count, ", ".join(senders))
 
-        # If nothing from senders but folder has mail, log a sample of From headers for diagnosis
-        if total_count == 0 and diag_total > 0:
-            sample_ids = diag_all[0].split()[-5:]  # last 5 emails
-            for sid in sample_ids:
-                try:
-                    _, hdata = mail.fetch(sid, "(BODY[HEADER.FIELDS (FROM SUBJECT DATE)])")
-                    header_raw = hdata[0][1].decode("utf-8", errors="replace") if hdata[0] else ""
-                    logger.warning("📧 sample header: %s", header_raw.replace("\r\n", " | "))
-                except Exception:
-                    pass
-
-        msg_ids = ids[0].split()
+        msg_ids = all_ids[0].split()
         if not msg_ids:
             mail.logout()
             return 0
 
-        logger.info("📧 Found %d new service-call email(s)", len(msg_ids))
+        logger.info("📧 Found %d service-call email(s) since today", len(msg_ids))
         api_key = getattr(s, "gemini_api_key", "")
+
+        from app.models.service_call_email_scan import ServiceCallEmailScan
 
         for mid in msg_ids:
             try:
                 _, data = mail.fetch(mid, "(RFC822)")
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
+
+                # Skip already-processed emails (by Message-ID, regardless of SEEN flag)
+                message_id = (msg.get("Message-ID") or f"uid-{mid.decode()}").strip()
+                already = db.query(ServiceCallEmailScan).filter(
+                    ServiceCallEmailScan.message_id == message_id
+                ).first()
+                if already:
+                    continue
 
                 # Extract email send time — use as created_at for the service call
                 email_date: datetime | None = None
@@ -480,8 +473,6 @@ def poll_emails(db) -> int:
                     pass
 
                 body = _extract_body(msg)
-                # Always force-clean HTML before passing to AI — beepertalk plain-text
-                # parts often contain literal </p><p> tags that slip through detection
                 body = _html_to_text(body)
 
                 logger.info("📧 Email body (first 400 chars): %s", body[:400])
@@ -534,6 +525,7 @@ def poll_emails(db) -> int:
                     **({"created_at": email_date} if email_date else {}),
                 )
                 db.add(call)
+                db.add(ServiceCallEmailScan(message_id=message_id))
                 db.commit()
                 created += 1
                 logger.info(

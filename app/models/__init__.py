@@ -11,6 +11,7 @@ from app.models.maintenance import MaintenanceSchedule
 from app.models.incoming_call import IncomingCallLog
 from app.models.inspection_report import InspectionReport
 from app.models.inspection_email_scan import InspectionEmailScan
+from app.models.service_call_email_scan import ServiceCallEmailScan
 
 __all__ = [
     "Building",
@@ -25,4 +26,5 @@ __all__ = [
     "IncomingCallLog",
     "InspectionReport",
     "InspectionEmailScan",
+    "ServiceCallEmailScan",
 ]
