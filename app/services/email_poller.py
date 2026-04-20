@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
-SENDER_FILTER = "TELESERVICE@beepertalk.co.il"
+SENDER_FILTER = "TELESERVICE@beepertalk.co.il"  # legacy constant — overridden by settings
 
 # Maps Hebrew call-type strings to our fault_type enum values
 _FAULT_TYPE_MAP = {
@@ -400,19 +400,42 @@ def poll_emails(db) -> int:
         logger.debug("Email polling skipped — GMAIL_USER / GMAIL_APP_PASSWORD not set")
         return 0
 
+    # Build sender list from settings (comma-separated)
+    senders = [addr.strip() for addr in getattr(s, "call_email_senders", SENDER_FILTER).split(",") if addr.strip()]
+    imap_folder = getattr(s, "gmail_imap_folder", "INBOX")
+
     created = 0
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(s.gmail_user, s.gmail_app_password)
-        mail.select("INBOX")
+
+        # Select folder — quoted to handle spaces in Gmail folder names
+        status, resp = mail.select(f'"{imap_folder}"')
+        if status != "OK":
+            # Fallback to INBOX if the configured folder doesn't exist
+            logger.warning("📧 Could not select folder '%s' (%s) — falling back to INBOX", imap_folder, resp)
+            mail.select("INBOX")
 
         # Only process emails received today or later — avoids replaying old backlog
-        since_str = date.today().strftime("%d-%b-%Y")  # e.g. "31-Mar-2026"
-        _, all_ids = mail.search(None, f'(FROM "{SENDER_FILTER}" SINCE {since_str})')
-        _, ids = mail.search(None, f'(UNSEEN FROM "{SENDER_FILTER}" SINCE {since_str})')
-        logger.warning("📧 beepertalk emails today: %d total, %d unread",
-                       len(all_ids[0].split()) if all_ids[0] else 0,
-                       len(ids[0].split()) if ids[0] else 0)
+        since_str = date.today().strftime("%d-%b-%Y")  # e.g. "20-Apr-2026"
+
+        # Build OR query across all configured senders
+        if len(senders) == 1:
+            from_filter = f'FROM "{senders[0]}"'
+        else:
+            # IMAP OR is binary: (OR (FROM "a") (FROM "b"))
+            def _or_chain(addresses):
+                if len(addresses) == 1:
+                    return f'FROM "{addresses[0]}"'
+                return f'(OR (FROM "{addresses[0]}") ({_or_chain(addresses[1:])}))'
+            from_filter = _or_chain(senders)
+
+        _, all_ids = mail.search(None, f'({from_filter} SINCE {since_str})')
+        _, ids = mail.search(None, f'(UNSEEN {from_filter} SINCE {since_str})')
+        total_count = len(all_ids[0].split()) if all_ids[0] else 0
+        unread_count = len(ids[0].split()) if ids[0] else 0
+        logger.warning("📧 [%s] service emails today: %d total, %d unread (senders: %s)",
+                       imap_folder, total_count, unread_count, ", ".join(senders))
         msg_ids = ids[0].split()
         if not msg_ids:
             mail.logout()

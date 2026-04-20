@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Gmail IMAP polling (for direct email → service call ingestion)
     gmail_user: str = ""
     gmail_app_password: str = ""
+    # IMAP folder to search — Gmail categorises automated emails into non-Primary tabs
+    # so INBOX misses them. Use '[Gmail]/All Mail' to catch everything.
+    gmail_imap_folder: str = "[Gmail]/All Mail"
+    # Comma-separated sender addresses to accept (leave empty to accept any sender)
+    call_email_senders: str = "TELESERVICE@beepertalk.co.il"
 
     # OpenAI — used for Whisper voice transcription
     openai_api_key: str = ""
