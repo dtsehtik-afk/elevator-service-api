@@ -73,7 +73,10 @@ def upload_file(
 
         metadata = {"name": file_name, "parents": [parent_id]}
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=False)
-        file = svc.files().create(body=metadata, media_body=media, fields="id").execute()
+        file = svc.files().create(
+            body=metadata, media_body=media, fields="id",
+            supportsAllDrives=True,
+        ).execute()
         file_id = file.get("id")
         logger.info("Uploaded %s to Drive → %s", file_name, file_id)
         return file_id
@@ -150,12 +153,12 @@ def _ensure_subfolder(svc, parent_id: str, name: str) -> str:
             " and mimeType = 'application/vnd.google-apps.folder'"
             " and trashed = false"
         )
-        res = svc.files().list(q=query, fields="files(id)").execute()
+        res = svc.files().list(q=query, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
         files = res.get("files", [])
         if files:
             return files[0]["id"]
         meta = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
-        folder = svc.files().create(body=meta, fields="id").execute()
+        folder = svc.files().create(body=meta, fields="id", supportsAllDrives=True).execute()
         return folder["id"]
     except Exception:
         return parent_id
