@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # required for Workload Identity
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -21,17 +21,20 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            set -e
-            cd ~/elevator-service-api
-            git pull origin main
-            docker compose build --no-cache app
-            docker compose up -d
-            docker system prune -f --filter "until=24h"
-            echo "✅ Deploy completed at $(date)"
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy via gcloud SSH
+        run: |
+          gcloud compute ssh dtsehtik@elevator-server \
+            --zone=us-central1-a \
+            --tunnel-through-iap \
+            --command="
+              set -e
+              cd ~/elevator-service-api
+              git pull origin main
+              docker compose build --no-cache app
+              docker compose up -d
+              docker system prune -f --filter 'until=24h'
+              echo '✅ Deploy completed at \$(date)'
+            "
