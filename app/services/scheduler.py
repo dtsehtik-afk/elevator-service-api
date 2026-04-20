@@ -685,6 +685,84 @@ def _handle_self_assign(db, phone: str, text: str) -> None:
     logger.info("✋ %s self-assigned call %s at %s", tech.name, matched_call.id, addr)
 
 
+def _handle_technician_defer(db, phone: str, text: str) -> None:
+    """
+    A technician defers their active/pending call to tomorrow with an optional summary note.
+    Example: "דחה למחר — המעלית עובדת, יש רעש קטן, יטופל בהמשך היום"
+    """
+    from datetime import date, timedelta
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician
+    from app.services.whatsapp_service import _send_message, notify_dispatcher
+
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    tech = (db.query(Technician)
+            .filter(Technician.phone.contains(digits[-9:]) |
+                    Technician.whatsapp_number.contains(digits[-9:]))
+            .first())
+    if not tech:
+        return
+
+    phone_out = tech.whatsapp_number or tech.phone
+
+    # Find the oldest active assignment (PENDING_CONFIRMATION or CONFIRMED)
+    assignment = (
+        db.query(Assignment)
+        .filter(
+            Assignment.technician_id == tech.id,
+            Assignment.status.in_(["PENDING_CONFIRMATION", "CONFIRMED"]),
+        )
+        .order_by(Assignment.assigned_at.asc())
+        .first()
+    )
+    if not assignment:
+        _send_message(phone_out, "ℹ️ לא נמצאה קריאה פעילה לדחייה.")
+        return
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+    elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call else None
+    addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+
+    # Extract summary from text (everything after "דחה למחר" or "מחר")
+    summary = text
+    for marker in ["דחה למחר", "אטפל מחר", "מחר"]:
+        if marker in summary:
+            parts = summary.split(marker, 1)
+            summary = parts[1].strip(" -–—:") if len(parts) > 1 else ""
+            break
+
+    tomorrow = date.today() + timedelta(days=1)
+    defer_note = f"[דחוי למחר {tomorrow.strftime('%d/%m/%Y')} ע״י {tech.name}]"
+    if summary:
+        defer_note += f" — {summary}"
+
+    assignment.status = "REJECTED"
+    if call:
+        call.description = (call.description or "") + f"\n{defer_note}"
+        call.status = "OPEN"
+        db.add(AuditLog(
+            service_call_id=call.id,
+            changed_by=tech.email or tech.name,
+            old_status="ASSIGNED",
+            new_status="OPEN",
+            notes=defer_note,
+        ))
+    db.commit()
+
+    _send_message(phone_out,
+        f"✅ הקריאה ב{addr} נדחתה למחר.\n"
+        f"📝 סיכום נשמר: {summary or '—'}"
+    )
+    notify_dispatcher(
+        f"⏭️ *{tech.name}* דחה קריאה ב{addr} למחר.\n"
+        f"📝 {summary or 'ללא סיכום'}"
+    )
+
+
 def _handle_technician_request(db, phone: str, text: str) -> None:
     """
     A technician sends 'מבקש [כתובת]' to request handling an open call that
@@ -864,6 +942,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             _handle_technician_report(db, phone, text)
         elif any(w in text for w in ["לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך"]):
             _handle_self_assign(db, phone, text)
+        elif any(w in text for w in ["דחה למחר", "אטפל מחר", "מחר", "לדחות"]):
+            _handle_technician_defer(db, phone, text)
         elif any(w in text for w in ["מבקש", "אשמח לטפל", "רוצה לטפל", "אני מבקש"]):
             _handle_technician_request(db, phone, text)
         else:
@@ -900,10 +980,11 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             "החזר JSON בלבד (ללא הסברים) עם שדה 'intent' אחד מתוך:\n"
             "- REPORT   (הטכנאי מדווח שסיים טיפול / שולח סיכום)\n"
             "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה — 'לקחתי', 'אני לוקח')\n"
+            "- DEFER    (הטכנאי מבקש לדחות קריאה ליום הבא — 'דחה למחר', 'מחר', 'אטפל מחר', 'לדחות')\n"
             "- REQUEST  (הטכנאי מבקש לטפל בקריאה הממתינה לשיבוץ ידני — 'מבקש', 'אשמח לטפל', 'רוצה לטפל', 'אני מבקש את הקריאה')\n"
             "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה, סטטוס)\n"
             "- IGNORE   (ברכה קצרה כמו 'אוקיי', 'תודה', 'סבבה', אמוג'י בלבד)\n"
-            "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה).\n\n"
+            "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה / סיכום הדחייה).\n\n"
             "הבדל בין TAKE לבין REQUEST:\n"
             "- TAKE: הטכנאי לוקח קריאה ישירות ללא אישור ('לקחתי', 'קיבלתי', 'אני על זה').\n"
             "- REQUEST: הטכנאי מבקש אישור מהמוקד ('מבקש', 'אשמח', 'רוצה', 'אפשר לטפל').\n\n"
@@ -938,6 +1019,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             _handle_technician_report(db, phone, extract or text)
         elif intent == "TAKE":
             _handle_self_assign(db, phone, extract or text)
+        elif intent == "DEFER":
+            _handle_technician_defer(db, phone, extract or text)
         elif intent == "REQUEST":
             _handle_technician_request(db, phone, extract or text)
         elif intent == "QUESTION":
@@ -1068,8 +1151,8 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
         _send_message(phone, "⚠️ שגיאה בעיבוד השאלה — נסה שוב מאוחר יותר.")
 
 
-_REMINDER_AFTER_MINUTES  = 15   # send reminder if no reply after 15 min
-_ESCALATE_AFTER_MINUTES  = 20   # reassign if still no reply after 20 min
+_REMINDER_AFTER_MINUTES  = 60    # send hourly reminder if call still unconfirmed
+_ESCALATE_AFTER_MINUTES  = 180   # alert dispatcher if still unconfirmed after 3 hours
 
 
 def _check_pending_assignment_timeouts():
@@ -1190,75 +1273,88 @@ def _check_pending_assignment_timeouts():
             phone = tech.whatsapp_number or tech.phone
             addr  = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
 
-            # ── Stage 2: escalate (20 min) ────────────────────────────────────
+            # ── Stage 2: escalate (3 hours) — alert dispatcher ───────────────
             if age_minutes >= _ESCALATE_AFTER_MINUTES:
                 logger.warning(
-                    "⏰ Assignment %s timed out (%.0f min) — escalating from %s",
-                    assignment.id, age_minutes, tech.name,
+                    "⏰ Assignment %s timed out (%.0f min) — alerting dispatcher",
+                    assignment.id, age_minutes,
                 )
-
-                assignment.status = "REJECTED"
-                if call:
-                    call.status = "OPEN"
-                    db.add(AuditLog(
-                        service_call_id=call.id,
-                        changed_by="system",
-                        old_status="ASSIGNED",
-                        new_status="OPEN",
-                        notes=f"{tech.name} לא השיב תוך {_ESCALATE_AFTER_MINUTES} דקות — הקריאה הועברה",
-                    ))
+                assignment.status = "CANCELLED"
                 db.commit()
 
-                if phone:
-                    _send_message(
-                        phone,
-                        f"⏰ הקריאה ב-{addr} הועברה לטכנאי אחר\n"
-                        f"(לא התקבלה תגובה תוך {_ESCALATE_AFTER_MINUTES} דקות)"
+                # If all assignments for this call are done/cancelled, alert dispatcher
+                remaining = db.query(Assignment).filter(
+                    Assignment.service_call_id == call.id,
+                    Assignment.status == "PENDING_CONFIRMATION",
+                ).count() if call else 0
+
+                if remaining == 0 and call and elevator:
+                    call.status = "OPEN"
+                    db.commit()
+                    from app.config import get_settings
+                    s = get_settings()
+                    from app.services.whatsapp_service import notify_dispatcher
+                    notify_dispatcher(
+                        f"⚠️ קריאה ב{addr} לא אושרה אחרי {_ESCALATE_AFTER_MINUTES} דקות — נא לשבץ ידנית."
                     )
 
-                # Collect all rejecters for this call and try next technician
-                if call:
-                    rejected_ids = [
-                        a.technician_id
-                        for a in db.query(Assignment).filter(
-                            Assignment.service_call_id == call.id,
-                            Assignment.status.in_(["REJECTED", "CANCELLED"]),
-                        ).all()
-                    ]
-                    next_a = ai_assignment_agent.assign_with_confirmation(
-                        db, call, exclude_tech_ids=rejected_ids
-                    )
-                    if not next_a:
-                        from app.config import get_settings
-                        from app.services.whatsapp_service import notify_dispatcher_unassigned
-                        s = get_settings()
-                        if s.dispatcher_whatsapp and elevator:
-                            notify_dispatcher_unassigned(
-                                s.dispatcher_whatsapp,
-                                elevator.address, elevator.city, call.fault_type,
-                            )
-
-            # ── Stage 1: reminder (10 min, only once) ────────────────────────
+            # ── Stage 1: hourly reminder to ALL available technicians ─────────
             elif age_minutes >= _REMINDER_AFTER_MINUTES and not assignment.reminder_sent_at:
                 logger.info(
-                    "🔔 Sending reminder to %s for assignment %s (%.0f min)",
-                    tech.name, assignment.id, age_minutes,
+                    "🔔 Sending hourly reminder for call %s (%.0f min pending)",
+                    assignment.service_call_id, age_minutes,
                 )
-                if phone:
-                    from app.config import get_settings as _gs
-                    _s = _gs()
-                    base_url = getattr(_s, "base_url", "").rstrip("/")
-                    tech_link = f"{base_url}/app/tech/{tech.id}" if base_url else ""
-                    _send_message(
-                        phone,
-                        f"🔔 {tech.name}, להזכירך — קריאה ממתינה לאישורך\n"
-                        f"📍 {addr}\n"
-                        + (f"🔗 {tech_link}\n" if tech_link else "")
-                        + f"\nהשב *1* לקבלה ✅ או *2* לדחייה ❌\n"
-                        f"_(אי-מענה תוך {_ESCALATE_AFTER_MINUTES - _REMINDER_AFTER_MINUTES} דקות יעביר את הקריאה לטכנאי אחר)_"
-                    )
+                # Mark this assignment's reminder sent so we don't repeat per-assignment
                 assignment.reminder_sent_at = now
                 db.commit()
+
+                # Send reminder to ALL currently available technicians
+                if call and elevator:
+                    from app.config import get_settings as _gs
+                    from app.services.whatsapp_service import _send_message as _wa
+                    base_url = getattr(_gs(), "app_base_url", "").rstrip("/")
+
+                    # Determine recommended tech (lowest score from current rankings)
+                    try:
+                        ranked = ai_assignment_agent.rank_technicians(
+                            db, elevator, call.fault_type, call.priority
+                        )
+                        recommended_name = ranked[0].technician.name if ranked else ""
+                    except Exception:
+                        recommended_name = ""
+
+                    all_techs = (
+                        db.query(Technician).filter(
+                            Technician.is_active == True,  # noqa: E712
+                            Technician.is_available == True,
+                        ).all()
+                        if is_working_hours() else
+                        db.query(Technician).filter(
+                            Technician.is_active == True,  # noqa: E712
+                            Technician.is_on_call == True,
+                        ).all()
+                    )
+                    for reminder_tech in all_techs:
+                        r_phone = reminder_tech.whatsapp_number or reminder_tech.phone
+                        if not r_phone:
+                            continue
+                        rec_line = (
+                            f"⭐ *טכנאי מומלץ:* {recommended_name}\n"
+                            if recommended_name and recommended_name != reminder_tech.name
+                            else f"⭐ *אתה הטכנאי המומלץ!*\n"
+                            if recommended_name == reminder_tech.name
+                            else ""
+                        )
+                        portal_url = f"{base_url}/app/tech/{reminder_tech.id}" if base_url else ""
+                        _wa(
+                            r_phone,
+                            f"🔔 *תזכורת — קריאה ממתינה לטיפול*\n"
+                            f"📍 {addr}\n"
+                            f"{rec_line}"
+                            f"⚡ {call.fault_type}\n"
+                            + (f"📱 {portal_url}\n" if portal_url else "")
+                            + f"השב *1* לקבלה ✅ | *2* לדחייה ❌ | *דחה למחר* לדחייה ליום הבא"
+                        )
 
     except Exception as exc:
         logger.error("Timeout checker error: %s", exc)
@@ -1475,6 +1571,108 @@ def _scan_drive_inspections():
         logger.error("Drive scan failed: %s", exc)
 
 
+_DEFICIENCY_THRESHOLDS = [
+    # (days_since_inspection, color, label, open_call)
+    (7,   "🟡", "צהוב — יש לטפל תוך שבוע",    False),
+    (14,  "🟠", "כתום — יש לטפל בדחיפות",      False),
+    (30,  "🔴", "אדום — נדרש טיפול מיידי!",     True),
+]
+
+
+def _check_inspection_deficiency_escalation():
+    """
+    Runs every 6 hours. For open inspection reports with deficiencies:
+    - 7+ days: yellow warning to dispatcher
+    - 14+ days: orange urgent to dispatcher
+    - 30+ days: red — auto-open a service call
+    """
+    from datetime import date, timedelta
+    from app.database import SessionLocal
+    from app.models.inspection_report import InspectionReport
+    from app.models.elevator import Elevator
+    from app.models.service_call import ServiceCall
+    from app.services.whatsapp_service import notify_dispatcher
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        open_reports = (
+            db.query(InspectionReport)
+            .filter(
+                InspectionReport.report_status.in_(["OPEN", "PARTIAL"]),
+                InspectionReport.elevator_id.isnot(None),
+                InspectionReport.inspection_date.isnot(None),
+            )
+            .all()
+        )
+
+        for report in open_reports:
+            days_since = (today - report.inspection_date).days
+            elevator = db.query(Elevator).filter(Elevator.id == report.elevator_id).first()
+            if not elevator:
+                continue
+
+            addr = f"{elevator.address}, {elevator.city}"
+            matched_threshold = None
+            for threshold_days, color, label, should_open_call in _DEFICIENCY_THRESHOLDS:
+                if days_since >= threshold_days:
+                    matched_threshold = (threshold_days, color, label, should_open_call)
+
+            if not matched_threshold:
+                continue
+
+            _, color, label, should_open_call = matched_threshold
+
+            # Auto-open urgent service call at 30-day threshold
+            if should_open_call:
+                already_open = db.query(ServiceCall).filter(
+                    ServiceCall.elevator_id == elevator.id,
+                    ServiceCall.status.notin_(["CLOSED", "RESOLVED"]),
+                    ServiceCall.fault_type == "OTHER",
+                    ServiceCall.description.like("%ליקויי בודק%"),
+                ).first()
+                if not already_open:
+                    new_call = ServiceCall(
+                        elevator_id=elevator.id,
+                        fault_type="OTHER",
+                        priority="HIGH",
+                        status="OPEN",
+                        reported_by="system | escalation",
+                        description=(
+                            f"ליקויי בודק ממתינים לטיפול {days_since} ימים "
+                            f"(מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}). "
+                            f"ליקויים: {report.deficiency_count}"
+                        ),
+                    )
+                    db.add(new_call)
+                    db.commit()
+                    notify_dispatcher(
+                        f"🔴 *הסלמה — ליקויי בודק* ב{addr}\n"
+                        f"⏳ {days_since} ימים ללא טיפול\n"
+                        f"⚠️ {report.deficiency_count} ליקויים מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}\n"
+                        f"📋 קריאה דחופה נפתחה אוטומטית"
+                    )
+                    logger.warning("🔴 Auto-opened escalation call for report %s (%s, %d days)", report.id, addr, days_since)
+            else:
+                # Send color warning to dispatcher (at most once per week per report)
+                last_note = report.notes or ""
+                marker = f"[escalation_{matched_threshold[0]}d]"
+                if marker not in last_note:
+                    notify_dispatcher(
+                        f"{color} *ליקויי בודק ממתינים* ב{addr}\n"
+                        f"⏳ {days_since} ימים ללא טיפול\n"
+                        f"🔧 {report.deficiency_count} ליקויים מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}\n"
+                        f"📊 {label}"
+                    )
+                    report.notes = (last_note + f"\n{marker}").strip()
+                    db.commit()
+
+    except Exception as exc:
+        logger.error("Inspection escalation check failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -1492,6 +1690,7 @@ def start_scheduler():
     _scheduler.add_job(_scan_drive_inspections,              "interval", minutes=15)
     # _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)  # disabled
     _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
+    _scheduler.add_job(_check_inspection_deficiency_escalation, "interval", hours=6)
     _scheduler.start()
     logger.info("Background scheduler started (timezone: Asia/Jerusalem)")
 

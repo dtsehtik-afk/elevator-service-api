@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime
 from typing import Optional
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -100,6 +101,17 @@ def _now_il() -> str:
     return datetime.now(_IL_TZ).strftime("%d/%m/%Y %H:%M")
 
 
+def _nav_links(address: str, city: str, lat: float = None, lng: float = None) -> str:
+    """Return Waze + Google Maps navigation links, URL-encoded."""
+    q = quote(f"{address}, {city}")
+    if lat and lng:
+        waze = f"https://waze.com/ul?ll={lat},{lng}&navigate=yes"
+    else:
+        waze = f"https://waze.com/ul?q={q}&navigate=yes"
+    maps = f"https://maps.google.com/?q={q}"
+    return f"🚘 *Waze:* {waze}\n🗺 *מפות:* {maps}"
+
+
 def notify_technician_new_call(
     phone: str,
     technician_name: str,
@@ -113,33 +125,36 @@ def notify_technician_new_call(
     travel_minutes: int,
     description: str = "",
     tech_id: str = "",
+    recommended_tech_name: str = "",
+    lat: float = None,
+    lng: float = None,
 ) -> bool:
-    """Send a new-call notification to a technician with a map confirmation link."""
+    """Send a new-call notification to a technician (broadcast model — first to take wins)."""
     from app.config import get_settings
     fault  = _FAULT_LABEL.get(fault_type, fault_type)
     pri    = _PRIORITY_LABEL.get(priority, priority)
     ts     = _now_il()
 
-    desc_line   = f"📝 *פירוט:* {description}\n" if description else ""
-    caller_line = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
-    phone_line  = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
-
-    base_url    = get_settings().app_base_url
-    confirm_url = f"{base_url}/webhooks/my-calls/{tech_id}" if tech_id else ""
-    confirm_line = (
-        f"────────────────────\n"
-        f"✅ לאישור/דחייה פתח:\n\n"
-        f"{confirm_url}\n"
-    ) if confirm_url else (
-        f"────────────────────\n"
-        f"השב *1* לקבלת הקריאה ✅\n"
-        f"השב *2* לדחייה ❌"
+    desc_line        = f"📝 *פירוט:* {description}\n" if description else ""
+    caller_line      = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
+    phone_line       = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
+    recommended_line = (
+        f"⭐ *טכנאי מומלץ:* {recommended_tech_name}\n"
+        if recommended_tech_name and recommended_tech_name != technician_name
+        else f"⭐ *אתה הטכנאי המומלץ!*\n"
+        if recommended_tech_name == technician_name
+        else ""
     )
+
+    base_url   = get_settings().app_base_url
+    portal_url = f"{base_url}/app/tech/{tech_id}" if tech_id else ""
+    portal_line = f"📱 *פורטל טכנאי:*\n{portal_url}\n" if portal_url else ""
 
     message = (
         f"🔔 *קריאת שירות חדשה*\n"
         f"🗓 {ts}\n"
-        f"────────────────────\n"
+        f"════════════════════\n"
+        f"{recommended_line}"
         f"📍 *כתובת:* {address}, {city}\n"
         f"⚡ *תקלה:* {fault}\n"
         f"{desc_line}"
@@ -147,7 +162,12 @@ def notify_technician_new_call(
         f"{caller_line}"
         f"{phone_line}"
         f"🚗 *זמן נסיעה משוער:* ~{travel_minutes} דקות\n"
-        f"{confirm_line}"
+        f"────────────────────\n"
+        f"{_nav_links(address, city, lat, lng)}\n"
+        f"────────────────────\n"
+        f"{portal_line}"
+        f"השב *1* לקבלת הקריאה ✅\n"
+        f"השב *2* לדחייה ❌"
     )
     return _send_message(phone, message)
 
@@ -176,9 +196,6 @@ def notify_technician_auto_assigned(
     caller_line  = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
     phone_line   = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
 
-    maps_url = f"https://maps.google.com/?q={address}+{city}"
-    waze_url = f"https://waze.com/ul?q={address}+{city}"
-
     message = (
         f"📋 *שובצת לקריאת שירות*\n"
         f"🗓 {ts}\n"
@@ -190,8 +207,8 @@ def notify_technician_auto_assigned(
         f"{caller_line}"
         f"{phone_line}"
         f"🚗 *זמן נסיעה משוער:* ~{travel_minutes} דקות\n"
-        f"🗺 גוגל מפות:\n{maps_url}\n"
-        f"🚘 Waze:\n{waze_url}\n"
+        f"────────────────────\n"
+        f"{_nav_links(address, city)}\n"
         f"────────────────────\n"
         f"בסיום הטיפול שלח: *דוח* + תיאור קצר"
     )
@@ -204,6 +221,12 @@ def notify_technician_call_cancelled(phone: str, address: str, city: str) -> boo
         f"ℹ️ הקריאה בכתובת {address}, {city} "
         f"בוטלה או הועברה לטכנאי אחר."
     )
+    return _send_message(phone, message)
+
+
+def notify_call_taken_by_other(phone: str, address: str, city: str, taken_by: str) -> bool:
+    """Notify a technician that the call they were offered was taken by someone else."""
+    message = f"ℹ️ הקריאה ב{address}, {city} נלקחה על ידי *{taken_by}*."
     return _send_message(phone, message)
 
 
@@ -220,9 +243,6 @@ def notify_rescue_emergency(
 ) -> bool:
     """Send an urgent rescue alert to a technician (people trapped in elevator)."""
     ts = _now_il()
-    maps_url = f"https://maps.google.com/?q={address}+{city}"
-    waze_url = f"https://waze.com/ul?q={address}+{city}"
-
     closest_line = ""
     if closest_tech_name:
         if is_closest:
@@ -243,8 +263,7 @@ def notify_rescue_emergency(
         f"{caller_line}"
         f"{phone_line}"
         f"{closest_line}"
-        f"🗺 גוגל מפות:\n{maps_url}\n"
-        f"🚘 Waze:\n{waze_url}\n"
+        f"{_nav_links(address, city)}\n"
         f"════════════════════\n"
         f"⚡ *נדרשת הגעה מיידית!*\n"
         f"השב *1* לאישור הגעה"

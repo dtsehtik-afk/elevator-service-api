@@ -806,6 +806,7 @@ def my_calls_page(tech_id: str, db: Session = Depends(get_db)):
     if not tech:
         raise HTTPException(status_code=404, detail="Technician not found")
 
+    from urllib.parse import quote as _url_quote
     assignments = (
         db.query(Assignment)
         .filter(Assignment.technician_id == tech.id, Assignment.status == "PENDING_CONFIRMATION")
@@ -822,9 +823,20 @@ def my_calls_page(tech_id: str, db: Session = Depends(get_db)):
         call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
         if not call:
             continue
+        # Skip stale assignments where the call was already handled
+        if call.status not in ("OPEN", "ASSIGNED"):
+            a.status = "CANCELLED"
+            db.commit()
+            continue
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
         if not elev:
             continue
+        q = _url_quote(f"{elev.address}, {elev.city}")
+        waze_url = (
+            f"https://waze.com/ul?ll={elev.latitude},{elev.longitude}&navigate=yes"
+            if elev.latitude and elev.longitude
+            else f"https://waze.com/ul?q={q}&navigate=yes"
+        )
         calls_data.append({
             "assignment_id": str(a.id),
             "address": elev.address,
@@ -836,8 +848,8 @@ def my_calls_page(tech_id: str, db: Session = Depends(get_db)):
             "travel_minutes": a.travel_minutes or "?",
             "lat": elev.latitude,
             "lng": elev.longitude,
-            "maps_url": f"https://maps.google.com/?q={elev.address}+{elev.city}",
-            "waze_url": f"https://waze.com/ul?q={elev.address}+{elev.city}",
+            "maps_url": f"https://maps.google.com/?q={q}",
+            "waze_url": waze_url,
         })
 
     base_url = settings.app_base_url
