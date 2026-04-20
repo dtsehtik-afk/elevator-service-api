@@ -21,6 +21,22 @@ from app.services import service_call_service
 router = APIRouter()
 
 
+@router.post(
+    "/admin/poll-now",
+    summary="Trigger email poll immediately (admin)",
+)
+def trigger_email_poll(
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Run the beepertalk email poller right now and return how many calls were created."""
+    if current_user.role not in ("ADMIN", "MANAGER"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.services.email_poller import poll_emails
+    created = poll_emails(db)
+    return {"created": created}
+
+
 @router.get(
     "",
     response_model=List[ServiceCallResponse],

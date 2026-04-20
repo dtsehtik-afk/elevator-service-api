@@ -514,13 +514,32 @@ def poll_emails(db) -> int:
                 _RESCUE_KEYWORDS = {"חילוץ", "לכודים", "לכוד", "כלואים", "כלוא", "תקועים", "נתקע"}
                 combined_text = f"{fields.get('call_type','')} {fields.get('description','')}".lower()
                 is_rescue = any(kw in combined_text for kw in _RESCUE_KEYWORDS)
+                fault_type = "RESCUE" if is_rescue else fields["fault_type"]
 
+                # Duplicate detection: same elevator + same fault type + open call today
                 from app.models.service_call import ServiceCall
+                from datetime import timezone as _tz
+                _today = datetime.now(_tz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                duplicate = db.query(ServiceCall).filter(
+                    ServiceCall.elevator_id == elevator.id,
+                    ServiceCall.fault_type == fault_type,
+                    ServiceCall.created_at >= _today,
+                    ServiceCall.status.notin_(["CLOSED", "RESOLVED"]),
+                ).first()
+                if duplicate:
+                    logger.info(
+                        "⏭️ Duplicate call for elevator %s (%s) — already open call %s, skipping",
+                        elevator.id, fault_type, duplicate.id,
+                    )
+                    db.add(ServiceCallEmailScan(message_id=message_id))
+                    db.commit()
+                    continue
+
                 call = ServiceCall(
                     elevator_id=elevator.id,
                     reported_by=reported_by,
                     description=description,
-                    fault_type="RESCUE" if is_rescue else fields["fault_type"],
+                    fault_type=fault_type,
                     priority="CRITICAL" if is_rescue else "MEDIUM",
                     status="OPEN",
                     **({"created_at": email_date} if email_date else {}),
