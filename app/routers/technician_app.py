@@ -67,6 +67,8 @@ def technician_portal(tech_id: str, db: Session = Depends(get_db)):
         priority = PRIORITY_HE.get(call.priority, call.priority)
         travel = f"~{assignment.travel_minutes} דק׳" if assignment.travel_minutes else "—"
         priority_class = "badge-red" if "קריטי" in priority else ("badge-orange" if "גבוה" in priority else "badge-blue")
+        has_coords = bool(elevator and elevator.latitude and elevator.longitude)
+        coords_label = f"({elevator.latitude:.5f}, {elevator.longitude:.5f})" if has_coords else "אין קואורדינטות"
         call_html = f"""
 <div class="section-header">🔧 קריאת שירות פעילה</div>
 <div class="card">
@@ -75,10 +77,17 @@ def technician_portal(tech_id: str, db: Session = Depends(get_db)):
   <div class="row"><span class="label">⚠️ עדיפות</span><span class="badge {priority_class}">{priority}</span></div>
   <div class="row"><span class="label">👤 מתקשר</span><span class="value">{call.reported_by or '—'}</span></div>
   <div class="row"><span class="label">🚗 נסיעה</span><span class="value">{travel}</span></div>
+  <div class="row"><span class="label">📌 GPS</span><span class="value" id="coords-label" style="font-size:.8rem;color:#888">{coords_label}</span></div>
+  <button class="btn-location" id="loc-btn" onclick="saveLocation()">
+    📍 שמור מיקום נוכחי על מפת המעלית
+  </button>
 </div>
 <div class="card">
   <h2>דו"ח סיום טיפול</h2>
-  <textarea id="notes" placeholder="תאר את הטיפול שבוצע, חלקים שהוחלפו וכו׳..."></textarea>
+  <div class="textarea-wrap">
+    <textarea id="notes" placeholder="תאר את הטיפול שבוצע, חלקים שהוחלפו וכו׳..."></textarea>
+    <button type="button" class="mic-btn" id="mic-notes" onclick="startVoice('notes','mic-notes')">🎤 תמלול קולי</button>
+  </div>
   <div class="checkbox-row" onclick="document.getElementById('quote').click()">
     <input type="checkbox" id="quote">
     <label for="quote">💰 נדרשת הצעת מחיר ללקוח</label>
@@ -184,6 +193,11 @@ class ReassignElevator(BaseModel):
     elevator_id: str
 
 
+class SaveLocation(BaseModel):
+    lat: float
+    lng: float
+
+
 @router.get("/tech/{tech_id}/elevators", include_in_schema=False)
 def search_elevators(tech_id: str, q: str = "", db: Session = Depends(get_db)):
     """
@@ -282,6 +296,43 @@ def reassign_elevator(tech_id: str, data: ReassignElevator, db: Session = Depend
         pass
 
     return HTMLResponse(_reassign_success_page(tech.name, old_addr, new_addr))
+
+
+@router.post("/tech/{tech_id}/save-elevator-location", include_in_schema=False)
+def save_elevator_location(tech_id: str, data: SaveLocation, db: Session = Depends(get_db)):
+    """Save technician's current GPS to the elevator on their active call."""
+    from app.models.elevator import Elevator
+    from app.models.assignment import AuditLog
+
+    tech, assignment, call = _get_tech_and_call(db, tech_id)
+    if not call:
+        return {"ok": False, "error": "אין קריאה פעילה"}
+
+    elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    if not elevator:
+        return {"ok": False, "error": "מעלית לא נמצאה"}
+
+    elevator.latitude = data.lat
+    elevator.longitude = data.lng
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=tech.email or tech.name,
+        old_status=call.status, new_status=call.status,
+        notes=f"קואורדינטות GPS עודכנו ע\"י {tech.name}: {data.lat:.6f},{data.lng:.6f}",
+    ))
+    db.commit()
+
+    try:
+        from app.services.whatsapp_service import notify_dispatcher
+        notify_dispatcher(
+            f"📍 *מיקום מעלית עודכן* ע\"י {tech.name}\n"
+            f"🏢 {elevator.address}, {elevator.city}\n"
+            f"📌 {data.lat:.6f}, {data.lng:.6f}"
+        )
+    except Exception:
+        pass
+
+    return {"ok": True, "address": f"{elevator.address}, {elevator.city}"}
 
 
 @router.post("/tech/{tech_id}/report", response_class=HTMLResponse, include_in_schema=False)
@@ -405,6 +456,23 @@ _BASE_STYLE = """
   .tab-inactive { background: #e5e7eb; color: #374151; }
   .section { display: none; }
   .section.active { display: block; }
+  .textarea-wrap { position: relative; margin-bottom: 12px; }
+  .textarea-wrap textarea { margin-bottom: 0; }
+  .mic-btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; padding: 10px; margin-top: 6px;
+    border: 1px solid #d1d5db; border-radius: 8px;
+    background: #f9fafb; color: #374151; font-size: .9rem; cursor: pointer;
+  }
+  .mic-btn.recording { background: #fee2e2; border-color: #fca5a5; color: #dc2626; animation: pulse 1s infinite; }
+  .btn-location {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;
+    border-radius: 10px; padding: 12px; width: 100%; font-size: .95rem;
+    font-weight: 700; cursor: pointer; margin-bottom: 10px;
+  }
+  .btn-location:active { opacity: .8; }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.5 } }
 </style>
 """
 
@@ -482,6 +550,73 @@ function claimReport(reportId) {{
     .then(r => {{ if (r.ok) location.reload(); else alert('שגיאה בקבלת הדוח'); }})
     .catch(() => alert('שגיאה'));
 }}
+
+function saveLocation() {{
+  const btn = document.getElementById('loc-btn');
+  if (!navigator.geolocation) {{ alert('GPS לא נתמך בדפדפן זה'); return; }}
+  btn.textContent = '⏳ מאתר מיקום...';
+  btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    pos => {{
+      const {{ latitude, longitude, accuracy }} = pos.coords;
+      fetch('/app/tech/{tech_id}/save-elevator-location', {{
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{ lat: latitude, lng: longitude }})
+      }})
+      .then(r => r.json())
+      .then(d => {{
+        if (d.ok) {{
+          btn.textContent = '✅ מיקום נשמר!';
+          const cl = document.getElementById('coords-label');
+          if (cl) cl.textContent = latitude.toFixed(5) + ', ' + longitude.toFixed(5) + ' (±' + Math.round(accuracy) + 'm)';
+        }} else {{
+          btn.textContent = '❌ ' + (d.error || 'שגיאה');
+          btn.disabled = false;
+        }}
+      }})
+      .catch(() => {{ btn.textContent = '❌ שגיאת רשת'; btn.disabled = false; }});
+    }},
+    err => {{
+      btn.textContent = '📍 שמור מיקום נוכחי על מפת המעלית';
+      btn.disabled = false;
+      const msgs = {{ 1: 'הרשאת מיקום נדחתה', 2: 'מיקום לא זמין', 3: 'תם הזמן המוקצב' }};
+      alert('לא ניתן לקבל מיקום: ' + (msgs[err.code] || err.message));
+    }},
+    {{ enableHighAccuracy: true, timeout: 15000 }}
+  );
+}}
+
+const _activeRecognition = {{}};
+function startVoice(targetId, btnId) {{
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {{ alert('תמלול קולי אינו נתמך בדפדפן זה.\nנסה Chrome או Safari עדכני.'); return; }}
+  const btn = document.getElementById(btnId);
+  if (_activeRecognition[targetId]) {{
+    _activeRecognition[targetId].stop();
+    return;
+  }}
+  const r = new SR();
+  r.lang = 'he-IL';
+  r.continuous = false;
+  r.interimResults = false;
+  r.maxAlternatives = 1;
+  _activeRecognition[targetId] = r;
+  btn.textContent = '🔴 מקליט... (לחץ לעצור)';
+  btn.classList.add('recording');
+  r.onresult = e => {{
+    const transcript = e.results[0][0].transcript;
+    const el = document.getElementById(targetId);
+    el.value = el.value ? el.value + ' ' + transcript : transcript;
+    el.focus();
+  }};
+  r.onerror = e => {{ if (e.error !== 'aborted') alert('שגיאת תמלול: ' + e.error); }};
+  r.onend = () => {{
+    delete _activeRecognition[targetId];
+    btn.textContent = '🎤 תמלול קולי';
+    btn.classList.remove('recording');
+  }};
+  r.start();
+}}
 </script>
 </body></html>"""
 
@@ -502,7 +637,10 @@ def _active_call_page(tech_id, tech_name, call_id, address, fault, priority, rep
 </div>
 <div class="card">
   <h2>דו"ח סיום טיפול</h2>
-  <textarea id="notes" placeholder="תאר את הטיפול שבוצע, חלקים שהוחלפו וכו׳..."></textarea>
+  <div class="textarea-wrap">
+    <textarea id="notes" placeholder="תאר את הטיפול שבוצע, חלקים שהוחלפו וכו׳..."></textarea>
+    <button type="button" class="mic-btn" id="mic-notes" onclick="startVoice('notes','mic-notes')">🎤 תמלול קולי</button>
+  </div>
   <div class="checkbox-row" onclick="document.getElementById('quote').click()">
     <input type="checkbox" id="quote">
     <label for="quote">💰 נדרשת הצעת מחיר ללקוח</label>
@@ -534,6 +672,30 @@ function submitReport(resolved) {{
   }}).then(r => r.text()).then(html => {{
     document.open(); document.write(html); document.close();
   }}).catch(() => alert('שגיאה בשליחת הדו"ח, נסה שוב'));
+}}
+
+const _activeRecognition = {{}};
+function startVoice(targetId, btnId) {{
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {{ alert('תמלול קולי אינו נתמך בדפדפן זה.\nנסה Chrome או Safari עדכני.'); return; }}
+  const btn = document.getElementById(btnId);
+  if (_activeRecognition[targetId]) {{ _activeRecognition[targetId].stop(); return; }}
+  const r = new SR();
+  r.lang = 'he-IL'; r.continuous = false; r.interimResults = false; r.maxAlternatives = 1;
+  _activeRecognition[targetId] = r;
+  btn.textContent = '🔴 מקליט... (לחץ לעצור)'; btn.classList.add('recording');
+  r.onresult = e => {{
+    const t = e.results[0][0].transcript;
+    const el = document.getElementById(targetId);
+    el.value = el.value ? el.value + ' ' + t : t;
+    el.focus();
+  }};
+  r.onerror = e => {{ if (e.error !== 'aborted') alert('שגיאת תמלול: ' + e.error); }};
+  r.onend = () => {{
+    delete _activeRecognition[targetId];
+    btn.textContent = '🎤 תמלול קולי'; btn.classList.remove('recording');
+  }};
+  r.start();
 }}
 
 function toggleReassign() {{
