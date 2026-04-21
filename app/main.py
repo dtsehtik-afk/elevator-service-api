@@ -40,6 +40,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS drive_file_id VARCHAR(200)",
             # management_companies — caller_phones may be missing on older DBs
             "ALTER TABLE management_companies ADD COLUMN IF NOT EXISTS caller_phones TEXT[] DEFAULT '{}'",
+            # elevators — management_company_id added after initial migration
+            "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS management_company_id UUID REFERENCES management_companies(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
         ]:
             _conn.execute(_text(_col_sql))
         _conn.commit()
