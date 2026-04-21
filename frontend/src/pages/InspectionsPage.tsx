@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
   FileInput, Center, Collapse, Card, Loader, Alert, Modal, ActionIcon,
-  Autocomplete, Divider, Anchor, Checkbox, Tabs,
+  Autocomplete, Divider, Anchor, Checkbox, Tabs, TextInput, Textarea, Select,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -37,6 +37,8 @@ interface InspectionReport {
   report_status: 'NA' | 'OPEN' | 'PARTIAL' | 'CLOSED'
   assigned_technician_id: string | null
   assigned_technician_name: string | null
+  raw_city: string | null
+  notes: string | null
 }
 
 interface ElevatorOption { id: string; label: string }
@@ -90,7 +92,13 @@ export default function InspectionsPage() {
   const [elevOptions, setElevOptions] = useState<ElevatorOption[]>([])
   const [selectedElevId, setSelectedElevId] = useState('')
   const [createMode, setCreateMode] = useState(false)
+  const [createElev, setCreateElev] = useState({ address: '', city: '', building_name: '' })
   const [activeTab, setActiveTab] = useState<string | null>('all')
+  const [completionModal, setCompletionModal] = useState<{ reportId: string; elevatorAddress: string; deficiencies: Deficiency[] } | null>(null)
+  const [completionNotes, setCompletionNotes] = useState('')
+  const [addDefFor, setAddDefFor] = useState<string | null>(null)
+  const [newDefDesc, setNewDefDesc] = useState('')
+  const [newDefSeverity, setNewDefSeverity] = useState('MEDIUM')
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ['inspections'],
@@ -162,7 +170,13 @@ export default function InspectionsPage() {
     onSuccess: (res, { reportId }) => {
       qc.invalidateQueries({ queryKey: ['inspections'] })
       const status = res.data?.report_status
-      if (status === 'CLOSED') notifications.show({ message: '✅ כל הליקויים טופלו — הדוח נסגר', color: 'green' })
+      if (status === 'CLOSED') {
+        const r = reports.find(r => r.id === reportId)
+        const defs = (r?.deficiencies || []).map(d => `• ${d.description}`).join('\n')
+        const defaultNotes = `כל הליקויים טופלו:\n${defs}`
+        setCompletionNotes(defaultNotes)
+        setCompletionModal({ reportId, elevatorAddress: r?.elevator_address ?? '', deficiencies: r?.deficiencies ?? [] })
+      }
     },
     onError: () => notifications.show({ message: 'שגיאה בעדכון הרשימה', color: 'red' }),
   })
@@ -171,6 +185,39 @@ export default function InspectionsPage() {
     mutationFn: (reportId: string) => client.delete(`/inspections/${reportId}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['inspections'] }); notifications.show({ message: 'הדוח נמחק', color: 'green' }) },
     onError: () => notifications.show({ message: 'שגיאה במחיקה', color: 'red' }),
+  })
+
+  const addDeficiencyMutation = useMutation({
+    mutationFn: ({ reportId, description, severity }: { reportId: string; description: string; severity: string }) =>
+      client.post(`/inspections/${reportId}/add-deficiency`, { description, severity }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      setAddDefFor(null); setNewDefDesc(''); setNewDefSeverity('MEDIUM')
+      notifications.show({ message: 'הליקוי נוסף', color: 'teal' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בהוספת ליקוי', color: 'red' }),
+  })
+
+  const createElevatorMutation = useMutation({
+    mutationFn: ({ reportId, ...form }: { reportId: string; address: string; city: string; building_name: string }) =>
+      client.post(`/inspections/${reportId}/create-elevator`, form),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      setConfirmReport(null); setCreateMode(false); setCreateElev({ address: '', city: '', building_name: '' })
+      notifications.show({ message: `✅ מעלית נוצרה ושויכה: ${res.data.elevator_address}`, color: 'green' })
+    },
+    onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה ביצירת מעלית', color: 'red' }),
+  })
+
+  const completeMutation = useMutation({
+    mutationFn: ({ reportId, notes }: { reportId: string; notes: string }) =>
+      client.post(`/inspections/${reportId}/complete`, { notes }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inspections'] })
+      setCompletionModal(null); setCompletionNotes('')
+      notifications.show({ message: '✅ דוח סיום נשלח למנהל', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשליחת דוח הסיום', color: 'red' }),
   })
 
   async function searchElevators(q: string) {
@@ -335,6 +382,40 @@ export default function InspectionsPage() {
                           }
                         />
                       ))}
+                      {addDefFor === r.id ? (
+                        <Paper p="xs" radius="sm" withBorder mt={4}>
+                          <Stack gap={6}>
+                            <TextInput
+                              placeholder="תיאור הליקוי..."
+                              size="xs"
+                              value={newDefDesc}
+                              onChange={e => setNewDefDesc(e.target.value)}
+                              autoFocus
+                            />
+                            <Group gap="xs">
+                              <Select
+                                size="xs"
+                                value={newDefSeverity}
+                                onChange={v => setNewDefSeverity(v ?? 'MEDIUM')}
+                                data={[{ value: 'HIGH', label: '🔴 גבוה' }, { value: 'MEDIUM', label: '🟡 בינוני' }, { value: 'LOW', label: '🟢 נמוך' }]}
+                                style={{ flex: 1 }}
+                              />
+                              <Button size="xs" color="teal"
+                                disabled={!newDefDesc.trim()}
+                                loading={addDeficiencyMutation.isPending}
+                                onClick={() => addDeficiencyMutation.mutate({ reportId: r.id, description: newDefDesc, severity: newDefSeverity })}>
+                                הוסף
+                              </Button>
+                              <Button size="xs" variant="subtle" color="gray" onClick={() => { setAddDefFor(null); setNewDefDesc('') }}>ביטול</Button>
+                            </Group>
+                          </Stack>
+                        </Paper>
+                      ) : (
+                        <Button size="xs" variant="subtle" color="blue" mt={4}
+                          onClick={() => setAddDefFor(r.id)}>
+                          + הוסף ליקוי
+                        </Button>
+                      )}
                     </Stack>
                   </Collapse>
                 </>
@@ -419,17 +500,68 @@ export default function InspectionsPage() {
             </Button>
 
             <Divider label="— לא מצאת? —" labelPosition="center" />
-            <Button variant="subtle" color="blue" onClick={() => setCreateMode(c => !c)}>
-              {createMode ? '▲ ביטול' : '+ הוסף מעלית חדשה על בסיס הדוח'}
+            <Button variant="subtle" color="blue" onClick={() => {
+              setCreateMode(c => !c)
+              if (!createMode && confirmReport) {
+                const parts = (confirmReport.raw_address || '').split(',')
+                setCreateElev({
+                  address: parts[0]?.trim() || '',
+                  city: confirmReport.raw_city || parts[1]?.trim() || '',
+                  building_name: '',
+                })
+              }
+            }}>
+              {createMode ? '▲ ביטול' : '+ צור מעלית חדשה על בסיס הדוח'}
             </Button>
-            {createMode && (
+            {createMode && confirmReport && (
               <Paper withBorder p="sm" radius="sm">
-                <Text size="xs" c="dimmed">
-                  לחץ "הוסף מעלית" בדף המעליות עם הכתובת: <strong>{confirmReport.raw_address}</strong>
-                  <br />לאחר יצירתה, חזור לכאן וחפש אותה לפי כתובת.
-                </Text>
+                <Stack gap="sm">
+                  <Text size="xs" c="dimmed">פרטי המעלית החדשה (מולאו מהדוח — ניתן לעדכן):</Text>
+                  <TextInput label="כתובת *" size="xs" value={createElev.address}
+                    onChange={e => setCreateElev(f => ({ ...f, address: e.target.value }))} />
+                  <TextInput label="עיר *" size="xs" value={createElev.city}
+                    onChange={e => setCreateElev(f => ({ ...f, city: e.target.value }))} />
+                  <TextInput label="שם בניין (אופציונלי)" size="xs" value={createElev.building_name}
+                    onChange={e => setCreateElev(f => ({ ...f, building_name: e.target.value }))} />
+                  <Button color="green" size="sm"
+                    disabled={!createElev.address.trim() || !createElev.city.trim()}
+                    loading={createElevatorMutation.isPending}
+                    onClick={() => createElevatorMutation.mutate({ reportId: confirmReport.id, ...createElev })}>
+                    ✅ צור מעלית ושייך דוח
+                  </Button>
+                </Stack>
               </Paper>
             )}
+          </Stack>
+        )}
+      </Modal>
+
+      {/* Completion report modal */}
+      <Modal
+        opened={!!completionModal}
+        onClose={() => { setCompletionModal(null); setCompletionNotes('') }}
+        title="✅ דוח סיום טיפול"
+        dir="rtl"
+        size="md"
+      >
+        {completionModal && (
+          <Stack gap="md">
+            <Text size="sm">📍 <strong>{completionModal.elevatorAddress}</strong></Text>
+            <Text size="sm" c="dimmed">כל הליקויים סומנו כמטופלים. ניתן לערוך את הסיכום לפני שליחה:</Text>
+            <Textarea
+              label="סיכום הטיפול"
+              value={completionNotes}
+              onChange={e => setCompletionNotes(e.target.value)}
+              minRows={4}
+              autosize
+            />
+            <Group justify="flex-end" gap="sm">
+              <Button variant="subtle" onClick={() => { setCompletionModal(null); setCompletionNotes('') }}>סגור ללא שליחה</Button>
+              <Button color="green" loading={completeMutation.isPending}
+                onClick={() => completeMutation.mutate({ reportId: completionModal.reportId, notes: completionNotes })}>
+                📤 שלח דוח למנהל
+              </Button>
+            </Group>
           </Stack>
         )}
       </Modal>

@@ -99,6 +99,8 @@ def list_inspections(
             "report_status": getattr(r, "report_status", "NA"),
             "assigned_technician_id": str(r.assigned_technician_id) if getattr(r, "assigned_technician_id", None) else None,
             "assigned_technician_name": tech.name if tech else None,
+            "raw_city": r.raw_city,
+            "notes": r.notes,
         })
     return result
 
@@ -286,4 +288,113 @@ def reject_inspection_match(
     report.match_status = "UNMATCHED"
     report.suggested_elevator_id = None
     db.commit()
+    return {"ok": True}
+
+
+@router.post("/{report_id}/add-deficiency", summary="Add a deficiency to an existing report without removing others")
+def add_deficiency(
+    report_id: str,
+    deficiency: dict = Body(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    from app.models.inspection_report import InspectionReport
+
+    report = db.query(InspectionReport).filter(InspectionReport.id == uuid.UUID(report_id)).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    checklist = list(report.deficiencies or [])
+    checklist.append({
+        "description": deficiency.get("description", "").strip(),
+        "severity": deficiency.get("severity", "MEDIUM"),
+        "done": False,
+    })
+    report.deficiencies = checklist
+    report.deficiency_count = len([d for d in checklist if not d.get("done")])
+    if report.report_status == "NA":
+        report.report_status = "OPEN"
+    db.commit()
+    return {"ok": True, "deficiency_count": report.deficiency_count}
+
+
+@router.post("/{report_id}/create-elevator", summary="Create a new elevator from inspection report data and link it")
+def create_elevator_from_report(
+    report_id: str,
+    data: dict = Body(...),
+    db: Session = Depends(get_db),
+    _=Depends(require_dispatcher_or_admin),
+):
+    from app.models.inspection_report import InspectionReport
+    from app.models.elevator import Elevator
+    from app.services.inspection_service import _apply_inspection_to_elevator
+
+    report = db.query(InspectionReport).filter(InspectionReport.id == uuid.UUID(report_id)).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    address = (data.get("address") or "").strip()
+    city = (data.get("city") or "").strip()
+    if not address or not city:
+        raise HTTPException(status_code=400, detail="כתובת ועיר הם שדות חובה")
+
+    elev = Elevator(
+        address=address,
+        city=city,
+        building_name=data.get("building_name") or None,
+        inspector_name=report.inspector_name,
+        last_inspection_date=report.inspection_date,
+    )
+    db.add(elev)
+    db.flush()
+
+    report.elevator_id = elev.id
+    report.match_status = "MANUALLY_CONFIRMED"
+    db.commit()
+
+    _apply_inspection_to_elevator(db, report, elev)
+    return {"ok": True, "elevator_id": str(elev.id), "elevator_address": f"{address}, {city}"}
+
+
+@router.post("/{report_id}/complete", summary="Save completion notes and notify dispatcher when all deficiencies resolved")
+def complete_report(
+    report_id: str,
+    data: dict = Body(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    from app.models.inspection_report import InspectionReport
+    from app.models.elevator import Elevator
+    from app.models.technician import Technician
+    from app.services.whatsapp_service import notify_dispatcher, _send_message
+
+    report = db.query(InspectionReport).filter(InspectionReport.id == uuid.UUID(report_id)).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    notes = (data.get("notes") or "").strip()
+    report.notes = notes
+    db.commit()
+
+    elevator = db.query(Elevator).filter(Elevator.id == report.elevator_id).first() if report.elevator_id else None
+    address = f"{elevator.address}, {elevator.city}" if elevator else report.raw_address or "—"
+
+    msg = (
+        f"✅ *דוח ביקורת נסגר*\n"
+        f"📍 {address}\n"
+        f"👤 בודק: {report.inspector_name or '—'}\n"
+    )
+    if notes:
+        msg += f"📝 {notes}\n"
+    msg += f"🔧 {report.deficiency_count} ליקויים טופלו"
+
+    notify_dispatcher(msg)
+
+    if report.assigned_technician_id:
+        tech = db.query(Technician).filter(Technician.id == report.assigned_technician_id).first()
+        if tech:
+            phone = tech.whatsapp_number or tech.phone
+            if phone:
+                _send_message(phone, f"✅ דוח הביקורת ב{address} נסגר בהצלחה. תודה!")
+
     return {"ok": True}

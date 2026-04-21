@@ -566,7 +566,7 @@ export default function ElevatorDetailPage() {
           <Tabs.Tab value="service">שירות</Tabs.Tab>
           <Tabs.Tab value="contacts">אנשי קשר {contacts.length > 0 && `(${contacts.length})`}</Tabs.Tab>
           <Tabs.Tab value="contract">חוזה</Tabs.Tab>
-          <Tabs.Tab value="inspection">ביקורת</Tabs.Tab>
+          <Tabs.Tab value="inspection">דוחות בודק</Tabs.Tab>
           <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>
           {elevator.building_id && (
             <Tabs.Tab value="group">קבוצה {siblings.length > 0 && `(${siblings.length + 1})`}</Tabs.Tab>
