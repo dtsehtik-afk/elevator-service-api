@@ -600,7 +600,7 @@ def _portal_page(tech_id: str, tech_name: str, call_html: str, maint_html: str, 
   <button class="tab-btn tab-active"  onclick="showTab('calls',this)">🔧 קריאות</button>
   <button class="tab-btn tab-inactive" onclick="showTab('maint',this)">🛠️ תחזוקה</button>
   <button class="tab-btn tab-inactive" onclick="showTab('reports',this)">📋 בודק</button>
-  <button class="tab-btn tab-inactive" onclick="showTab('warmap',this);initWarMap()">🗺️ חמ"ל</button>
+  <button class="tab-btn tab-inactive" onclick="showTab('warmap',this);setTimeout(initWarMap,100)">🗺️ חמ"ל</button>
 </div>
 <div id="calls"  class="section active">{call_html}</div>
 <div id="maint"  class="section">{maint_html}</div>
@@ -678,7 +678,10 @@ function claimReport(reportId) {{
 // ── War-room map ──────────────────────────────────────────────────────────────
 let _warMap = null;
 function initWarMap() {{
-  if (_warMap) return;
+  if (_warMap) {{
+    setTimeout(() => _warMap.invalidateSize(), 100);
+    return;
+  }}
   const container = document.getElementById('warmap-container');
   if ((container)._leaflet_id) delete container._leaflet_id;
   _warMap = L.map(container, {{ zoomControl: true }});

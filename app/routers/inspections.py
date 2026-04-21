@@ -192,10 +192,11 @@ def update_checklist(
     report_id: str,
     updates: list = Body(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """
     updates: list of {index: int, done: bool}
+    Records done_by (current user name) on each deficiency when marking done.
     When all items done → report_status = CLOSED; otherwise PARTIAL.
     """
     from app.models.inspection_report import InspectionReport
@@ -208,7 +209,13 @@ def update_checklist(
     for upd in updates:
         idx = upd.get("index")
         if idx is not None and 0 <= idx < len(checklist):
-            checklist[idx] = {**checklist[idx], "done": bool(upd.get("done", False))}
+            done = bool(upd.get("done", False))
+            entry = {**checklist[idx], "done": done}
+            if done:
+                entry["done_by"] = current_user.name
+            else:
+                entry.pop("done_by", None)
+            checklist[idx] = entry
 
     report.deficiencies = checklist
     all_done = all(item.get("done", False) for item in checklist)
@@ -379,14 +386,25 @@ def complete_report(
     elevator = db.query(Elevator).filter(Elevator.id == report.elevator_id).first() if report.elevator_id else None
     address = f"{elevator.address}, {elevator.city}" if elevator else report.raw_address or "—"
 
+    # Group deficiencies by done_by technician
+    by_tech: dict[str, list[str]] = {}
+    for d in (report.deficiencies or []):
+        if d.get("done"):
+            tech_name = d.get("done_by") or "לא צוין"
+            by_tech.setdefault(tech_name, []).append(d.get("description", ""))
+
+    tech_lines = ""
+    for tech_name, items in by_tech.items():
+        tech_lines += f"\n🔧 *{tech_name}:*\n" + "\n".join(f"  ✓ {i}" for i in items)
+
     msg = (
         f"✅ *דוח ביקורת נסגר*\n"
         f"📍 {address}\n"
         f"👤 בודק: {report.inspector_name or '—'}\n"
+        f"{tech_lines}\n"
     )
     if notes:
-        msg += f"📝 {notes}\n"
-    msg += f"🔧 {report.deficiency_count} ליקויים טופלו"
+        msg += f"\n📝 {notes}"
 
     notify_dispatcher(msg)
 

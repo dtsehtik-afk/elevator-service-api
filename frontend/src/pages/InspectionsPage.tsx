@@ -14,6 +14,7 @@ interface Deficiency {
   description: string
   severity: string
   done?: boolean
+  done_by?: string
 }
 
 interface InspectionReport {
@@ -172,10 +173,20 @@ export default function InspectionsPage() {
       const status = res.data?.report_status
       if (status === 'CLOSED') {
         const r = reports.find(r => r.id === reportId)
-        const defs = (r?.deficiencies || []).map(d => `• ${d.description}`).join('\n')
-        const defaultNotes = `כל הליקויים טופלו:\n${defs}`
-        setCompletionNotes(defaultNotes)
-        setCompletionModal({ reportId, elevatorAddress: r?.elevator_address ?? '', deficiencies: r?.deficiencies ?? [] })
+        const defs = r?.deficiencies || []
+        // Group by done_by technician
+        const byTech: Record<string, string[]> = {}
+        defs.forEach(d => {
+          if (d.done) {
+            const who = d.done_by || 'לא צוין'
+            byTech[who] = [...(byTech[who] || []), d.description]
+          }
+        })
+        const grouped = Object.entries(byTech)
+          .map(([name, items]) => `🔧 ${name}:\n${items.map(i => `  ✓ ${i}`).join('\n')}`)
+          .join('\n\n')
+        setCompletionNotes(grouped || defs.map(d => `✓ ${d.description}`).join('\n'))
+        setCompletionModal({ reportId, elevatorAddress: r?.elevator_address ?? '', deficiencies: defs })
       }
     },
     onError: () => notifications.show({ message: 'שגיאה בעדכון הרשימה', color: 'red' }),
@@ -377,6 +388,7 @@ export default function InspectionsPage() {
                               <Badge color={SEVERITY_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
                               <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
                                 {d.description}
+                                {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
                               </Text>
                             </Group>
                           }
