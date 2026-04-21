@@ -198,6 +198,114 @@ class SaveLocation(BaseModel):
     lng: float
 
 
+@router.get("/tech/{tech_id}/map-data", include_in_schema=False)
+def tech_map_data(tech_id: str, db: Session = Depends(get_db)):
+    """
+    Return all geo-located work items for the technician's war-room map:
+    - Open/active service calls (red)
+    - Open inspection reports with deficiencies (orange)
+    - Upcoming maintenance within 15 days (yellow/green by urgency)
+    """
+    import uuid
+    from datetime import date, timedelta
+    from app.models.technician import Technician
+    from app.models.service_call import ServiceCall
+    from app.models.assignment import Assignment
+    from app.models.inspection_report import InspectionReport
+    from app.models.elevator import Elevator
+
+    try:
+        tid = uuid.UUID(tech_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="לא נמצא")
+    if not db.query(Technician).filter(Technician.id == tid).first():
+        raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
+
+    pins = []
+    today = date.today()
+    _FAULT_HE = {"STUCK": "מעלית תקועה 🚨", "DOOR": "תקלת דלת", "ELECTRICAL": "חשמלית",
+                 "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית"}
+    _PRI_HE   = {"CRITICAL": "קריטי 🔴", "HIGH": "גבוה 🟠", "MEDIUM": "בינוני 🟡", "LOW": "נמוך 🟢"}
+
+    # ── 1. Open service calls ─────────────────────────────────────────────────
+    open_calls = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]))
+        .all()
+    )
+    for call in open_calls:
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        if not elev or not elev.latitude or not elev.longitude:
+            continue
+        pri_color = {"CRITICAL": "#dc2626", "HIGH": "#ea580c"}.get(call.priority, "#eab308")
+        pins.append({
+            "type": "call",
+            "lat": elev.latitude,
+            "lng": elev.longitude,
+            "address": f"{elev.address}, {elev.city}",
+            "title": _FAULT_HE.get(call.fault_type, call.fault_type),
+            "detail": _PRI_HE.get(call.priority, call.priority),
+            "status": call.status,
+            "color": pri_color,
+            "call_id": str(call.id),
+        })
+
+    # ── 2. Open inspection reports ────────────────────────────────────────────
+    open_reports = (
+        db.query(InspectionReport)
+        .filter(
+            InspectionReport.report_status.in_(["OPEN", "PARTIAL"]),
+            InspectionReport.elevator_id.isnot(None),
+        )
+        .all()
+    )
+    for rep in open_reports:
+        elev = db.query(Elevator).filter(Elevator.id == rep.elevator_id).first()
+        if not elev or not elev.latitude or not elev.longitude:
+            continue
+        days_pending = (today - rep.inspection_date).days if rep.inspection_date else 0
+        color = "#dc2626" if days_pending >= 30 else ("#ea580c" if days_pending >= 14 else "#f97316")
+        pins.append({
+            "type": "inspection",
+            "lat": elev.latitude,
+            "lng": elev.longitude,
+            "address": f"{elev.address}, {elev.city}",
+            "title": f"⚠️ {rep.deficiency_count} ליקויים",
+            "detail": f"תסקיר: {rep.inspection_date.strftime('%d/%m/%Y') if rep.inspection_date else '—'} · {days_pending} ימים",
+            "color": color,
+            "report_id": str(rep.id),
+        })
+
+    # ── 3. Upcoming maintenance ───────────────────────────────────────────────
+    upcoming = (
+        db.query(Elevator)
+        .filter(
+            Elevator.next_service_date.isnot(None),
+            Elevator.next_service_date <= today + timedelta(days=15),
+            Elevator.status == "ACTIVE",
+            Elevator.latitude.isnot(None),
+            Elevator.longitude.isnot(None),
+        )
+        .all()
+    )
+    for elev in upcoming:
+        days_left = (elev.next_service_date - today).days
+        color = "#dc2626" if days_left <= 0 else ("#ea580c" if days_left <= 5 else "#16a34a")
+        label = f"בוצע לפני {abs(days_left)} ימים" if days_left < 0 else (f"עוד {days_left} ימים" if days_left > 0 else "היום!")
+        pins.append({
+            "type": "maintenance",
+            "lat": elev.latitude,
+            "lng": elev.longitude,
+            "address": f"{elev.address}, {elev.city}",
+            "title": f"🛠️ טיפול מונע",
+            "detail": label,
+            "color": color,
+            "service_date": elev.next_service_date.strftime("%d/%m/%Y"),
+        })
+
+    return {"pins": pins}
+
+
 @router.get("/tech/{tech_id}/elevators", include_in_schema=False)
 def search_elevators(tech_id: str, q: str = "", db: Session = Depends(get_db)):
     """
@@ -478,18 +586,34 @@ _BASE_STYLE = """
 
 
 def _portal_page(tech_id: str, tech_name: str, call_html: str, maint_html: str, report_html: str) -> str:
-    return f"""<!DOCTYPE html><html><head>{_BASE_STYLE}<title>ממשק טכנאי</title></head><body>
+    return f"""<!DOCTYPE html><html>
+<head>
+{_BASE_STYLE}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<title>ממשק טכנאי</title>
+</head><body>
 <div class="card" style="margin-bottom:12px">
   <h1>שלום {tech_name} 👋</h1>
 </div>
 <div class="tabs">
-  <button class="tab-btn tab-active" onclick="showTab('calls',this)">🔧 קריאות</button>
+  <button class="tab-btn tab-active"  onclick="showTab('calls',this)">🔧 קריאות</button>
   <button class="tab-btn tab-inactive" onclick="showTab('maint',this)">🛠️ תחזוקה</button>
   <button class="tab-btn tab-inactive" onclick="showTab('reports',this)">📋 בודק</button>
+  <button class="tab-btn tab-inactive" onclick="showTab('warmap',this);initWarMap()">🗺️ חמ"ל</button>
 </div>
-<div id="calls" class="section active">{call_html}</div>
-<div id="maint" class="section">{maint_html}</div>
+<div id="calls"  class="section active">{call_html}</div>
+<div id="maint"  class="section">{maint_html}</div>
 <div id="reports" class="section">{report_html}</div>
+<div id="warmap" class="section">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+    <span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:4px 10px;font-size:.8rem;font-weight:700">🔴 קריאות פתוחות</span>
+    <span style="background:#ffedd5;color:#ea580c;border-radius:20px;padding:4px 10px;font-size:.8rem;font-weight:700">🟠 ליקויי בודק</span>
+    <span style="background:#f0fdf4;color:#16a34a;border-radius:20px;padding:4px 10px;font-size:.8rem;font-weight:700">🟢 טיפול מונע</span>
+  </div>
+  <div id="warmap-container" style="height:420px;border-radius:12px;overflow:hidden;margin-bottom:12px"></div>
+  <div id="warmap-list"></div>
+</div>
 <script>
 function showTab(id, btn) {{
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -549,6 +673,98 @@ function claimReport(reportId) {{
   fetch(`/app/tech/{tech_id}/claim-report/${{reportId}}`, {{ method: 'POST' }})
     .then(r => {{ if (r.ok) location.reload(); else alert('שגיאה בקבלת הדוח'); }})
     .catch(() => alert('שגיאה'));
+}}
+
+// ── War-room map ──────────────────────────────────────────────────────────────
+let _warMap = null;
+function initWarMap() {{
+  if (_warMap) return;
+  const container = document.getElementById('warmap-container');
+  if ((container)._leaflet_id) delete container._leaflet_id;
+  _warMap = L.map(container, {{ zoomControl: true }});
+  L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+    attribution: '© OpenStreetMap'
+  }}).addTo(_warMap);
+  _warMap.setView([32.08, 34.78], 9);
+
+  fetch('/app/tech/{tech_id}/map-data')
+    .then(r => r.json())
+    .then(d => renderWarPins(d.pins))
+    .catch(() => document.getElementById('warmap-list').innerHTML =
+      '<p style="color:#888;text-align:center;padding:20px">שגיאה בטעינת נתונים</p>');
+
+  // Show technician's own location if available
+  if (navigator.geolocation) {{
+    navigator.geolocation.getCurrentPosition(pos => {{
+      const {{ latitude: lat, longitude: lng }} = pos.coords;
+      const myIcon = L.divIcon({{
+        className: '',
+        html: '<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,.5)"></div>',
+        iconSize: [16,16], iconAnchor: [8,8],
+      }});
+      L.marker([lat, lng], {{ icon: myIcon }})
+        .addTo(_warMap)
+        .bindPopup('<b>📍 המיקום שלי</b>');
+    }}, () => {{}});
+  }}
+}}
+
+function renderWarPins(pins) {{
+  const listEl = document.getElementById('warmap-list');
+  const _TYPE_HE = {{ call: 'קריאה', inspection: 'דוח בודק', maintenance: 'טיפול מונע' }};
+  const bounds = [];
+  const byType = {{ call: [], inspection: [], maintenance: [] }};
+
+  pins.forEach(p => {{
+    if (!p.lat || !p.lng) return;
+    const icon = L.divIcon({{
+      className: '',
+      html: `<div style="width:24px;height:24px;border-radius:50%;background:${{p.color}};border:3px solid white;
+                         box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;
+                         font-size:10px;color:white;font-weight:700"></div>`,
+      iconSize: [24,24], iconAnchor: [12,12],
+    }});
+    const safeAddr = p.address.replace(/'/g, "\\'");
+    const waze = p.lat && p.lng ? `https://waze.com/ul?ll=${{p.lat}},${{p.lng}}&navigate=yes` : '';
+    L.marker([p.lat, p.lng], {{ icon }})
+      .addTo(_warMap)
+      .bindPopup(`
+        <div style="direction:rtl;min-width:160px;font-family:sans-serif">
+          <b>${{p.title}}</b><br>
+          <small>📍 ${{p.address}}</small><br>
+          <small>${{p.detail}}</small><br>
+          ${{waze ? `<a href="${{waze}}" target="_blank" style="font-size:12px">🚘 Waze</a>` : ''}}
+        </div>
+      `);
+    bounds.push([p.lat, p.lng]);
+    (byType[p.type] || []).push(p);
+  }});
+
+  if (bounds.length > 0) _warMap.fitBounds(bounds, {{ padding: [40,40], maxZoom: 14 }});
+  setTimeout(() => _warMap.invalidateSize(), 100);
+
+  // Build summary list below map
+  const _ICONS = {{ call: '🔴', inspection: '🟠', maintenance: '🟢' }};
+  let html = '';
+  ['call','inspection','maintenance'].forEach(type => {{
+    const items = byType[type];
+    if (!items.length) return;
+    html += `<div style="font-weight:700;margin:12px 0 6px">${{_ICONS[type]}} ${{_TYPE_HE[type]}} (${{items.length}})</div>`;
+    items.forEach(p => {{
+      const waze = p.lat && p.lng ? `https://waze.com/ul?ll=${{p.lat}},${{p.lng}}&navigate=yes` : '';
+      html += `
+        <div style="background:white;border-radius:8px;padding:10px 12px;margin-bottom:8px;
+                    box-shadow:0 1px 4px rgba(0,0,0,.08);border-right:4px solid ${{p.color}}">
+          <div style="font-weight:600;font-size:.9rem">${{p.address}}</div>
+          <div style="font-size:.8rem;color:#555;margin-top:2px">${{p.title}} · ${{p.detail}}</div>
+          ${{waze ? `<a href="${{waze}}" target="_blank"
+              style="font-size:.8rem;color:#1d4ed8;text-decoration:none;margin-top:4px;display:inline-block">
+              🚘 נווט ב-Waze</a>` : ''}}
+        </div>`;
+    }});
+  }});
+  if (!html) html = '<p style="color:#888;text-align:center;padding:20px">אין פריטים עם קואורדינטות GPS</p>';
+  listEl.innerHTML = html;
 }}
 
 function saveLocation() {{
