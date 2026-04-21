@@ -1148,7 +1148,7 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
         _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
     except Exception as exc:
         logger.error("Chat agent error: %s", exc)
-        _send_message(phone, "⚠️ שגיאה בעיבוד השאלה — נסה שוב מאוחר יותר.")
+        _handle_chat_question_simple(db, phone, question, settings)
 
 
 _REMINDER_AFTER_MINUTES  = 60    # send hourly reminder if call still unconfirmed

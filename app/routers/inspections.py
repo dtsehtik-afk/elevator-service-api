@@ -3,7 +3,7 @@ import logging
 import uuid
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.auth.dependencies import require_dispatcher_or_admin, get_current_user
@@ -188,7 +188,7 @@ def claim_inspection_report(
 @router.patch("/checklist/{report_id}", summary="Update deficiency checklist items")
 def update_checklist(
     report_id: str,
-    updates: list,
+    updates: list = Body(...),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):

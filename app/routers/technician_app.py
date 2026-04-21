@@ -686,6 +686,7 @@ function initWarMap() {{
     attribution: '© OpenStreetMap'
   }}).addTo(_warMap);
   _warMap.setView([32.08, 34.78], 9);
+  setTimeout(() => _warMap.invalidateSize(), 250);
 
   fetch('/app/tech/{tech_id}/map-data')
     .then(r => r.json())
