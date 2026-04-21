@@ -2,10 +2,12 @@
  * TechAppPage — Mobile technician app
  * Accessible at /tech — no admin shell, optimized for phone
  */
-import { useState, useEffect, useRef } from 'react'
-import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea } from '@mantine/core'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
 import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor } from '@capacitor/core'
 import { useAuthStore } from '../stores/authStore'
@@ -58,6 +60,44 @@ interface OpenCall {
   lng: number | null
 }
 
+interface MaintenanceItem {
+  id: string
+  elevator_address: string
+  elevator_city: string
+  scheduled_date: string
+  status: string
+  notes: string | null
+}
+
+interface ReportDeficiency {
+  description: string
+  severity: string
+  done?: boolean
+  done_by?: string
+}
+
+interface InspReport {
+  id: string
+  elevator_address: string
+  elevator_id: string | null
+  inspection_date: string | null
+  inspector_name: string | null
+  deficiency_count: number
+  deficiencies: ReportDeficiency[] | null
+  report_status: 'OPEN' | 'PARTIAL' | 'CLOSED' | 'NA'
+  assigned_technician_name: string | null
+}
+
+interface MapPin {
+  type: 'call' | 'inspection' | 'maintenance'
+  lat: number
+  lng: number
+  address: string
+  title: string
+  detail: string
+  color: string
+}
+
 // ── API helpers ────────────────────────────────────────────────────────────
 async function fetchMe(): Promise<TechInfo> {
   const { data } = await client.get('/auth/me')
@@ -101,6 +141,44 @@ async function reassignElevator(techId: string, elevatorId: string) {
 
 async function sendLocation(techId: string, lat: number, lng: number) {
   await client.post(`/webhooks/location/${techId}`, { latitude: lat, longitude: lng })
+}
+
+async function fetchMaintenance(techId: string): Promise<MaintenanceItem[]> {
+  const today = new Date().toISOString().split('T')[0]
+  const future = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+  const { data } = await client.get('/maintenance', { params: { technician_id: techId, from: today, to: future, status: 'SCHEDULED', limit: 50 } })
+  return data
+}
+
+async function fetchMyReports(): Promise<InspReport[]> {
+  const { data } = await client.get('/inspections', { params: { report_status: 'OPEN', limit: 50 } })
+  return data
+}
+
+async function fetchMapPins(techId: string): Promise<MapPin[]> {
+  const { data } = await client.get(`/app/tech/${techId}/map-data`)
+  return data.pins ?? []
+}
+
+async function toggleDeficiency(reportId: string, idx: number, done: boolean) {
+  await client.patch(`/inspections/checklist/${reportId}`, [{ index: idx, done }])
+}
+
+// ── Voice transcription hook ──────────────────────────────────────────────
+function useVoice(onResult: (t: string) => void) {
+  const [active, setActive] = useState(false)
+  const start = useCallback(() => {
+    const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
+    if (!SR) { notifications.show({ message: 'הדפדפן לא תומך בתמלול קולי', color: 'orange' }); return }
+    const r = new SR()
+    r.lang = 'he-IL'; r.continuous = false; r.interimResults = false
+    r.onstart = () => setActive(true)
+    r.onend = () => setActive(false)
+    r.onresult = (e: any) => onResult(e.results[0][0].transcript)
+    r.onerror = () => setActive(false)
+    r.start()
+  }, [onResult])
+  return { start, active }
 }
 
 // ── Login Screen ───────────────────────────────────────────────────────────
@@ -214,6 +292,113 @@ function useGPS(techId: string | null) {
   return { status }
 }
 
+// ── Maintenance Tab ───────────────────────────────────────────────────────
+const STATUS_COLOR: Record<string, string> = { SCHEDULED: 'blue', COMPLETED: 'green', OVERDUE: 'red', CANCELLED: 'gray' }
+const STATUS_LABEL: Record<string, string> = { SCHEDULED: '📅 מתוכנן', COMPLETED: '✅ הושלם', OVERDUE: '⚠️ באיחור', CANCELLED: 'בוטל' }
+
+function MaintenanceTab({ techId }: { techId: string }) {
+  const { data: items = [], isLoading } = useQuery({ queryKey: ['maint-tech', techId], queryFn: () => fetchMaintenance(techId) })
+  if (isLoading) return <Center h={200}><Loader /></Center>
+  if (!items.length) return <Card withBorder p="xl" ta="center"><Text c="dimmed">אין תחזוקה מתוכננת ב-30 הימים הקרובים</Text></Card>
+  return (
+    <Stack gap="sm">
+      {items.map(m => (
+        <Card key={m.id} withBorder radius="md" p="md">
+          <Group justify="space-between" mb={4}>
+            <Badge color={STATUS_COLOR[m.status] ?? 'gray'}>{STATUS_LABEL[m.status] ?? m.status}</Badge>
+            <Text size="sm" c="dimmed">{new Date(m.scheduled_date).toLocaleDateString('he-IL')}</Text>
+          </Group>
+          <Text fw={700}>📍 {m.elevator_address}, {m.elevator_city}</Text>
+          {m.notes && <Text size="sm" c="dimmed" mt={4}>📝 {m.notes}</Text>}
+        </Card>
+      ))}
+    </Stack>
+  )
+}
+
+// ── Inspection Reports Tab ────────────────────────────────────────────────
+const SEV_COLOR: Record<string, string> = { HIGH: 'red', MEDIUM: 'orange', LOW: 'yellow' }
+
+function ReportsTab() {
+  const qc = useQueryClient()
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const { data: reports = [], isLoading } = useQuery({ queryKey: ['tech-reports'], queryFn: fetchMyReports })
+
+  const checkMut = useMutation({
+    mutationFn: ({ reportId, idx, done }: { reportId: string; idx: number; done: boolean }) => toggleDeficiency(reportId, idx, done),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tech-reports'] }),
+    onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
+  })
+
+  const open = reports.filter(r => r.report_status === 'OPEN' || r.report_status === 'PARTIAL')
+
+  if (isLoading) return <Center h={200}><Loader /></Center>
+  if (!open.length) return <Card withBorder p="xl" ta="center"><Text c="dimmed">אין דוחות פתוחים לטיפול</Text></Card>
+
+  return (
+    <Stack gap="sm">
+      {open.map(r => (
+        <Card key={r.id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #fa5252' }}>
+          <Group justify="space-between" mb={4}>
+            <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
+            <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
+          </Group>
+          {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
+          <Button size="xs" variant="subtle" mt={6}
+            onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+            {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
+          </Button>
+          <Collapse in={expanded === r.id}>
+            <Stack gap={6} mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
+              {(r.deficiencies || []).map((d, i) => (
+                <Checkbox key={i} checked={!!d.done}
+                  onChange={e => checkMut.mutate({ reportId: r.id, idx: i, done: e.target.checked })}
+                  label={
+                    <Group gap="xs">
+                      <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
+                      <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
+                        {d.description}
+                        {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
+                      </Text>
+                    </Group>
+                  }
+                />
+              ))}
+            </Stack>
+          </Collapse>
+        </Card>
+      ))}
+    </Stack>
+  )
+}
+
+// ── Map Tab ───────────────────────────────────────────────────────────────
+function MapTab({ techId }: { techId: string }) {
+  const { data: pins = [], isLoading } = useQuery({ queryKey: ['map-pins', techId], queryFn: () => fetchMapPins(techId) })
+  if (isLoading) return <Center h={200}><Loader /></Center>
+  return (
+    <Stack gap="sm">
+      <MapContainer center={[32.08, 34.78]} zoom={9} style={{ height: 420, borderRadius: 12 }}>
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />
+        {pins.map((p, i) => (
+          <CircleMarker key={i} center={[p.lat, p.lng]}
+            pathOptions={{ color: p.color, fillColor: p.color, fillOpacity: 0.8 }} radius={10}>
+            <Popup>
+              <div style={{ direction: 'rtl', minWidth: 160 }}>
+                <strong>{p.title}</strong><br />
+                <small>📍 {p.address}</small><br />
+                <small>{p.detail}</small><br />
+                <a href={`https://waze.com/ul?ll=${p.lat},${p.lng}&navigate=yes`} target="_blank" rel="noreferrer">🚘 Waze</a>
+              </div>
+            </Popup>
+          </CircleMarker>
+        ))}
+      </MapContainer>
+      {!pins.length && <Text c="dimmed" ta="center" size="sm">אין פריטים עם קואורדינטות GPS</Text>}
+    </Stack>
+  )
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 function TechMain() {
   const qc = useQueryClient()
@@ -238,9 +423,11 @@ function TechMain() {
     refetchInterval: 30000,
   })
 
+  const [activeTab, setActiveTab] = useState<'calls' | 'maint' | 'reports' | 'map'>('calls')
   const [resolveOpen, setResolveOpen] = useState(false)
   const [resolveCallId, setResolveCallId] = useState<string | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
+  const voice = useVoice(t => setResolveNotes(n => n ? n + ' ' + t : t))
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
@@ -323,10 +510,22 @@ function TechMain() {
         </Group>
       </div>
 
+      {/* Tab bar */}
+      <div style={{ display: 'flex', background: '#fff', borderBottom: '1px solid #e5e7eb', overflowX: 'auto' }}>
+        {([['calls','🔧 קריאות'],['maint','🛠 תחזוקה'],['reports','📋 בודק'],['map','🗺 חמ"ל']] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setActiveTab(id)}
+            style={{ flex: 1, padding: '10px 4px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: activeTab === id ? 700 : 400, color: activeTab === id ? '#1a73e8' : '#555', borderBottom: activeTab === id ? '3px solid #1a73e8' : '3px solid transparent', whiteSpace: 'nowrap' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <Stack gap="md" p="md">
-        {isLoading ? (
-          <Center h={200}><Loader /></Center>
-        ) : (
+        {activeTab === 'maint' && techId && <MaintenanceTab techId={techId} />}
+        {activeTab === 'reports' && <ReportsTab />}
+        {activeTab === 'map' && techId && <MapTab techId={techId} />}
+
+        {activeTab === 'calls' && (isLoading ? <Center h={200}><Loader /></Center> : (
           <>
             {/* ── Active / confirmed calls — always at top ── */}
             {pending.filter(c => c.assignment_status !== 'PENDING_CONFIRMATION').map((call) => (
@@ -374,7 +573,12 @@ function TechMain() {
             {/* ── Resolve call modal ── */}
             <Modal opened={resolveOpen} onClose={() => setResolveOpen(false)} title="✅ סגירת קריאה" size="md" dir="rtl">
               <Stack gap="sm">
-                <Text size="sm" c="dimmed">תאר את הפעולות שבוצעו (אופציונלי)</Text>
+                <Group justify="space-between">
+                  <Text size="sm" c="dimmed">תאר את הפעולות שבוצעו (אופציונלי)</Text>
+                  <Button size="xs" variant={voice.active ? 'filled' : 'subtle'} color={voice.active ? 'red' : 'blue'} onClick={voice.start}>
+                    {voice.active ? '🎤 מאזין...' : '🎤 תמלול'}
+                  </Button>
+                </Group>
                 <Textarea
                   placeholder="לדוגמה: הוחלף חיישן הדלת, נבדקה תקינות המנוע..."
                   minRows={4}
@@ -465,19 +669,20 @@ function TechMain() {
               </Card>
             )}
           </>
-        )}
+        ))}
 
-        {/* ── Open calls board ── */}
-        <Divider label="📋 לוח קריאות פתוחות" labelPosition="center" mt="md" />
-        {boardLoading ? (
-          <Center h={80}><Loader size="sm" /></Center>
-        ) : openBoard.length === 0 ? (
-          <Card withBorder radius="md" p="md" ta="center">
-            <Text c="dimmed" size="sm">אין קריאות פתוחות כרגע</Text>
-          </Card>
-        ) : (
+        {activeTab === 'calls' && (
           <>
-            <Text size="sm" c="dimmed">כל הקריאות הפתוחות שלא שויכו סופית — לחץ "משוך" כדי לקחת</Text>
+            <Divider label="📋 לוח קריאות פתוחות" labelPosition="center" mt="md" />
+            {boardLoading ? (
+              <Center h={80}><Loader size="sm" /></Center>
+            ) : openBoard.length === 0 ? (
+              <Card withBorder radius="md" p="md" ta="center">
+                <Text c="dimmed" size="sm">אין קריאות פתוחות כרגע</Text>
+              </Card>
+            ) : (
+              <>
+                <Text size="sm" c="dimmed">כל הקריאות הפתוחות שלא שויכו סופית — לחץ "משוך" כדי לקחת</Text>
             {openBoard.map((call) => (
               <Card key={call.call_id} withBorder radius="md" p="md" shadow="xs"
                 style={{ borderRight: `4px solid ${PRIORITY_COLOR[call.priority] === 'red' ? '#fa5252' : PRIORITY_COLOR[call.priority] === 'orange' ? '#fd7e14' : '#228be6'}` }}>
@@ -511,6 +716,8 @@ function TechMain() {
                 </Button>
               </Card>
             ))}
+          </>
+            )}
           </>
         )}
       </Stack>
