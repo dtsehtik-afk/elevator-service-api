@@ -261,8 +261,8 @@ def _parse_email(body: str, api_key: str = "") -> Optional[dict]:
 
     result = _parse_with_gemini(body, api_key)
     if not result:
-        logger.error("Claude failed to parse email body — skipping this email.")
-        return None
+        logger.warning("Gemini unavailable — falling back to regex parser")
+        result = _parse_email_regex(body)
 
     # Normalise fault_type in case Claude returned something unexpected
     valid = {"STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "OTHER"}
@@ -473,6 +473,8 @@ def poll_emails(db) -> int:
 
                 logger.info("📧 Email body (first 400 chars): %s", body[:400])
 
+                import time as _time
+                _time.sleep(2)  # avoid Gemini rate limit when processing multiple emails
                 fields = _parse_email(body, api_key=api_key)
 
                 if fields is None:
