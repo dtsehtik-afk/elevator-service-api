@@ -420,30 +420,20 @@ def poll_emails(db) -> int:
         # Look back 3 days — dedup table (service_call_email_scans) prevents re-processing
         since_str = (date.today() - timedelta(days=3)).strftime("%d-%b-%Y")
 
-        # Build OR query across all configured senders
-        if len(senders) == 1:
-            from_filter = f'FROM "{senders[0]}"'
-        else:
-            # IMAP OR is binary: (OR (FROM "a") (FROM "b"))
-            def _or_chain(addresses):
-                if len(addresses) == 1:
-                    return f'FROM "{addresses[0]}"'
-                return f'(OR (FROM "{addresses[0]}") ({_or_chain(addresses[1:])}))'
-            from_filter = _or_chain(senders)
+        # Fetch ALL emails since the lookback date — filter by sender in Python.
+        # Gmail Workspace IMAP FROM search can be unreliable; Python filtering is safer.
+        _, all_ids = mail.search(None, f'SINCE {since_str}')
+        total_all = len(all_ids[0].split()) if all_ids[0] else 0
+        logger.warning("📧 [%s] since %s: %d total emails (will filter by sender in Python)",
+                       imap_folder, since_str, total_all)
 
-        # Search ALL matching emails (not just UNSEEN) — filter by Message-ID in DB instead
-        # This prevents missing emails that were already read by a human before the poller ran
-        _, all_ids = mail.search(None, f'({from_filter} SINCE {since_str})')
-        total_count = len(all_ids[0].split()) if all_ids[0] else 0
-        logger.warning("📧 [%s] today(%s): %d from senders | senders=%s",
-                       imap_folder, since_str, total_count, ", ".join(senders))
-
+        senders_lower = [s.lower() for s in senders]
         msg_ids = all_ids[0].split()
         if not msg_ids:
             mail.logout()
             return 0
 
-        logger.info("📧 Found %d service-call email(s) since today", len(msg_ids))
+        logger.info("📧 Scanning %d email(s) for senders: %s", len(msg_ids), ", ".join(senders))
         api_key = getattr(s, "gemini_api_key", "")
 
         from app.models.service_call_email_scan import ServiceCallEmailScan
@@ -453,6 +443,11 @@ def poll_emails(db) -> int:
                 _, data = mail.fetch(mid, "(RFC822)")
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
+
+                # Filter by sender in Python (more reliable than IMAP FROM search on Workspace)
+                from_header = msg.get("From", "").lower()
+                if not any(s in from_header for s in senders_lower):
+                    continue
 
                 # Skip already-processed emails (by Message-ID, regardless of SEEN flag)
                 message_id = (msg.get("Message-ID") or f"uid-{mid.decode()}").strip()
