@@ -206,7 +206,7 @@ export default function CallsPage() {
         floor_count: form.floor_count || 1,
         notes: form.notes || null,
       })
-      await client.patch(`/service-calls/${callId}/elevator`, null, { params: { elevator_id: elev.id } })
+      await client.patch(`/calls/${callId}/elevator`, null, { params: { elevator_id: elev.id } })
       return elev
     },
     onSuccess: (elev) => {
@@ -222,7 +222,7 @@ export default function CallsPage() {
 
   const changeElevMutation = useMutation({
     mutationFn: ({ callId, elevId }: { callId: string; elevId: string }) =>
-      client.patch(`/service-calls/${callId}/elevator`, null, { params: { elevator_id: elevId } }),
+      client.patch(`/calls/${callId}/elevator`, null, { params: { elevator_id: elevId } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['calls'] })
       qc.invalidateQueries({ queryKey: ['call-detail'] })
@@ -238,7 +238,7 @@ export default function CallsPage() {
   const isAdmin = userRole === 'ADMIN'
 
   const deleteCallMutation = useMutation({
-    mutationFn: (id: string) => client.delete(`/service-calls/${id}`),
+    mutationFn: (id: string) => client.delete(`/calls/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['calls'] })
       notifications.show({ message: 'הקריאה נמחקה', color: 'green' })
