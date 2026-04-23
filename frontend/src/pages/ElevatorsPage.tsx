@@ -95,7 +95,10 @@ export default function ElevatorsPage() {
       }
     }
     const groups = Object.entries(byBuilding)
-      .filter(([, list]) => list.length >= 1)
+      .filter(([, list]) => {
+        if (list.length < 2) { ungrouped.push(...list); return false }
+        return true
+      })
       .sort(([, a], [, b]) => b.length - a.length)
     return { groups, ungrouped }
   }, [elevators, viewMode])

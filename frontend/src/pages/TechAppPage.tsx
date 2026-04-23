@@ -151,7 +151,7 @@ async function fetchMaintenance(techId: string): Promise<MaintenanceItem[]> {
 }
 
 async function fetchMyReports(): Promise<InspReport[]> {
-  const { data } = await client.get('/inspections', { params: { report_status: 'OPEN', limit: 50 } })
+  const { data } = await client.get('/inspections', { params: { limit: 100 } })
   return data
 }
 
