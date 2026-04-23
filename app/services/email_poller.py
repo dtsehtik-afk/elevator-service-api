@@ -456,6 +456,7 @@ def poll_emails(db) -> int:
                 # Filter by sender in Python (more reliable than IMAP FROM search on Workspace)
                 from_header = msg.get("From", "").lower()
                 if not any(s in from_header for s in senders_lower):
+                    logger.info("📧 Skipping non-matching sender: %s", msg.get("From", "")[:80])
                     continue
 
                 # Skip already-processed emails (by Message-ID, regardless of SEEN flag)
