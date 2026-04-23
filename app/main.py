@@ -38,8 +38,17 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS report_status VARCHAR(20) NOT NULL DEFAULT 'NA'",
             "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS assigned_technician_id UUID",
             "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS drive_file_id VARCHAR(200)",
-            # management_companies — caller_phones may be missing on older DBs
+            # management_companies — caller_phones may be JSONB (created by create_all) or missing
             "ALTER TABLE management_companies ADD COLUMN IF NOT EXISTS caller_phones TEXT[] DEFAULT '{}'",
+            # Fix: if column was created as JSONB by create_all, convert to TEXT[]
+            """DO $$ BEGIN
+                IF (SELECT data_type FROM information_schema.columns
+                    WHERE table_name='management_companies' AND column_name='caller_phones') = 'jsonb'
+                THEN
+                    ALTER TABLE management_companies ALTER COLUMN caller_phones
+                    TYPE TEXT[] USING ARRAY(SELECT jsonb_array_elements_text(caller_phones));
+                END IF;
+            END $$""",
             # elevators — management_company_id added after initial migration
             "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS management_company_id UUID REFERENCES management_companies(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
