@@ -8,7 +8,7 @@ import imaplib
 import json
 import logging
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.header import decode_header
 from typing import Optional
 
@@ -417,8 +417,8 @@ def poll_emails(db) -> int:
             logger.warning("📧 Could not select folder '%s' (%s) — falling back to INBOX", imap_folder, resp)
             mail.select("INBOX")
 
-        # Only process emails received today or later — avoids replaying old backlog
-        since_str = date.today().strftime("%d-%b-%Y")  # e.g. "20-Apr-2026"
+        # Look back 3 days — dedup table (service_call_email_scans) prevents re-processing
+        since_str = (date.today() - timedelta(days=3)).strftime("%d-%b-%Y")
 
         # Build OR query across all configured senders
         if len(senders) == 1:
