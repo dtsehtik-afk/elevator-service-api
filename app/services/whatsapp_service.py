@@ -354,3 +354,38 @@ def notify_dispatcher_elevator_not_found(
     lines.append("\n⚠️ *הקריאה לא נפתחה במערכת — נא לטפל ידנית*")
 
     return notify_dispatcher("\n".join(lines))
+
+
+def send_after_hours_confirmation(caller_phone: str, caller_name: str, address: str, city: str) -> bool:
+    """Ask caller outside working hours if they approve the extra charge or want to defer."""
+    name_part = f" {caller_name}" if caller_name else ""
+    message = (
+        f"היי{name_part} 👋\n"
+        f"קיבלנו קריאת שירות עבור המעלית ב-{address}, {city}.\n\n"
+        f"⏰ שים לב — הגעת טכנאי *מחוץ לשעות העבודה* כרוכה בתשלום נוסף.\n\n"
+        f"בחר:\n"
+        f"1️⃣ *אני מאשר* — שלח טכנאי עכשיו (בתשלום)\n"
+        f"2️⃣ *דחה למחר* — נטפל בכך מחר בבוקר"
+    )
+    return _send_message(caller_phone, message)
+
+
+def send_after_hours_deferred(caller_phone: str, caller_name: str) -> bool:
+    """Confirm to caller that the call is deferred to tomorrow."""
+    name_part = f" {caller_name}" if caller_name else ""
+    message = (
+        f"תודה{name_part} 🙏\n"
+        f"הקריאה נקלטה ונטפל בה מחר בבוקר בתחילת שעות העבודה.\n"
+        f"לשאלות נוספות ניתן לפנות אלינו."
+    )
+    return _send_message(caller_phone, message)
+
+
+def send_after_hours_approved(caller_phone: str, caller_name: str) -> bool:
+    """Confirm to caller that a technician is on the way."""
+    name_part = f" {caller_name}" if caller_name else ""
+    message = (
+        f"תודה{name_part} ✅\n"
+        f"אנחנו מאתרים עבורך טכנאי תורן — תקבל עדכון בקרוב."
+    )
+    return _send_message(caller_phone, message)

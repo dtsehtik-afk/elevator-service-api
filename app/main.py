@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import get_settings
-from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import
+from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import, settings as settings_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -59,6 +59,14 @@ async def lifespan(app: FastAPI):
                 # elevators — management_company_id added after initial migration
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS management_company_id UUID REFERENCES management_companies(id) ON DELETE SET NULL",
                 "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
+                # after_hours_pending flag for caller approval flow
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS after_hours_pending BOOLEAN NOT NULL DEFAULT FALSE",
+                # system_settings key-value store
+                """CREATE TABLE IF NOT EXISTS system_settings (
+                    key VARCHAR(100) PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
                 # Remove service calls auto-created from inspection escalation (now silent flow)
                 "DELETE FROM service_calls WHERE reported_by = 'system | escalation' AND description LIKE '%ליקויי בודק%' AND status IN ('OPEN','ASSIGNED')",
             ]:
@@ -101,7 +109,7 @@ app.add_middleware(
 _API_ONLY_PREFIXES = (
     "/auth", "/docs", "/redoc", "/openapi", "/health",
     "/uploads", "/assets", "/webhooks", "/analytics",
-    "/schedule", "/buildings", "/contacts", "/app/",
+    "/schedule", "/buildings", "/contacts", "/app/", "/settings",
 )
 
 
@@ -138,6 +146,7 @@ app.include_router(management_companies.router)
 app.include_router(buildings.router)
 app.include_router(contacts.router)
 app.include_router(data_import.router)
+app.include_router(settings_router.router)
 
 
 @app.get("/health", tags=["Health"])

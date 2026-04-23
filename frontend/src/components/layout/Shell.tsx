@@ -21,7 +21,9 @@ const NAV_ITEMS = [
   { label: 'ייבוא נתונים', path: '/import', icon: '📥' },
 ]
 
-const ADMIN_NAV_ITEMS: { label: string; path: string; icon: string }[] = []
+const ADMIN_NAV_ITEMS = [
+  { label: 'הגדרות', path: '/settings', icon: '⚙️' },
+]
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [opened, { toggle }] = useDisclosure()
