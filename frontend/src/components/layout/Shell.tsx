@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   AppShell, Burger, Group, NavLink, Text, Avatar, Menu, ActionIcon,
-  Divider, Box, rem,
+  Divider, Box, rem, Button,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
@@ -89,6 +89,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           ))}
         </Box>
         <Divider mt="auto" mb="xs" />
+        <Button
+          variant="light"
+          color="blue"
+          fullWidth
+          mb="xs"
+          leftSection={<span>📱</span>}
+          onClick={() => navigate('/tech')}
+          style={{ borderRadius: 8 }}
+        >
+          מצב טכנאי
+        </Button>
         <Text size="xs" c="dimmed" ta="center">v1.0.0</Text>
       </AppShell.Navbar>
 

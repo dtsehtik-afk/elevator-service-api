@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -18,6 +18,9 @@ from app.auth.router import router as auth_router
 settings = get_settings()
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+
+# Resolved once at startup — used by the SPA middleware and static mounts
+_FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -86,6 +89,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── SPA fallback middleware ───────────────────────────────────────────────────
+# React uses history routing — on page refresh the browser sends a GET for the
+# current path (e.g. /calls). Without this middleware, FastAPI would match its
+# own /calls API route and return JSON, giving the user a blank/error screen.
+# We detect browser navigations by their Accept header (starts with text/html)
+# and serve index.html instead, letting the React Router handle the path.
+_API_ONLY_PREFIXES = (
+    "/auth", "/docs", "/redoc", "/openapi", "/health",
+    "/uploads", "/assets", "/webhooks", "/analytics",
+    "/schedule", "/buildings", "/contacts", "/app/",
+)
+
+
+@app.middleware("http")
+async def spa_browser_fallback(request: Request, call_next):
+    accept = request.headers.get("accept", "")
+    path   = request.url.path
+    if (
+        request.method == "GET"
+        and accept.startswith("text/html")
+        and not any(path.startswith(p) for p in _API_ONLY_PREFIXES)
+        and _FRONTEND_DIST.exists()
+    ):
+        file = _FRONTEND_DIST / path.lstrip("/")
+        if file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(_FRONTEND_DIST / "index.html"))
+    return await call_next(request)
+
+
 # Routers
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(elevators.router, prefix="/elevators", tags=["Elevators"])
@@ -111,8 +144,6 @@ def health_check():
 
 
 # ── Serve React frontend (must be last) ──────────────────────────────────────
-_FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
-
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 if _FRONTEND_DIST.exists():

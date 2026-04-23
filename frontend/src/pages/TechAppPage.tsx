@@ -402,7 +402,7 @@ function MapTab({ techId }: { techId: string }) {
 // ── Main App ───────────────────────────────────────────────────────────────
 function TechMain() {
   const qc = useQueryClient()
-  const { userName, clear } = useAuthStore()
+  const { userName, userRole, clear } = useAuthStore()
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const techId = me?.id ?? null
@@ -506,7 +506,15 @@ function TechMain() {
             <Text fw={700} size="lg">שלום, {userName} 👋</Text>
             <Text size="xs" opacity={0.85}>{gpsLabel}</Text>
           </div>
-          <Button size="xs" variant="white" color="blue" onClick={clear}>יציאה</Button>
+          <Group gap="xs">
+            {userRole && userRole !== 'TECHNICIAN' && (
+              <Button size="xs" variant="light" color="gray"
+                onClick={() => window.location.href = '/'}>
+                🏢 מצב מנהל
+              </Button>
+            )}
+            <Button size="xs" variant="white" color="blue" onClick={clear}>יציאה</Button>
+          </Group>
         </Group>
       </div>
 
