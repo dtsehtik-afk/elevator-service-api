@@ -8,6 +8,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { listMaintenance, createMaintenance, updateMaintenance } from '../api/maintenance'
+import { listCalls } from '../api/calls'
 import { listElevators } from '../api/elevators'
 import { listTechnicians } from '../api/technicians'
 import { MAINTENANCE_TYPE_LABELS, MAINTENANCE_STATUS_LABELS, MAINTENANCE_STATUS_COLORS } from '../utils/constants'
@@ -34,6 +35,18 @@ export default function MaintenancePage() {
   const { data: maintenance = [], isLoading } = useQuery({ queryKey: ['maintenance'], queryFn: () => listMaintenance() })
   const { data: elevators = [] } = useQuery({ queryKey: ['elevators'], queryFn: () => listElevators() })
   const { data: technicians = [] } = useQuery({ queryKey: ['technicians'], queryFn: listTechnicians })
+  const { data: maintCalls = [] } = useQuery({
+    queryKey: ['maint-calls'],
+    queryFn: () => listCalls({ fault_type: 'MAINTENANCE', status: 'OPEN', limit: 100 }),
+  })
+
+  // Inject blink animation once
+  if (typeof document !== 'undefined' && !document.getElementById('maint-blink-style')) {
+    const s = document.createElement('style')
+    s.id = 'maint-blink-style'
+    s.textContent = `@keyframes maint-blink { 0%,100%{background-color:rgba(255,50,50,0.08)} 50%{background-color:rgba(255,50,50,0.28)} }`
+    document.head.appendChild(s)
+  }
 
   const elevatorOptions = elevators.map(e => ({ value: e.id, label: `#${e.serial_number} — ${e.address}, ${e.city}` }))
   const techOptions = [
@@ -95,6 +108,48 @@ export default function MaintenancePage() {
         />
         <Text size="sm" c="dimmed">{filtered.length} רשומות</Text>
       </Group>
+
+      {maintCalls.length > 0 && (
+        <Paper withBorder radius="md" p="sm">
+          <Text fw={600} mb="xs">📋 קריאות טיפול מונע פתוחות ({maintCalls.length})</Text>
+          <Table highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>מעלית</Table.Th>
+                <Table.Th>תיאור</Table.Th>
+                <Table.Th>דחיפות</Table.Th>
+                <Table.Th>נפתח</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {maintCalls.map(c => {
+                const elev = elevators.find(e => e.id === c.elevator_id)
+                const isUrgent = c.priority === 'HIGH' || c.priority === 'CRITICAL'
+                const priorityColor = c.priority === 'LOW' ? 'green' : c.priority === 'MEDIUM' ? 'orange' : 'red'
+                const rowStyle: React.CSSProperties = isUrgent
+                  ? { animation: 'maint-blink 1.2s ease-in-out infinite' }
+                  : {}
+                return (
+                  <Table.Tr key={c.id} style={rowStyle}>
+                    <Table.Td>
+                      <Text size="sm">{elev ? `#${elev.serial_number} — ${elev.address}, ${elev.city}` : c.elevator_id.slice(0, 8)}</Text>
+                    </Table.Td>
+                    <Table.Td><Text size="sm">{c.description}</Text></Table.Td>
+                    <Table.Td>
+                      <Badge color={priorityColor} variant="light" size="sm">
+                        {c.priority === 'LOW' ? 'נמוך' : c.priority === 'MEDIUM' ? 'בינוני' : c.priority === 'HIGH' ? 'גבוה' : 'קריטי'}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="xs" c="dimmed">{new Date(c.created_at).toLocaleDateString('he-IL')}</Text>
+                    </Table.Td>
+                  </Table.Tr>
+                )
+              })}
+            </Table.Tbody>
+          </Table>
+        </Paper>
+      )}
 
       <Paper withBorder radius="md">
         {isLoading ? (
