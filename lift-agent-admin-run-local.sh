@@ -7,10 +7,18 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 # Backend
 echo "=== Starting backend on :8001 ==="
 cd "$ROOT/lift-agent-admin-backend"
+
 if [ ! -d ".venv" ]; then
+  # Ensure python3-venv is available
+  if ! python3 -m venv --help &>/dev/null; then
+    echo "Installing python3-venv..."
+    sudo apt-get install -y python3-venv python3-pip
+  fi
   python3 -m venv .venv
+  .venv/bin/pip install --upgrade pip -q
   .venv/bin/pip install -r requirements.txt
 fi
+
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
