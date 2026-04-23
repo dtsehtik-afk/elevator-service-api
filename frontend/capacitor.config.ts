@@ -6,7 +6,7 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   server: {
     androidScheme: 'https',
-    url: 'https://34-173-13-122.sslip.io',
+    url: 'https://lift-agent.com',
     cleartext: false,
   },
 }
