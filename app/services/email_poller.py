@@ -137,7 +137,7 @@ def _parse_with_gemini(body: str, api_key: str) -> Optional[dict]:
     try:
         import httpx
         resp = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={api_key}",
             json={
                 "system_instruction": {"parts": [{"text": _GEMINI_PROMPT}]},
                 "contents": [{"role": "user", "parts": [{"text": f"גוף המייל:\n\n{body}"}]}],
@@ -483,7 +483,7 @@ def poll_emails(db) -> int:
                     continue
 
                 if not fields.get("city") and not fields.get("address"):
-                    logger.warning("Could not extract address from email — skipping")
+                    logger.warning("Could not extract address — body preview: %s", body[:600])
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
