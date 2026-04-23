@@ -137,7 +137,7 @@ def _parse_with_gemini(body: str, api_key: str) -> Optional[dict]:
     try:
         import httpx
         resp = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={api_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
             json={
                 "system_instruction": {"parts": [{"text": _GEMINI_PROMPT}]},
                 "contents": [{"role": "user", "parts": [{"text": f"גוף המייל:\n\n{body}"}]}],
@@ -386,6 +386,15 @@ def _send_rescue_blast(db, fields: dict, caller_name: str, caller_phone: str, de
     logger.info("🚨 Rescue blast sent to %d technicians", len(technicians))
 
 
+def _record_as_scanned(db, message_id: str):
+    from app.models.service_call_email_scan import ServiceCallEmailScan
+    try:
+        db.add(ServiceCallEmailScan(message_id=message_id))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 # ── main poller ────────────────────────────────────────────────────────────────
 
 def poll_emails(db) -> int:
@@ -471,10 +480,16 @@ def poll_emails(db) -> int:
                 body = _extract_body(msg)
                 body = _html_to_text(body)
 
-                logger.info("📧 Email body (first 400 chars): %s", body[:400])
+                # Skip closure/summary notifications — not new service calls
+                _SKIP_PATTERNS = ["סגירת פנייה", "דו\"ח ריכוז", "דוח ריכוז", "שעת סיום טיפול", "האם הושג כונן"]
+                if any(p in body for p in _SKIP_PATTERNS):
+                    logger.info("📧 Skipping closure/summary email (not a new call)")
+                    _record_as_scanned(db, message_id)
+                    mail.store(mid, "+FLAGS", "\\Seen")
+                    continue
 
                 import time as _time
-                _time.sleep(2)  # avoid Gemini rate limit when processing multiple emails
+                _time.sleep(1)
                 fields = _parse_email(body, api_key=api_key)
 
                 if fields is None:
