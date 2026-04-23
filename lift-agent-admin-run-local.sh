@@ -4,12 +4,11 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# Backend
+# ── Python / venv ──────────────────────────────────────────────
 echo "=== Starting backend on :8001 ==="
 cd "$ROOT/lift-agent-admin-backend"
 
 if [ ! -d ".venv" ]; then
-  # Ensure python3-venv is available
   if ! python3 -m venv --help &>/dev/null; then
     echo "Installing python3-venv..."
     sudo apt-get install -y python3-venv python3-pip
@@ -28,7 +27,13 @@ sleep 2
 # Seed first admin user (ignore error if already exists)
 curl -s -X POST http://localhost:8001/auth/seed-admin | python3 -m json.tool || true
 
-# Frontend
+# ── Node / npm ─────────────────────────────────────────────────
+if ! command -v npm &>/dev/null; then
+  echo "Installing Node.js 20 (LTS)..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+fi
+
 echo ""
 echo "=== Starting frontend on :5174 ==="
 cd "$ROOT/lift-agent-admin-frontend"
