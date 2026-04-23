@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
             # elevators — management_company_id added after initial migration
             "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS management_company_id UUID REFERENCES management_companies(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
+            # Remove service calls that were auto-created from inspection deficiency escalation.
+            # These are now handled through the inspection-reports dashboard (silent flow).
+            "DELETE FROM service_calls WHERE reported_by = 'system | escalation' AND description LIKE '%ליקויי בודק%' AND status IN ('OPEN','ASSIGNED')",
         ]:
             _conn.execute(_text(_col_sql))
         _conn.commit()

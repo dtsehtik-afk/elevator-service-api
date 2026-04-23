@@ -59,56 +59,113 @@ def _transcribe_voice(msg_data: dict, settings) -> str:
 
 
 def _run_nightly_maintenance():
-    """Nightly job: mark overdue maintenances, auto-open service calls for 5-day-overdue elevators."""
+    """
+    Nightly job: mark overdue maintenances + tiered maintenance call creation.
+
+    15 days  → LOW priority, silent (no WhatsApp)
+    10 days  → MEDIUM priority, silent
+    5 days   → HIGH priority + urgent WhatsApp to dispatcher
+    overdue  → CRITICAL priority + urgent WhatsApp (once)
+    """
     from datetime import date, timedelta
     from app.database import SessionLocal
     from app.services.maintenance_service import mark_overdue_maintenances
     from app.models.elevator import Elevator
     from app.models.service_call import ServiceCall
+    from app.services.whatsapp_service import notify_dispatcher
 
     db = SessionLocal()
     try:
         overdue_count = mark_overdue_maintenances(db)
 
-        # Auto-open service call for elevators ≤5 days until next service (or already overdue)
         today = date.today()
-        threshold = today + timedelta(days=5)
-        critical_elevators = (
+        threshold_15 = today + timedelta(days=15)
+
+        upcoming = (
             db.query(Elevator)
             .filter(
                 Elevator.next_service_date.isnot(None),
-                Elevator.next_service_date <= threshold,
+                Elevator.next_service_date <= threshold_15,
                 Elevator.status == "ACTIVE",
             )
             .all()
         )
+
+        _PRANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
         opened = 0
-        for elev in critical_elevators:
-            # Skip if there's already an open/assigned maintenance call for this elevator
+        upgraded = 0
+        notified = 0
+
+        for elev in upcoming:
+            days_left = (elev.next_service_date - today).days
+
+            if days_left <= 0:
+                priority = "CRITICAL"
+                should_notify = True
+            elif days_left <= 5:
+                priority = "HIGH"
+                should_notify = True
+            elif days_left <= 10:
+                priority = "MEDIUM"
+                should_notify = False
+            else:
+                priority = "LOW"
+                should_notify = False
+
             existing = db.query(ServiceCall).filter(
                 ServiceCall.elevator_id == elev.id,
                 ServiceCall.fault_type == "MAINTENANCE",
                 ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]),
             ).first()
+
+            addr = f"{elev.address}, {elev.city}"
+            days_str = (
+                f"מתוכנן ל-{elev.next_service_date.strftime('%d/%m/%Y')}"
+                if days_left >= 0
+                else f"באיחור {-days_left} ימים"
+            )
+
             if existing:
+                if _PRANK.get(priority, 2) < _PRANK.get(existing.priority, 2):
+                    existing.priority = priority
+                    db.commit()
+                    upgraded += 1
+                if should_notify and "[maint_notified]" not in (existing.description or ""):
+                    notify_dispatcher(
+                        f"🔴 *טיפול מונע דחוף* — {addr}\n"
+                        f"⏳ {days_str}\n"
+                        f"📅 {elev.next_service_date.strftime('%d/%m/%Y')}"
+                    )
+                    existing.description = (existing.description or "") + " [maint_notified]"
+                    db.commit()
+                    notified += 1
                 continue
-            days_left = (elev.next_service_date - today).days
+
             sc = ServiceCall(
                 elevator_id=elev.id,
                 reported_by="מערכת — טיפול מונע",
-                description=f"טיפול מונע {'מתוכנן ל-' + elev.next_service_date.strftime('%d/%m/%Y') if days_left >= 0 else 'באיחור ' + str(-days_left) + ' ימים'}",
-                priority="HIGH" if days_left <= 0 else "MEDIUM",
+                description=f"טיפול מונע {days_str}",
+                priority=priority,
                 fault_type="MAINTENANCE",
                 status="OPEN",
             )
             db.add(sc)
-            opened += 1
-        if opened:
             db.commit()
+            opened += 1
+
+            if should_notify:
+                notify_dispatcher(
+                    f"🔴 *טיפול מונע דחוף* — {addr}\n"
+                    f"⏳ {days_str}\n"
+                    f"📅 {elev.next_service_date.strftime('%d/%m/%Y')}"
+                )
+                sc.description += " [maint_notified]"
+                db.commit()
+                notified += 1
 
         logger.info(
-            "Nightly maintenance: %d overdue marked, %d maintenance calls opened",
-            overdue_count, opened,
+            "Nightly maintenance: %d overdue, %d calls opened, %d upgraded, %d notified",
+            overdue_count, opened, upgraded, notified,
         )
     except Exception as exc:
         logger.error("Nightly maintenance job failed: %s", exc)
@@ -1572,25 +1629,27 @@ def _scan_drive_inspections():
 
 
 _DEFICIENCY_THRESHOLDS = [
-    # (days_since_inspection, color, label, open_call)
-    (7,   "🟡", "צהוב — יש לטפל תוך שבוע",    False),
-    (14,  "🟠", "כתום — יש לטפל בדחיפות",      False),
-    (30,  "🔴", "אדום — נדרש טיפול מיידי!",     True),
+    # (days_since_inspection, color, label)
+    (7,   "🟡", "צהוב — יש לטפל תוך שבוע"),
+    (14,  "🟠", "כתום — יש לטפל בדחיפות"),
+    (30,  "🔴", "אדום — נדרש טיפול מיידי!"),
 ]
 
 
 def _check_inspection_deficiency_escalation():
     """
     Runs every 6 hours. For open inspection reports with deficiencies:
-    - 7+ days: yellow warning to dispatcher
-    - 14+ days: orange urgent to dispatcher
-    - 30+ days: red — auto-open a service call
+    - 7+ days: yellow warning to dispatcher (WhatsApp)
+    - 14+ days: orange urgent to dispatcher (WhatsApp)
+    - 30+ days: red urgent to dispatcher (WhatsApp only — no auto service-call)
+
+    Inspection deficiencies are tracked and resolved through the inspection-reports
+    dashboard, not through regular service calls.
     """
-    from datetime import date, timedelta
+    from datetime import date
     from app.database import SessionLocal
     from app.models.inspection_report import InspectionReport
     from app.models.elevator import Elevator
-    from app.models.service_call import ServiceCall
     from app.services.whatsapp_service import notify_dispatcher
 
     db = SessionLocal()
@@ -1614,58 +1673,26 @@ def _check_inspection_deficiency_escalation():
 
             addr = f"{elevator.address}, {elevator.city}"
             matched_threshold = None
-            for threshold_days, color, label, should_open_call in _DEFICIENCY_THRESHOLDS:
+            for threshold_days, color, label in _DEFICIENCY_THRESHOLDS:
                 if days_since >= threshold_days:
-                    matched_threshold = (threshold_days, color, label, should_open_call)
+                    matched_threshold = (threshold_days, color, label)
 
             if not matched_threshold:
                 continue
 
-            _, color, label, should_open_call = matched_threshold
-
-            # Auto-open urgent service call at 30-day threshold
-            if should_open_call:
-                already_open = db.query(ServiceCall).filter(
-                    ServiceCall.elevator_id == elevator.id,
-                    ServiceCall.status.notin_(["CLOSED", "RESOLVED"]),
-                    ServiceCall.fault_type == "OTHER",
-                    ServiceCall.description.like("%ליקויי בודק%"),
-                ).first()
-                if not already_open:
-                    new_call = ServiceCall(
-                        elevator_id=elevator.id,
-                        fault_type="OTHER",
-                        priority="HIGH",
-                        status="OPEN",
-                        reported_by="system | escalation",
-                        description=(
-                            f"ליקויי בודק ממתינים לטיפול {days_since} ימים "
-                            f"(מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}). "
-                            f"ליקויים: {report.deficiency_count}"
-                        ),
-                    )
-                    db.add(new_call)
-                    db.commit()
-                    notify_dispatcher(
-                        f"🔴 *הסלמה — ליקויי בודק* ב{addr}\n"
-                        f"⏳ {days_since} ימים ללא טיפול\n"
-                        f"⚠️ {report.deficiency_count} ליקויים מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}\n"
-                        f"📋 קריאה דחופה נפתחה אוטומטית"
-                    )
-                    logger.warning("🔴 Auto-opened escalation call for report %s (%s, %d days)", report.id, addr, days_since)
-            else:
-                # Send color warning to dispatcher (at most once per week per report)
-                last_note = report.notes or ""
-                marker = f"[escalation_{matched_threshold[0]}d]"
-                if marker not in last_note:
-                    notify_dispatcher(
-                        f"{color} *ליקויי בודק ממתינים* ב{addr}\n"
-                        f"⏳ {days_since} ימים ללא טיפול\n"
-                        f"🔧 {report.deficiency_count} ליקויים מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}\n"
-                        f"📊 {label}"
-                    )
-                    report.notes = (last_note + f"\n{marker}").strip()
-                    db.commit()
+            threshold_days, color, label = matched_threshold
+            last_note = report.notes or ""
+            marker = f"[escalation_{threshold_days}d]"
+            if marker not in last_note:
+                notify_dispatcher(
+                    f"{color} *ליקויי בודק ממתינים* ב{addr}\n"
+                    f"⏳ {days_since} ימים ללא טיפול\n"
+                    f"🔧 {report.deficiency_count} ליקויים מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}\n"
+                    f"📊 {label}\n"
+                    f"🔗 טפל בדשבורד › דוחות בודק"
+                )
+                report.notes = (last_note + f"\n{marker}").strip()
+                db.commit()
 
     except Exception as exc:
         logger.error("Inspection escalation check failed: %s", exc)

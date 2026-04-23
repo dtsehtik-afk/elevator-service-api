@@ -190,6 +190,44 @@ def rank_technicians(
     return scored
 
 
+def _elevator_context(db: Session, elevator_id) -> str:
+    """
+    Return a short context string about open inspection deficiencies and upcoming
+    maintenance for the given elevator — appended to assignment WhatsApp messages.
+    """
+    from datetime import date, timedelta
+    from app.models.inspection_report import InspectionReport
+
+    lines = []
+
+    # Open inspection deficiencies
+    open_reports = (
+        db.query(InspectionReport)
+        .filter(
+            InspectionReport.elevator_id == elevator_id,
+            InspectionReport.report_status.in_(["OPEN", "PARTIAL"]),
+        )
+        .all()
+    )
+    if open_reports:
+        total_def = sum(r.deficiency_count or 0 for r in open_reports)
+        lines.append(f"⚠️ *ליקויי בודק פתוחים:* {total_def} ליקויים — טפל בדשבורד")
+
+    # Upcoming or overdue maintenance
+    elevator = db.query(Elevator).filter(Elevator.id == elevator_id).first()
+    if elevator and elevator.next_service_date:
+        today = date.today()
+        days_left = (elevator.next_service_date - today).days
+        if days_left < 0:
+            lines.append(f"🔧 *טיפול מונע:* באיחור {-days_left} ימים!")
+        elif days_left == 0:
+            lines.append("🔧 *טיפול מונע:* מתוכנן להיום!")
+        elif days_left <= 15:
+            lines.append(f"🔧 *טיפול מונע:* עוד {days_left} ימים")
+
+    return "\n".join(lines)
+
+
 def assign_with_confirmation(
     db: Session,
     service_call: ServiceCall,
@@ -251,6 +289,10 @@ def assign_with_confirmation(
         db.refresh(assignment)
         phone = tech.whatsapp_number or tech.phone
         if phone:
+            ctx = _elevator_context(db, elevator.id)
+            desc = service_call.description or ""
+            if ctx:
+                desc = f"{desc}\n{ctx}".strip() if desc else ctx
             whatsapp_service.notify_technician_auto_assigned(
                 phone=phone,
                 technician_name=tech.name,
@@ -261,7 +303,7 @@ def assign_with_confirmation(
                 caller_name=caller_name,
                 caller_phone=caller_phone,
                 travel_minutes=best.travel_minutes,
-                description=service_call.description or "",
+                description=desc,
             )
         return assignment
 
@@ -301,6 +343,10 @@ def assign_with_confirmation(
 
         phone = tech.whatsapp_number or tech.phone
         if phone:
+            ctx = _elevator_context(db, elevator.id)
+            desc = service_call.description or ""
+            if ctx:
+                desc = f"{desc}\n{ctx}".strip() if desc else ctx
             whatsapp_service.notify_technician_new_call(
                 phone=phone,
                 technician_name=tech.name,
@@ -312,7 +358,7 @@ def assign_with_confirmation(
                 caller_name=caller_name,
                 caller_phone=caller_phone,
                 travel_minutes=candidate.travel_minutes,
-                description=service_call.description or "",
+                description=desc,
                 tech_id=str(tech.id),
                 recommended_tech_name=recommended_name,
                 lat=elevator.latitude,

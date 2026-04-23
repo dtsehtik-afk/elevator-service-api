@@ -108,8 +108,28 @@ def technician_portal(tech_id: str, db: Session = Depends(get_db)):
         call_html = '<div class="card" style="text-align:center;color:#888;padding:30px">אין קריאות שירות פעילות</div>'
 
     # ── Section 2: Preventive maintenance ─────────────────────────────────────
+    import uuid as _uuid_mod
+    from app.models.maintenance import MaintenanceSchedule
+
     today = date.today()
-    upcoming = (
+    tid_uuid = _uuid_mod.UUID(tech_id)
+
+    # A) Scheduled maintenance records assigned to this technician (next 30 days)
+    tech_schedules = (
+        db.query(MaintenanceSchedule)
+        .filter(
+            MaintenanceSchedule.technician_id == tid_uuid,
+            MaintenanceSchedule.scheduled_date >= today,
+            MaintenanceSchedule.scheduled_date <= today + timedelta(days=30),
+            MaintenanceSchedule.status == "SCHEDULED",
+        )
+        .order_by(MaintenanceSchedule.scheduled_date)
+        .limit(20)
+        .all()
+    )
+
+    # B) All elevators with next_service_date within 15 days (company-wide reminder)
+    upcoming_elevators = (
         db.query(Elevator)
         .filter(
             Elevator.next_service_date.isnot(None),
@@ -121,26 +141,54 @@ def technician_portal(tech_id: str, db: Session = Depends(get_db)):
         .all()
     )
 
-    if upcoming:
-        maint_rows = ""
-        for e in upcoming:
-            days_left = (e.next_service_date - today).days
-            if days_left <= 5:
-                color = "#dc2626"; bg = "#fee2e2"; dot = "🔴"
-            elif days_left <= 10:
-                color = "#ea580c"; bg = "#ffedd5"; dot = "🟠"
-            else:
-                color = "#16a34a"; bg = "#f0fdf4"; dot = "🟢"
-            maint_rows += (
-                f'<div style="background:{bg};border-radius:8px;padding:10px 12px;margin-bottom:8px">'
-                f'<div style="font-weight:600;color:{color}">{dot} {e.address}, {e.city}</div>'
-                f'<div style="font-size:.85rem;color:#555;margin-top:3px">'
-                f'טיפול בעוד {days_left} ימים · {e.next_service_date.strftime("%d/%m/%Y")}</div>'
-                f'</div>'
-            )
+    maint_rows = ""
+
+    # Personal schedule entries first
+    for ms in tech_schedules:
+        e = db.query(Elevator).filter(Elevator.id == ms.elevator_id).first()
+        if not e:
+            continue
+        days_left = (ms.scheduled_date - today).days
+        if days_left == 0:
+            color = "#dc2626"; bg = "#fee2e2"; dot = "🔴"
+        elif days_left <= 5:
+            color = "#ea580c"; bg = "#ffedd5"; dot = "🟠"
+        else:
+            color = "#16a34a"; bg = "#f0fdf4"; dot = "🟢"
+        type_he = {"QUARTERLY": "רבעוני", "SEMI_ANNUAL": "חצי שנתי", "ANNUAL": "שנתי", "INSPECTION": "ביקורת"}.get(ms.maintenance_type, ms.maintenance_type)
+        maint_rows += (
+            f'<div style="background:{bg};border-radius:8px;padding:10px 12px;margin-bottom:8px;border-right:3px solid {color}">'
+            f'<div style="font-weight:600;color:{color}">{dot} {e.address}, {e.city}</div>'
+            f'<div style="font-size:.85rem;color:#555;margin-top:3px">'
+            f'📅 {ms.scheduled_date.strftime("%d/%m/%Y")} · {type_he}'
+            f'{" · עוד " + str(days_left) + " ימים" if days_left > 0 else " · היום!"}'
+            f'</div></div>'
+        )
+
+    # Company-wide upcoming service dates (deduplicate elevators already in personal schedule)
+    scheduled_elevator_ids = {ms.elevator_id for ms in tech_schedules}
+    for e in upcoming_elevators:
+        if e.id in scheduled_elevator_ids:
+            continue
+        days_left = (e.next_service_date - today).days
+        if days_left <= 5:
+            color = "#dc2626"; bg = "#fee2e2"; dot = "🔴"
+        elif days_left <= 10:
+            color = "#ea580c"; bg = "#ffedd5"; dot = "🟠"
+        else:
+            color = "#16a34a"; bg = "#f0fdf4"; dot = "🟢"
+        maint_rows += (
+            f'<div style="background:{bg};border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+            f'<div style="font-weight:600;color:{color}">{dot} {e.address}, {e.city}</div>'
+            f'<div style="font-size:.85rem;color:#555;margin-top:3px">'
+            f'טיפול בעוד {days_left} ימים · {e.next_service_date.strftime("%d/%m/%Y")}'
+            f'</div></div>'
+        )
+
+    if maint_rows:
         maint_html = f'<div class="section-header">🛠️ טיפול מונע קרוב</div><div class="card">{maint_rows}</div>'
     else:
-        maint_html = '<div class="section-header">🛠️ טיפול מונע קרוב</div><div class="card" style="text-align:center;color:#888;padding:20px">אין טיפולים קרובים ב-15 הימים הבאים</div>'
+        maint_html = '<div class="section-header">🛠️ טיפול מונע קרוב</div><div class="card" style="text-align:center;color:#888;padding:20px">אין טיפולים מתוכננים ב-15 הימים הבאים</div>'
 
     # ── Section 3: Open inspection reports ────────────────────────────────────
     open_reports = (

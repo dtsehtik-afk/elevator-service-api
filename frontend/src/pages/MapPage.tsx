@@ -84,6 +84,13 @@ export default function MapPage() {
     }
   }, [])
 
+  // Recalculate map size when loading completes (container may have been 0-sized on init)
+  useEffect(() => {
+    if (mapReady && mapRef.current && !isLoading) {
+      setTimeout(() => mapRef.current?.invalidateSize(), 50)
+    }
+  }, [isLoading, mapReady])
+
   // Update markers when data/filters change
   useEffect(() => {
     if (!mapReady || !mapRef.current) return
@@ -157,9 +164,13 @@ export default function MapPage() {
         {noGeo > 0 && <Text size="xs" c="dimmed">{noGeo} מעליות ללא קואורדינטות לא מוצגות</Text>}
       </Group>
 
-      <Paper withBorder radius="md" style={{ overflow: 'hidden' }}>
-        {isLoading && <Center h={500}><Loader /></Center>}
-        <Box ref={containerRef} style={{ height: 600, width: '100%', display: isLoading ? 'none' : 'block' }} />
+      <Paper withBorder radius="md" style={{ overflow: 'hidden', position: 'relative' }}>
+        {isLoading && (
+          <Center style={{ position: 'absolute', inset: 0, zIndex: 1000, background: 'rgba(255,255,255,0.7)' }}>
+            <Loader />
+          </Center>
+        )}
+        <Box ref={containerRef} style={{ height: 600, width: '100%' }} />
       </Paper>
     </Stack>
   )
