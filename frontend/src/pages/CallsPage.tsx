@@ -8,8 +8,9 @@ import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall, resetAndReassignCall } from '../api/calls'
-import { listElevators } from '../api/elevators'
+import { listElevators, updateElevator } from '../api/elevators'
 import client from '../api/client'
+import LocationPickerModal from '../components/LocationPickerModal'
 import { listTechnicians } from '../api/technicians'
 import { useAuthStore } from '../stores/authStore'
 import {
@@ -67,6 +68,8 @@ export default function CallsPage() {
   const [assignNotes, setAssignNotes] = useState('')
   const [changeElevOpened, { open: openChangeElev, close: closeChangeElev }] = useDisclosure()
   const [changeElevId, setChangeElevId] = useState<string | null>(null)
+  const [locationPickerElevId, setLocationPickerElevId] = useState<string | null>(null)
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false)
   const [addElevOpened, { open: openAddElev, close: closeAddElev }] = useDisclosure()
   const [addElevForm, setAddElevForm] = useState({
     address: '', city: '', contact_phone: '', building_name: '', floor_count: 1, notes: '',
@@ -246,6 +249,18 @@ export default function CallsPage() {
     onError: () => notifications.show({ message: 'שגיאה במחיקה', color: 'red' }),
   })
 
+  const saveLocationMutation = useMutation({
+    mutationFn: ({ elevId, lat, lng }: { elevId: string; lat: number; lng: number }) =>
+      updateElevator(elevId, { latitude: lat, longitude: lng } as any),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['elevators'] })
+      setLocationPickerOpen(false)
+      setLocationPickerElevId(null)
+      notifications.show({ message: '📍 מיקום עודכן', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשמירת מיקום', color: 'red' }),
+  })
+
   function openDetailModal(call: ServiceCall) {
     setDetailCall(call as CallDetail)
     openDetail()
@@ -404,6 +419,10 @@ export default function CallsPage() {
                     <Text size="sm" c="dimmed" w={100}>📍 כתובת</Text>
                     <Text size="sm" fw={600}>{detail.elevator_address}, {detail.elevator_city}</Text>
                     {detail.elevator_serial && <Text size="xs" c="dimmed">#{detail.elevator_serial}</Text>}
+                    <Button
+                      size="xs" variant="subtle" color="teal" px={6}
+                      onClick={() => { setLocationPickerElevId(detail.elevator_id); setLocationPickerOpen(true) }}
+                    >📍 עדכן מיקום</Button>
                   </Group>
                 )}
                 <Group gap="xs">
@@ -848,6 +867,13 @@ export default function CallsPage() {
           </Group>
         </Stack>
       </Modal>
+
+      <LocationPickerModal
+        opened={locationPickerOpen}
+        onClose={() => { setLocationPickerOpen(false); setLocationPickerElevId(null) }}
+        onSave={(lat, lng) => locationPickerElevId && saveLocationMutation.mutate({ elevId: locationPickerElevId, lat, lng })}
+        loading={saveLocationMutation.isPending}
+      />
     </Stack>
   )
 }

@@ -13,6 +13,7 @@ import { notifications } from '@mantine/notifications'
 import { getElevator, updateElevator, getElevatorCalls } from '../api/elevators'
 import client from '../api/client'
 import { Elevator } from '../types'
+import LocationPickerModal from '../components/LocationPickerModal'
 import {
   ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS,
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -145,6 +146,7 @@ export default function ElevatorDetailPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
   const [addToGroupOpen, setAddToGroupOpen] = useState(false)
   const [elevatorSearch, setElevatorSearch] = useState('')
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false)
 
   const set = (key: string, value: any) => setForm(s => ({ ...s, [key]: value }))
   const dateSet = (key: string, d: Date | null) => set(key, toISODate(d))
@@ -308,6 +310,17 @@ export default function ElevatorDetailPage() {
       setSelectedCompanyId(null)
       notifications.show({ message: 'שיוך חברת הניהול עודכן', color: 'green' })
     },
+  })
+
+  const locationMutation = useMutation({
+    mutationFn: ({ lat, lng }: { lat: number; lng: number }) =>
+      updateElevator(id!, { latitude: lat, longitude: lng } as any),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['elevator', id] })
+      setLocationPickerOpen(false)
+      notifications.show({ message: '📍 מיקום עודכן בהצלחה', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשמירת מיקום', color: 'red' }),
   })
 
   const addElevatorToGroupMutation = useMutation({
@@ -692,6 +705,24 @@ export default function ElevatorDetailPage() {
                 ) : elevator.notes ? (
                   <Field label="הערות" value={elevator.notes} />
                 ) : null}
+              </Grid.Col>
+
+              {/* Location */}
+              <Grid.Col span={12}>
+                <Divider label="מיקום גיאוגרפי" labelPosition="right" mt="sm" mb="xs" />
+                <Group gap="sm" align="center">
+                  {elevator.latitude && elevator.longitude ? (
+                    <>
+                      <Text size="sm" c="dimmed">📍 {elevator.latitude.toFixed(5)}, {elevator.longitude.toFixed(5)}</Text>
+                      <Anchor size="xs" href={`https://waze.com/ul?ll=${elevator.latitude},${elevator.longitude}&navigate=yes`} target="_blank">🚘 Waze</Anchor>
+                    </>
+                  ) : (
+                    <Text size="sm" c="dimmed">אין מיקום מוגדר</Text>
+                  )}
+                  <Button size="xs" variant="light" color="teal" onClick={() => setLocationPickerOpen(true)}>
+                    📍 {elevator.latitude ? 'עדכן מיקום' : 'הוסף מיקום'}
+                  </Button>
+                </Group>
               </Grid.Col>
 
               {/* Group & management company checkboxes */}
@@ -1214,6 +1245,15 @@ export default function ElevatorDetailPage() {
           </Stack>
         </Tabs.Panel>
       </Tabs>
+
+      <LocationPickerModal
+        opened={locationPickerOpen}
+        onClose={() => setLocationPickerOpen(false)}
+        onSave={(lat, lng) => locationMutation.mutate({ lat, lng })}
+        initialLat={elevator.latitude}
+        initialLng={elevator.longitude}
+        loading={locationMutation.isPending}
+      />
     </Stack>
   )
 }
