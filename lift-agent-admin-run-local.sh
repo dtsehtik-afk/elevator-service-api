@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # Backend
 echo "=== Starting backend on :8001 ==="
-cd "$ROOT/backend"
+cd "$ROOT/lift-agent-admin-backend"
 if [ ! -d ".venv" ]; then
   python3 -m venv .venv
   .venv/bin/pip install -r requirements.txt
@@ -23,7 +23,7 @@ curl -s -X POST http://localhost:8001/auth/seed-admin | python3 -m json.tool || 
 # Frontend
 echo ""
 echo "=== Starting frontend on :5174 ==="
-cd "$ROOT/frontend"
+cd "$ROOT/lift-agent-admin-frontend"
 if [ ! -d "node_modules" ]; then
   npm install
 fi
