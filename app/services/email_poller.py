@@ -419,25 +419,23 @@ def poll_emails(db) -> int:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(user, password)
 
-        # Select folder — quoted to handle spaces in Gmail folder names
-        status, resp = mail.select(f'"{imap_folder}"')
-        if status != "OK":
-            # Fallback to INBOX if the configured folder doesn't exist
-            logger.warning("📧 Could not select folder '%s' (%s) — falling back to INBOX", imap_folder, resp)
-            mail.select("INBOX")
-
-        # Look back 3 days — dedup table (service_call_email_scans) prevents re-processing
+        # Look back 3 days — dedup table prevents re-processing
         since_str = (date.today() - timedelta(days=3)).strftime("%d-%b-%Y")
-
-        # Fetch ALL emails since the lookback date — filter by sender in Python.
-        # Gmail Workspace IMAP FROM search can be unreliable; Python filtering is safer.
-        _, all_ids = mail.search(None, f'SINCE {since_str}')
-        total_all = len(all_ids[0].split()) if all_ids[0] else 0
-        logger.warning("📧 [%s] since %s: %d total emails (will filter by sender in Python)",
-                       imap_folder, since_str, total_all)
-
         senders_lower = [s.lower() for s in senders]
-        msg_ids = all_ids[0].split()
+
+        # Scan both the configured folder AND Spam (beepertalk emails can end up in spam)
+        folders_to_scan = [imap_folder, "[Gmail]/Spam"]
+        msg_ids = []
+        for folder in folders_to_scan:
+            status, resp = mail.select(f'"{folder}"', readonly=False)
+            if status != "OK":
+                logger.debug("📧 Folder '%s' not accessible — skipping", folder)
+                continue
+            _, all_ids = mail.search(None, f'SINCE {since_str}')
+            folder_ids = all_ids[0].split() if all_ids[0] else []
+            logger.warning("📧 [%s] since %s: %d emails", folder, since_str, len(folder_ids))
+            msg_ids.extend([(mid, folder) for mid in folder_ids])
+
         if not msg_ids:
             mail.logout()
             return 0
@@ -447,8 +445,10 @@ def poll_emails(db) -> int:
 
         from app.models.service_call_email_scan import ServiceCallEmailScan
 
-        for mid in msg_ids:
+        for mid, folder in msg_ids:
             try:
+                # Re-select folder in case last iteration was a different one
+                mail.select(f'"{folder}"', readonly=False)
                 _, data = mail.fetch(mid, "(RFC822)")
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
@@ -456,7 +456,6 @@ def poll_emails(db) -> int:
                 # Filter by sender in Python (more reliable than IMAP FROM search on Workspace)
                 from_header = msg.get("From", "").lower()
                 if not any(s in from_header for s in senders_lower):
-                    logger.info("📧 Skipping non-matching sender: %s", msg.get("From", "")[:80])
                     continue
 
                 # Skip already-processed emails (by Message-ID, regardless of SEEN flag)
