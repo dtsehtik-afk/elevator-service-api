@@ -25,7 +25,8 @@ def test_create_service_call(client, admin_token, sample_elevator):
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert data["status"] == "OPEN"
+    # Auto-assignment may run immediately — accept OPEN or ASSIGNED
+    assert data["status"] in ("OPEN", "ASSIGNED")
     assert data["is_recurring"] is False
 
 

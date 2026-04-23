@@ -29,6 +29,10 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def create_tables():
     """Create all tables once per test session."""
     Base.metadata.create_all(bind=engine)
+    # Disable rate limiting so repeated login calls in tests don't get blocked
+    app.state.limiter.enabled = False
+    from app.auth import router as auth_module
+    auth_module._limiter.enabled = False
     yield
     Base.metadata.drop_all(bind=engine)
 

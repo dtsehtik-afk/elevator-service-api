@@ -2,8 +2,8 @@
 import uuid
 from datetime import date, datetime
 from typing import Optional
-from sqlalchemy import Date, DateTime, Float, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Date, DateTime, Float, Integer, JSON, String, Text, func
+from sqlalchemy.types import Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -11,9 +11,9 @@ from app.database import Base
 class InspectionReport(Base):
     __tablename__ = "inspection_reports"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    elevator_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
-    suggested_elevator_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    elevator_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    suggested_elevator_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="upload")  # "email" | "upload"
     file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -25,8 +25,8 @@ class InspectionReport(Base):
     result: Mapped[str] = mapped_column(String(10), nullable=False, default="UNKNOWN")  # PASS | FAIL | UNKNOWN
     inspector_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     deficiency_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    deficiencies: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    service_call_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    deficiencies: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    service_call_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
     match_status: Mapped[str] = mapped_column(String(20), nullable=False, default="AUTO_MATCHED")
     match_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -34,7 +34,7 @@ class InspectionReport(Base):
     # Report work status: NA (clean) | OPEN (has deficiencies) | PARTIAL | CLOSED
     report_status: Mapped[str] = mapped_column(String(20), nullable=False, default="NA")
     # Technician who claimed this report for remediation
-    assigned_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    assigned_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
     # Google Drive file ID — when set, file_path is ignored and Drive URL is used
     drive_file_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 

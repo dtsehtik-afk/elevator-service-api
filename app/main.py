@@ -32,34 +32,37 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)  # creates any missing tables
     Path("uploads/elevators").mkdir(parents=True, exist_ok=True)
     Path("uploads/inspections").mkdir(parents=True, exist_ok=True)
-    # Incremental migrations for inspection_reports columns
+    # Incremental migrations — PostgreSQL only (skipped for SQLite in tests)
     from sqlalchemy import text as _text
     with engine.connect() as _conn:
-        for _col_sql in [
-            # inspection_reports
-            "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS file_path VARCHAR(500)",
-            "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS report_status VARCHAR(20) NOT NULL DEFAULT 'NA'",
-            "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS assigned_technician_id UUID",
-            "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS drive_file_id VARCHAR(200)",
-            # management_companies — caller_phones may be JSONB (created by create_all) or missing
-            "ALTER TABLE management_companies ADD COLUMN IF NOT EXISTS caller_phones TEXT[] DEFAULT '{}'",
-            # Fix: if column was created as JSONB by create_all, convert to TEXT[]
-            """DO $$ BEGIN
-                IF (SELECT data_type FROM information_schema.columns
-                    WHERE table_name='management_companies' AND column_name='caller_phones') = 'jsonb'
-                THEN
-                    ALTER TABLE management_companies ALTER COLUMN caller_phones
-                    TYPE TEXT[] USING ARRAY(SELECT jsonb_array_elements_text(caller_phones));
-                END IF;
-            END $$""",
-            # elevators — management_company_id added after initial migration
-            "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS management_company_id UUID REFERENCES management_companies(id) ON DELETE SET NULL",
-            "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
-            # Remove service calls that were auto-created from inspection deficiency escalation.
-            # These are now handled through the inspection-reports dashboard (silent flow).
-            "DELETE FROM service_calls WHERE reported_by = 'system | escalation' AND description LIKE '%ליקויי בודק%' AND status IN ('OPEN','ASSIGNED')",
-        ]:
-            _conn.execute(_text(_col_sql))
+        if engine.dialect.name == "postgresql":
+            for _col_sql in [
+                # inspection_reports
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS file_path VARCHAR(500)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS report_status VARCHAR(20) NOT NULL DEFAULT 'NA'",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS assigned_technician_id UUID",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS drive_file_id VARCHAR(200)",
+                # management_companies — caller_phones may be missing
+                "ALTER TABLE management_companies ADD COLUMN IF NOT EXISTS caller_phones TEXT[] DEFAULT '{}'",
+                # Fix: if column was created as JSONB by create_all, convert to TEXT[]
+                # Uses a temp-column swap because USING with a subquery is not allowed in ALTER TABLE
+                """DO $$ BEGIN
+                    IF (SELECT data_type FROM information_schema.columns
+                        WHERE table_name='management_companies' AND column_name='caller_phones') = 'jsonb'
+                    THEN
+                        ALTER TABLE management_companies ADD COLUMN caller_phones_new TEXT[] DEFAULT '{}';
+                        UPDATE management_companies SET caller_phones_new = ARRAY(SELECT jsonb_array_elements_text(caller_phones));
+                        ALTER TABLE management_companies DROP COLUMN caller_phones;
+                        ALTER TABLE management_companies RENAME COLUMN caller_phones_new TO caller_phones;
+                    END IF;
+                END $$""",
+                # elevators — management_company_id added after initial migration
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS management_company_id UUID REFERENCES management_companies(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
+                # Remove service calls auto-created from inspection escalation (now silent flow)
+                "DELETE FROM service_calls WHERE reported_by = 'system | escalation' AND description LIKE '%ליקויי בודק%' AND status IN ('OPEN','ASSIGNED')",
+            ]:
+                _conn.execute(_text(_col_sql))
         _conn.commit()
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
