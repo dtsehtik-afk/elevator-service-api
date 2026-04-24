@@ -1711,7 +1711,7 @@ def start_scheduler():
     # _scheduler.add_job(_send_morning_location_requests,   "cron",     hour=7,  minute=45)
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
-    _scheduler.add_job(_poll_email_calls,                    "interval", minutes=5)
+    _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
     _scheduler.add_job(_poll_inspection_emails,              "interval", hours=1)
     _scheduler.add_job(_scan_drive_inspections,              "interval", minutes=15)
