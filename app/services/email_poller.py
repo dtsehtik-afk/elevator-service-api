@@ -8,7 +8,7 @@ import imaplib
 import json
 import logging
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.header import decode_header
 from typing import Optional
 
@@ -419,7 +419,6 @@ def poll_emails(db) -> int:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(user, password)
 
-        since_str = (date.today() - timedelta(days=3)).strftime("%d-%b-%Y")
         senders_lower = [s.lower() for s in senders]
 
         # Scan both the configured folder AND Spam (beepertalk emails can end up in spam)
@@ -431,9 +430,9 @@ def poll_emails(db) -> int:
             if status != "OK":
                 logger.debug("📧 Folder '%s' not accessible — skipping", folder)
                 continue
-            _, all_ids = mail.search(None, f'UNSEEN SINCE {since_str}')
+            _, all_ids = mail.search(None, "UNSEEN")
             folder_ids = all_ids[0].split() if all_ids[0] else []
-            logger.info("📧 [%s] unseen since %s: %d emails", folder, since_str, len(folder_ids))
+            logger.info("📧 [%s] unseen: %d emails", folder, len(folder_ids))
             msg_ids.extend([(mid, folder) for mid in folder_ids])
 
         if not msg_ids:
