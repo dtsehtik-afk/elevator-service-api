@@ -601,10 +601,16 @@ def poll_emails(db) -> int:
             except Exception as exc:
                 logger.error("Failed to process email %s: %s", mid, exc)
                 db.rollback()
+                if "OVERQUOTA" in str(exc):
+                    logger.warning("📧 OVERQUOTA on email %s — stopping this poll cycle to avoid rate limiting", mid)
+                    break
 
             finally:
                 # Mark as read regardless of success/failure to avoid re-processing
-                mail.store(mid, "+FLAGS", "\\Seen")
+                try:
+                    mail.store(mid, "+FLAGS", "\\Seen")
+                except Exception:
+                    pass
 
         mail.close()
         mail.logout()
