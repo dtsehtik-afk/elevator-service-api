@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     gmail_user_calls: str = ""
     gmail_app_password_calls: str = ""
     gmail_imap_folder: str = "[Gmail]/All Mail"
-    call_email_senders: str = "TELESERVICE@beepertalk.co.il,denis@akordelevator.com"
+    call_email_senders: str = "TELESERVICE@beepertalk.co.il"
 
     # Inspection-report emails — set GMAIL_USER_REPORTS + GMAIL_APP_PASSWORD_REPORTS
     gmail_user_reports: str = ""
