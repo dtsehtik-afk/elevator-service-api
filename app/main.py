@@ -107,7 +107,7 @@ app.add_middleware(
 _API_ONLY_PREFIXES = (
     "/auth", "/docs", "/redoc", "/openapi", "/health",
     "/uploads", "/assets", "/webhooks", "/analytics",
-    "/schedule", "/buildings", "/contacts", "/app/",
+    "/schedule", "/buildings", "/contacts", "/app/", "/admin",
 )
 
 
