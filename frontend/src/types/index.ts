@@ -68,6 +68,7 @@ export interface ServiceCall {
   is_recurring: boolean
   resolution_notes: string | null
   quote_needed: boolean
+  technician_id: string | null
   created_at: string
   assigned_at: string | null
   resolved_at: string | null
@@ -148,6 +149,7 @@ export interface CallFilters {
   status?: string
   priority?: string
   fault_type?: string
+  technician_id?: string
   skip?: number
   limit?: number
 }
