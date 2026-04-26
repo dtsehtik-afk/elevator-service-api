@@ -19,51 +19,40 @@ def _headers() -> dict:
 def _cloud_init(slug: str, env_vars: dict, docker_image: str) -> str:
     """Generate cloud-init user-data script for a new tenant server."""
     domain = f"{slug}.lift-agent.com"
-    env_lines = "\n".join(f'{k}="{v}"' for k, v in env_vars.items())
-    db_password = (
-        env_vars.get("DATABASE_URL", "").split(":")[2].split("@")[0]
-        if "@" in env_vars.get("DATABASE_URL", "")
-        else "lift"
-    )
+    env_lines = "\n".join(f"{k}={v}" for k, v in env_vars.items())
     return f"""#!/bin/bash
 set -e
 exec > /var/log/liftapp-init.log 2>&1
 
 # ── System packages ───────────────────────────────────────────────────────────
 apt-get update -qq
-apt-get install -y -qq docker.io docker-compose-plugin postgresql postgresql-client \
-    nginx certbot python3-certbot-nginx
+apt-get install -y -qq git docker.io docker-compose-plugin nginx certbot python3-certbot-nginx
 
-# ── PostgreSQL ────────────────────────────────────────────────────────────────
-systemctl enable postgresql
-systemctl start postgresql
-sudo -u postgres psql -c "CREATE USER lift WITH PASSWORD '{db_password}'" || true
-sudo -u postgres psql -c "CREATE DATABASE liftdb OWNER lift" || true
+systemctl enable docker
+systemctl start docker
 
-# ── App files ─────────────────────────────────────────────────────────────────
-mkdir -p /opt/liftapp
+# ── Clone repo ────────────────────────────────────────────────────────────────
+git clone https://github.com/dtsehtik-afk/elevator-service-api.git /opt/liftapp
+cd /opt/liftapp
+
+# ── .env ──────────────────────────────────────────────────────────────────────
 cat > /opt/liftapp/.env << 'ENVEOF'
 {env_lines}
 APP_BASE_URL=https://{domain}
 CORS_ORIGINS=https://{domain}
 ENVEOF
 
-cat > /opt/liftapp/docker-compose.yml << 'DCEOF'
-version: "3.9"
-services:
-  api:
-    image: {docker_image}
-    restart: always
-    env_file: /opt/liftapp/.env
-    ports:
-      - "127.0.0.1:8000:8000"
-DCEOF
+# ── Start only db + app ───────────────────────────────────────────────────────
+docker compose up -d --build db app
 
-# ── nginx reverse proxy (HTTP first, certbot upgrades to HTTPS) ───────────────
+# ── Wait for app ──────────────────────────────────────────────────────────────
+sleep 30
+
+# ── nginx reverse proxy ───────────────────────────────────────────────────────
 cat > /etc/nginx/sites-available/liftapp << 'NGINXEOF'
 server {{
     listen 80;
-    server_name {domain};
+    server_name {domain} _;
 
     location / {{
         proxy_pass http://127.0.0.1:8000;
@@ -78,24 +67,16 @@ NGINXEOF
 
 ln -sf /etc/nginx/sites-available/liftapp /etc/nginx/sites-enabled/liftapp
 rm -f /etc/nginx/sites-enabled/default
-systemctl enable nginx
-systemctl start nginx
+nginx -t && systemctl enable nginx && systemctl restart nginx
 
-# ── Start app ─────────────────────────────────────────────────────────────────
-docker pull {docker_image}
-cd /opt/liftapp && docker compose up -d
-
-# ── SSL (runs after DNS propagates — triggered by control plane or cron) ──────
-# certbot --nginx -d {domain} --non-interactive --agree-tos -m admin@lift-agent.com || true
-
-echo "lift-agent tenant '{slug}' deployed at {domain}"
+echo "lift-agent tenant '{slug}' ready at http://{domain}"
 """
 
 
 def create_tenant_server(slug: str, env_vars: dict) -> int:
     """Create a Hetzner server for the given tenant. Returns server ID."""
     settings = get_settings()
-    user_data = _cloud_init(slug, env_vars, settings.tenant_docker_image)
+    user_data = _cloud_init(slug, env_vars, "")
 
     payload = {
         "name": f"lift-{slug}",
