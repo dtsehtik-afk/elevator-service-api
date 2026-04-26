@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # Google Gemini — used for email parsing and WhatsApp chat agent
     gemini_api_key: str = ""
 
+    # Control plane — secret key sent by admin.lift-agent.com in X-Control-Plane-Key header
+    control_plane_api_key: str = ""
+
     # Google Drive integration — optional, falls back to local storage if unset
     # GOOGLE_SERVICE_ACCOUNT_JSON: full JSON content of the service account key file
     google_service_account_json: str = ""

@@ -12,6 +12,7 @@ from app.models.incoming_call import IncomingCallLog
 from app.models.inspection_report import InspectionReport
 from app.models.inspection_email_scan import InspectionEmailScan
 from app.models.service_call_email_scan import ServiceCallEmailScan
+from app.models.system_settings import SystemSettings
 
 __all__ = [
     "Building",
@@ -27,4 +28,5 @@ __all__ = [
     "InspectionReport",
     "InspectionEmailScan",
     "ServiceCallEmailScan",
+    "SystemSettings",
 ]

@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import get_settings
-from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import
+from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import, admin_control
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -61,6 +61,13 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
                 # Remove service calls auto-created from inspection escalation (now silent flow)
                 "DELETE FROM service_calls WHERE reported_by = 'system | escalation' AND description LIKE '%ליקויי בודק%' AND status IN ('OPEN','ASSIGNED')",
+                # system_settings — control plane module flags
+                """CREATE TABLE IF NOT EXISTS system_settings (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    key VARCHAR(50) UNIQUE NOT NULL DEFAULT 'default',
+                    modules JSONB NOT NULL DEFAULT '{}',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -138,6 +145,7 @@ app.include_router(management_companies.router)
 app.include_router(buildings.router)
 app.include_router(contacts.router)
 app.include_router(data_import.router)
+app.include_router(admin_control.router)
 
 
 @app.get("/health", tags=["Health"])

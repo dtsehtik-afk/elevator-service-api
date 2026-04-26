@@ -20,7 +20,13 @@ def _build_engine():
 
     kwargs: dict = {}
     if database_url.startswith("postgresql"):
-        kwargs = {"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20}
+        kwargs = {
+            "pool_pre_ping": True,
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_recycle": 3600,
+            "pool_timeout": 30,
+        }
 
     return create_engine(database_url, **kwargs)
 
