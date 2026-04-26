@@ -39,12 +39,24 @@ export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
 
   const { data: tenant, isLoading } = useQuery({
     queryKey: ['tenant', id],
     queryFn: () => fetchTenant(id!),
     refetchInterval: (query) =>
       query.state.data?.status === 'DEPLOYING' ? 5000 : false,
+  })
+
+  const renameMutation = useMutation({
+    mutationFn: (name: string) => updateTenant(id!, { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenant', id] })
+      qc.invalidateQueries({ queryKey: ['tenants'] })
+      setEditingName(false)
+      notifications.show({ message: 'שם עודכן', color: 'green' })
+    },
   })
 
   if (isLoading) return <Loader m="xl" />
@@ -55,7 +67,20 @@ export default function TenantDetailPage() {
       <Group mb="md" justify="space-between">
         <Group>
           <ActionIcon variant="subtle" onClick={() => navigate('/tenants')}>←</ActionIcon>
-          <Title order={3}>{tenant.name}</Title>
+          {editingName ? (
+            <Group gap={4}>
+              <TextInput value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} size="sm" style={{ width: 180 }} />
+              <ActionIcon color="green" variant="subtle" onClick={() => renameMutation.mutate(nameDraft)} loading={renameMutation.isPending}>✓</ActionIcon>
+              <ActionIcon variant="subtle" onClick={() => setEditingName(false)}>✕</ActionIcon>
+            </Group>
+          ) : (
+            <Group gap={4}>
+              <Title order={3}>{tenant.name}</Title>
+              <Tooltip label="שנה שם">
+                <ActionIcon size="sm" variant="subtle" onClick={() => { setNameDraft(tenant.name); setEditingName(true) }}>✏️</ActionIcon>
+              </Tooltip>
+            </Group>
+          )}
           <Badge color={STATUS_COLOR[tenant.status]} variant="light">{tenant.status}</Badge>
           {tenant.status === 'ACTIVE' && (
             <Text>{tenant.is_healthy ? '🟢' : '🔴'}</Text>
