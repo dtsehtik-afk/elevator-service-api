@@ -341,6 +341,15 @@ def _handle_technician_report(db, phone: str, text: str):
             tech.whatsapp_number or tech.phone,
             f"✅ {closed} קריאות נסגרו בהצלחה. תודה {tech.name}!"
         )
+
+    # Rebuild route after closing — remove resolved stops
+    if closed > 0 and tech.current_latitude and tech.current_longitude:
+        try:
+            from app.services.route_service import send_route_to_technician
+            send_route_to_technician(db, tech)
+        except Exception as exc:
+            logger.error("Route rebuild after close failed for %s: %s", tech.name, exc)
+
     logger.info("📋 %d call(s) resolved by %s", closed, tech.name)
 
 

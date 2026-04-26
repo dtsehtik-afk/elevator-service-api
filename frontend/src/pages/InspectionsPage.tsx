@@ -338,6 +338,19 @@ export default function InspectionsPage() {
                       🏢 פתח מעלית
                     </Button>
                   )}
+                  {isAdmin && (
+                    <Button size="xs" variant="subtle" color="gray"
+                      onClick={() => {
+                        setConfirmReport(r)
+                        setElevSearch(''); setSelectedElevId(''); setCreateMode(false)
+                        if (r.raw_address) {
+                          const parts = r.raw_address.split(',')
+                          setCreateElev({ address: parts[0]?.trim() || '', city: r.raw_city || parts[1]?.trim() || '', building_name: '' })
+                        }
+                      }}>
+                      ✏️ שנה שיוך
+                    </Button>
+                  )}
                 </Group>
               )}
 
