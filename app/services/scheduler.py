@@ -130,21 +130,17 @@ def _run_nightly_maintenance():
                     existing.priority = priority
                     db.commit()
                     upgraded += 1
-                if should_notify and "[maint_notified]" not in (existing.description or ""):
-                    notify_dispatcher(
-                        f"🔴 *טיפול מונע דחוף* — {addr}\n"
-                        f"⏳ {days_str}\n"
-                        f"📅 {elev.next_service_date.strftime('%d/%m/%Y')}"
-                    )
-                    existing.description = (existing.description or "") + " [maint_notified]"
+                # Mark for morning WhatsApp — don't send at midnight
+                if should_notify and "[maint_pending_notify]" not in (existing.description or "") \
+                        and "[maint_notified]" not in (existing.description or ""):
+                    existing.description = (existing.description or "") + " [maint_pending_notify]"
                     db.commit()
-                    notified += 1
                 continue
 
             sc = ServiceCall(
                 elevator_id=elev.id,
                 reported_by="מערכת — טיפול מונע",
-                description=f"טיפול מונע {days_str}",
+                description=f"טיפול מונע {days_str}" + (" [maint_pending_notify]" if should_notify else ""),
                 priority=priority,
                 fault_type="MAINTENANCE",
                 status="OPEN",
@@ -152,16 +148,6 @@ def _run_nightly_maintenance():
             db.add(sc)
             db.commit()
             opened += 1
-
-            if should_notify:
-                notify_dispatcher(
-                    f"🔴 *טיפול מונע דחוף* — {addr}\n"
-                    f"⏳ {days_str}\n"
-                    f"📅 {elev.next_service_date.strftime('%d/%m/%Y')}"
-                )
-                sc.description += " [maint_notified]"
-                db.commit()
-                notified += 1
 
         logger.info(
             "Nightly maintenance: %d overdue, %d calls opened, %d upgraded, %d notified",
@@ -1740,6 +1726,42 @@ def _check_inspection_deficiency_escalation():
         db.close()
 
 
+def _send_morning_maintenance_alerts():
+    """07:35 — send WhatsApp for urgent maintenance calls created overnight."""
+    from app.database import SessionLocal
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    from app.services.whatsapp_service import notify_dispatcher
+
+    db = SessionLocal()
+    try:
+        pending = db.query(ServiceCall).filter(
+            ServiceCall.fault_type == "MAINTENANCE",
+            ServiceCall.status == "OPEN",
+            ServiceCall.priority.in_(["CRITICAL", "HIGH"]),
+            ServiceCall.description.contains("[maint_pending_notify]"),
+        ).all()
+
+        for sc in pending:
+            elev = db.get(Elevator, sc.elevator_id)
+            addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+            days_str = sc.description.split("[maint_pending_notify]")[0].replace("טיפול מונע ", "").strip()
+            notify_dispatcher(
+                f"🔴 *טיפול מונע דחוף* — {addr}\n"
+                f"⏳ {days_str}\n"
+                f"📅 {elev.next_service_date.strftime('%d/%m/%Y') if elev and elev.next_service_date else ''}"
+            )
+            sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
+            db.commit()
+
+        if pending:
+            logger.info("Morning maintenance alerts sent for %d calls", len(pending))
+    except Exception as exc:
+        logger.error("Morning maintenance alert job failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -1747,6 +1769,7 @@ def start_scheduler():
     # All cron times are in Israel local time (Asia/Jerusalem)
     _scheduler = BackgroundScheduler(timezone=ZoneInfo("Asia/Jerusalem"))
     _scheduler.add_job(_run_nightly_maintenance,             "cron",     hour=0,  minute=5)
+    _scheduler.add_job(_send_morning_maintenance_alerts,     "cron",     hour=7,  minute=35)
     # Morning location requests disabled — technicians use the app now
     # _scheduler.add_job(_send_morning_location_requests,   "cron",     hour=7,  minute=45)
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)

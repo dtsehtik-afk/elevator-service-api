@@ -311,6 +311,31 @@ def notify_dispatcher(text: str) -> bool:
     return success
 
 
+# ── Customer testing redirect ─────────────────────────────────────────────────
+# All outgoing customer messages go here until production routing is enabled
+_CUSTOMER_TEST_PHONE = "0527474013"
+
+
+def notify_customer_outside_hours(caller_phone: str, caller_name: str) -> None:
+    """Send an outside-hours WhatsApp to the customer — currently redirected to test number."""
+    from app.services.working_hours import get_working_hours_str, get_time_greeting
+    greeting = get_time_greeting()
+    name_str = caller_name.strip() if caller_name and caller_name.strip() else "לקוח יקר"
+    hours_str = get_working_hours_str()
+
+    msg = (
+        f"{greeting} *{name_str}*,\n\n"
+        f"קיבלנו את פנייתך — תודה שפנית אלינו.\n\n"
+        f"שעות הפעילות שלנו:\n{hours_str}\n\n"
+        f"קריאת שירות מחוץ לשעות הפעילות כרוכה בתשלום נוסף.\n"
+        f"במה תרצה לטפל?\n\n"
+        f"*1* — דחה את הטיפול לשעות הפעילות הקרובות\n"
+        f"*2* — אשר טיפול דחוף (בתשלום נוסף)"
+    )
+    # Testing redirect — replace _CUSTOMER_TEST_PHONE with caller_phone when ready
+    _send_message(_CUSTOMER_TEST_PHONE, f"[בדיקה — יועבר ל-{caller_phone}]\n\n{msg}")
+
+
 def notify_dispatcher_unassigned(phone: str, address: str, city: str, fault_type: str) -> bool:
     """Notify the dispatcher that no technician could be assigned."""
     fault = _FAULT_LABEL.get(fault_type, fault_type)

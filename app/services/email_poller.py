@@ -333,16 +333,30 @@ def _find_or_create_elevator(db, city: str, address: str):
 # ── rescue blast ──────────────────────────────────────────────────────────────
 
 def _send_rescue_blast(db, fields: dict, caller_name: str, caller_phone: str, description: str):
-    """Send an emergency rescue alert to ALL active technicians."""
+    """Send an emergency rescue alert.
+    Working hours → ALL active technicians.
+    Outside hours  → only on-call technician + ADMIN/MANAGER role.
+    """
     import math
     from app.models.technician import Technician
     from app.services.whatsapp_service import notify_rescue_emergency
+    from app.services.working_hours import is_working_hours
 
-    technicians = (
-        db.query(Technician)
-        .filter(Technician.is_active == True, Technician.role == "TECHNICIAN")  # noqa: E712
-        .all()
-    )
+    if is_working_hours():
+        technicians = (
+            db.query(Technician)
+            .filter(Technician.is_active == True, Technician.role == "TECHNICIAN")  # noqa: E712
+            .all()
+        )
+    else:
+        technicians = (
+            db.query(Technician)
+            .filter(
+                Technician.is_active == True,  # noqa: E712
+                (Technician.is_on_call == True) | (Technician.role.in_(["ADMIN", "MANAGER"]))  # noqa: E712
+            )
+            .all()
+        )
     if not technicians:
         return
 
@@ -567,12 +581,22 @@ def poll_emails(db) -> int:
                     " [RESCUE]" if is_rescue else "",
                 )
 
-                # Rescue: blast ALL technicians immediately
+                # Rescue: blast immediately (working-hours-aware)
                 if is_rescue:
                     try:
                         _send_rescue_blast(db, fields, caller_name, caller_phone, description)
                     except Exception as exc:
                         logger.error("Rescue blast failed: %s", exc)
+
+                # Outside hours, non-rescue: notify customer about extra charge
+                if not is_rescue:
+                    from app.services.working_hours import is_working_hours
+                    if not is_working_hours():
+                        try:
+                            from app.services.whatsapp_service import notify_customer_outside_hours
+                            notify_customer_outside_hours(caller_phone or "", caller_name or "")
+                        except Exception as exc:
+                            logger.error("Customer outside-hours message failed: %s", exc)
 
                 # Regular assignment — always ask for confirmation (1/2)
                 assignment = None

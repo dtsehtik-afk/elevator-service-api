@@ -15,6 +15,9 @@ _SCHEDULE = {
     # 5 = Sat: not present → closed
 }
 
+_DAY_NAMES = {6: "ראשון", 0: "שני", 1: "שלישי", 2: "רביעי", 3: "חמישי", 4: "שישי"}
+
+
 def is_working_hours(now: datetime | None = None) -> bool:
     """Return True if current Israel time is within working hours."""
     now = (now or datetime.now(_IL_TZ)).astimezone(_IL_TZ)
@@ -25,3 +28,26 @@ def is_working_hours(now: datetime | None = None) -> bool:
     start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
     end   = now.replace(hour=eh, minute=em, second=0, microsecond=0)
     return start <= now < end
+
+
+def get_working_hours_str() -> str:
+    """Return a formatted Hebrew string of the working schedule."""
+    lines = []
+    for day_num in [6, 0, 1, 2, 3, 4]:
+        if day_num not in _SCHEDULE:
+            continue
+        sh, sm, eh, em = _SCHEDULE[day_num]
+        lines.append(f"יום {_DAY_NAMES[day_num]}: {sh:02d}:{sm:02d}–{eh:02d}:{em:02d}")
+    return "\n".join(lines)
+
+
+def get_time_greeting() -> str:
+    """Return Hebrew greeting based on current Israel time."""
+    h = datetime.now(_IL_TZ).hour
+    if 5 <= h < 12:
+        return "בוקר טוב"
+    if 12 <= h < 17:
+        return "צהריים טובים"
+    if 17 <= h < 21:
+        return "ערב טוב"
+    return "לילה טוב"
