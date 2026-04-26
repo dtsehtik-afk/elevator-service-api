@@ -109,6 +109,8 @@ def create_tenant_server(slug: str, env_vars: dict) -> int:
         payload["ssh_keys"] = [settings.hetzner_ssh_key_name]
 
     resp = httpx.post(f"{_BASE}/servers", json=payload, headers=_headers(), timeout=30)
+    if not resp.is_success:
+        logger.error("Hetzner error %s: %s", resp.status_code, resp.text)
     resp.raise_for_status()
     server_id = resp.json()["server"]["id"]
     logger.info("Created Hetzner server %s for tenant %s", server_id, slug)
