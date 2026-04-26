@@ -45,7 +45,6 @@ async def lifespan(app: FastAPI):
                 # management_companies — caller_phones may be missing
                 "ALTER TABLE management_companies ADD COLUMN IF NOT EXISTS caller_phones TEXT[] DEFAULT '{}'",
                 # Fix: if column was created as JSONB by create_all, convert to TEXT[]
-                # Uses a temp-column swap because USING with a subquery is not allowed in ALTER TABLE
                 """DO $$ BEGIN
                     IF (SELECT data_type FROM information_schema.columns
                         WHERE table_name='management_companies' AND column_name='caller_phones') = 'jsonb'
@@ -155,6 +154,8 @@ def health_check():
 
 
 # ── Serve React frontend (must be last) ──────────────────────────────────────
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 if _FRONTEND_DIST.exists():

@@ -6,6 +6,7 @@ Selects the best technician for a service call using:
   - Current workload (open assigned calls)
   - Technician availability
   - Fault-type specialization match
+  - last visited
 
 Flow
 ----
