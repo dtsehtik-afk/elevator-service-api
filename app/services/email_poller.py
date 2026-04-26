@@ -598,15 +598,19 @@ def poll_emails(db) -> int:
                         except Exception as exc:
                             logger.error("Customer outside-hours message failed: %s", exc)
 
-                # Regular assignment — always ask for confirmation (1/2)
+                # Regular assignment — only during working hours (rescues already handled above)
                 assignment = None
-                try:
-                    from app.services import ai_assignment_agent
-                    assignment = ai_assignment_agent.assign_with_confirmation(
-                        db, call, needs_confirmation=True
-                    )
-                except Exception as exc:
-                    logger.error("AI assignment failed for email-polled call: %s", exc)
+                from app.services.working_hours import is_working_hours as _is_wh
+                if not is_rescue and not _is_wh():
+                    logger.info("⏰ Off-hours — skipping assignment for non-rescue call, will be picked up in morning")
+                else:
+                    try:
+                        from app.services import ai_assignment_agent
+                        assignment = ai_assignment_agent.assign_with_confirmation(
+                            db, call, needs_confirmation=True
+                        )
+                    except Exception as exc:
+                        logger.error("AI assignment failed for email-polled call: %s", exc)
 
                 # Fall back: notify dispatcher if no technician could be assigned
                 if not assignment:

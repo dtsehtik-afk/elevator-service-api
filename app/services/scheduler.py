@@ -1375,11 +1375,15 @@ def _check_pending_assignment_timeouts():
                     call.status = "OPEN"
                     db.commit()
                     from app.config import get_settings
+                    from app.services.working_hours import is_working_hours as _iwh
                     s = get_settings()
                     from app.services.whatsapp_service import notify_dispatcher
-                    notify_dispatcher(
-                        f"⚠️ קריאה ב{addr} לא אושרה אחרי {_ESCALATE_AFTER_MINUTES} דקות — נא לשבץ ידנית."
-                    )
+                    if _iwh():
+                        notify_dispatcher(
+                            f"⚠️ קריאה ב{addr} לא אושרה אחרי {_ESCALATE_AFTER_MINUTES} דקות — נא לשבץ ידנית."
+                        )
+                    else:
+                        logger.info("⏰ Off-hours — 180-min escalation for %s deferred to morning", addr)
 
             # ── Stage 1: hourly reminder to ALL available technicians ─────────
             elif age_minutes >= _REMINDER_AFTER_MINUTES and not assignment.reminder_sent_at:
