@@ -43,7 +43,8 @@ export default function TenantDetailPage() {
   const { data: tenant, isLoading } = useQuery({
     queryKey: ['tenant', id],
     queryFn: () => fetchTenant(id!),
-    refetchInterval: tenant?.status === 'DEPLOYING' ? 5000 : false,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'DEPLOYING' ? 5000 : false,
   })
 
   if (isLoading) return <Loader m="xl" />
@@ -449,7 +450,7 @@ function BillingTab({ tenant, qc }: { tenant: any; qc: any }) {
       <Paper withBorder p="md" radius="md">
         <Text size="sm" fw={600} mb="sm">פרטי כרטיס אשראי</Text>
         <div style={{ padding: '10px', border: '1px solid #dee2e6', borderRadius: 6 }}>
-          <CardElement options={{ style: { base: { fontSize: '16px', direction: 'ltr' } } }} />
+          <CardElement options={{ style: { base: { fontSize: '16px' } } }} />
         </div>
         <Button
           mt="md" fullWidth

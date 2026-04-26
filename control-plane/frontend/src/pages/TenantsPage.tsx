@@ -139,7 +139,7 @@ function CreateModal({ opened, onClose, onSubmit, loading }: {
           onChange={(v) => setForm((f) => ({ ...f, plan: v ?? 'TRIAL' }))}
         />
         <Textarea label="הערות" value={form.notes} onChange={set('notes')} />
-        <Button onClick={() => onSubmit(form)} loading={loading} fullWidth>צור דייר</Button>
+        <Button onClick={() => onSubmit(form as any)} loading={loading} fullWidth>צור דייר</Button>
       </Stack>
     </Modal>
   )
