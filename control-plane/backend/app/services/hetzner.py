@@ -26,8 +26,10 @@ exec > /var/log/liftapp-init.log 2>&1
 
 # ── System packages ───────────────────────────────────────────────────────────
 apt-get update -qq
-apt-get install -y -qq git docker.io docker-compose-plugin nginx certbot python3-certbot-nginx
+apt-get install -y -qq git curl nginx certbot python3-certbot-nginx
 
+# Install Docker CE (includes docker-compose-plugin)
+curl -fsSL https://get.docker.com | sh
 systemctl enable docker
 systemctl start docker
 
