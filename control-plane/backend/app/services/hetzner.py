@@ -42,6 +42,14 @@ APP_BASE_URL=https://{domain}
 CORS_ORIGINS=https://{domain}
 ENVEOF
 
+# ── docker-compose override to expose app port to host ────────────────────────
+cat > /opt/liftapp/docker-compose.override.yml << 'OVEREOF'
+services:
+  app:
+    ports:
+      - "8000:8000"
+OVEREOF
+
 # ── Start only db + app ───────────────────────────────────────────────────────
 docker compose up -d --build db app
 
