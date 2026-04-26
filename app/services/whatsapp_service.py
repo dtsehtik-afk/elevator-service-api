@@ -147,7 +147,7 @@ def notify_technician_new_call(
     )
 
     base_url   = get_settings().app_base_url
-    portal_url = f"{base_url}/app/tech/{tech_id}" if tech_id else ""
+    portal_url = f"{base_url}/tech/{tech_id}" if tech_id else ""
     portal_line = f"📱 *פורטל טכנאי:*\n{portal_url}\n" if portal_url else ""
 
     message = (

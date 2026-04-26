@@ -219,25 +219,9 @@ def _do_deploy(tenant_id: uuid.UUID, body: DeployRequest):
         except Exception as dns_err:
             logger.warning("DNS creation failed (non-fatal): %s", dns_err)
 
-        # 4. Wait for /health via nginx on port 80 (Docker takes ~2 min to start)
-        health_url = f"http://{ip}/health"
-        import httpx
-        for _ in range(160):   # 160 × 15s = 40 minutes
-            time.sleep(15)
-            try:
-                r = httpx.get(health_url, timeout=5)
-                if r.status_code == 200:
-                    tenant.status = "ACTIVE"
-                    tenant.is_healthy = True
-                    db.commit()
-                    logger.info("Tenant %s deployed successfully at %s", tenant.slug, ip)
-                    return
-            except Exception:
-                pass
-
-        tenant.status = "ERROR"
-        db.commit()
-        logger.error("Tenant %s health check timed out", tenant.slug)
+        # 4. Server is provisioning — monitor scheduler will poll every 5 min
+        #    and promote DEPLOYING → ACTIVE once /health responds.
+        logger.info("Tenant %s server provisioned at %s — monitor will promote to ACTIVE", tenant.slug, ip)
 
     except Exception as exc:
         logger.exception("Deploy failed for tenant %s: %s", tenant_id, exc)

@@ -966,6 +966,24 @@ def _handle_technician_request(db, phone: str, text: str) -> None:
     logger.info("🙋 %s requested call %s at %s — awaiting dispatcher approval", tech.name, matched_call.id, addr)
 
 
+def _quick_detect_intent(text: str, settings) -> str:
+    """Fast intent detection for manager routing — returns REPORT/TAKE/DEFER/REQUEST/OTHER."""
+    t = text.strip().lower()
+    report_kw = ("דוח", "סיום", "סיימתי", "טיפלתי", "סגור", "סגירה", 'דו"ח')
+    take_kw = ("לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך", "אני על זה")
+    defer_kw = ("דחה למחר", "אטפל מחר", "לדחות")
+    request_kw = ("מבקש", "מבקשת", "אשמח לטפל", "רוצה לטפל")
+    if any(k in t for k in report_kw):
+        return "REPORT"
+    if any(k in t for k in take_kw):
+        return "TAKE"
+    if any(k in t for k in defer_kw):
+        return "DEFER"
+    if any(k in t for k in request_kw):
+        return "REQUEST"
+    return "OTHER"
+
+
 def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = False) -> None:
     """
     Route ANY free-text message from a technician through Gemini for intent detection.
@@ -1020,12 +1038,34 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
         "".join(c for c in n if c.isdigit())[-9:] == digits[-9:]
         for n in dispatcher_numbers
     )
+    is_manager = is_dispatcher or (tech and getattr(tech, "role", "") == "MANAGER")
 
-    if not tech and not is_dispatcher:
+    if not tech and not is_manager:
         logger.warning("📵 Message from unregistered number %s — ignored", phone)
         return
 
-    if is_dispatcher:
+    # Manager = dispatcher + technician capabilities.
+    # Tech-style intents (REPORT/TAKE/DEFER/REQUEST) handled as technician first;
+    # everything else routed to dispatcher handler (with confirmation for destructive actions).
+    if is_manager and not tech:
+        # Pure dispatcher (no tech record) — always dispatcher handler
+        from app.services.dispatcher_commands import handle_dispatcher_command
+        handle_dispatcher_command(db, phone, text, settings)
+        return
+
+    if is_manager and tech:
+        # Manager who is also a technician — detect tech intents first
+        _tech_intents = {"REPORT", "TAKE", "DEFER", "REQUEST"}
+        quick_intent = _quick_detect_intent(text, settings)
+        if quick_intent in _tech_intents:
+            pass  # fall through to technician flow below
+        else:
+            from app.services.dispatcher_commands import handle_dispatcher_command
+            handle_dispatcher_command(db, phone, text, settings, technician=tech)
+            return
+
+    if is_dispatcher and not tech:
+        # Fallback: dispatcher without tech record
         from app.services.dispatcher_commands import handle_dispatcher_command
         handle_dispatcher_command(db, phone, text, settings)
         return

@@ -68,14 +68,19 @@ def poll_tenant(tenant: Tenant, db: Session) -> TenantSnapshot:
 
 
 def _poll_all():
-    """Called by APScheduler — polls every ACTIVE tenant."""
+    """Called by APScheduler — polls ACTIVE and DEPLOYING tenants."""
     db: Session = SessionLocal()
     try:
-        tenants = db.query(Tenant).filter(Tenant.status == "ACTIVE").all()
-        logger.debug("Polling %d active tenants", len(tenants))
+        tenants = db.query(Tenant).filter(Tenant.status.in_(["ACTIVE", "DEPLOYING"])).all()
+        logger.debug("Polling %d tenants (active+deploying)", len(tenants))
         for tenant in tenants:
             try:
-                poll_tenant(tenant, db)
+                snapshot = poll_tenant(tenant, db)
+                # Promote DEPLOYING → ACTIVE once healthy
+                if tenant.status == "DEPLOYING" and snapshot.is_healthy:
+                    tenant.status = "ACTIVE"
+                    db.commit()
+                    logger.info("Tenant %s promoted DEPLOYING → ACTIVE", tenant.slug)
             except Exception as exc:
                 logger.exception("Unhandled error polling tenant %s: %s", tenant.slug, exc)
     finally:
