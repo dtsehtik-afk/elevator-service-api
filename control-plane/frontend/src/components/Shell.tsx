@@ -7,6 +7,7 @@ import { notifications } from '@mantine/notifications'
 const NAV = [
   { label: 'דיירים', path: '/tenants', icon: '🏢' },
   { label: 'ניטור', path: '/monitoring', icon: '📊' },
+  { label: 'יכולות המערכת', path: '/features', icon: '🗺️' },
 ]
 
 export default function Shell() {
