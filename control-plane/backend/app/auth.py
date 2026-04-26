@@ -2,15 +2,15 @@
 
 from datetime import datetime, timedelta, timezone
 
+import bcrypt as _bcrypt
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from app.config import get_settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
@@ -20,11 +20,11 @@ class TokenResponse(BaseModel):
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 def hash_password(plain: str) -> str:
-    return _pwd_context.hash(plain)
+    return _bcrypt.hashpw(plain.encode(), _bcrypt.gensalt()).decode()
 
 
 def create_access_token(subject: str) -> str:
