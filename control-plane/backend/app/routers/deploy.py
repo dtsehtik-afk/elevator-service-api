@@ -222,7 +222,7 @@ def _do_deploy(tenant_id: uuid.UUID, body: DeployRequest):
         # 4. Wait for /health via nginx on port 80 (Docker takes ~2 min to start)
         health_url = f"http://{ip}/health"
         import httpx
-        for _ in range(32):   # 32 × 15s = 8 minutes
+        for _ in range(80):   # 80 × 15s = 20 minutes
             time.sleep(15)
             try:
                 r = httpx.get(health_url, timeout=5)
