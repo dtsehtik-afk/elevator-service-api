@@ -1,36 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Stack, Title, Group, Select, Text, Badge, Paper, Box, Loader, Center } from '@mantine/core'
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
+import { Stack, Title, Group, Select, Text, Badge, Paper, Loader, Center } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { listElevators } from '../api/elevators'
-import { ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS } from '../utils/constants'
+import 'leaflet/dist/leaflet.css'
 
-// Leaflet loaded lazily to avoid SSR/module issues
-let leafletLoaded = false
-function ensureLeaflet(cb: () => void) {
-  if (leafletLoaded) { cb(); return }
-  const link = document.createElement('link')
-  link.rel = 'stylesheet'
-  link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-  document.head.appendChild(link)
-  const script = document.createElement('script')
-  script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-  script.onload = () => { leafletLoaded = true; cb() }
-  document.head.appendChild(script)
-}
-
-function riskColor(risk: number, status: string) {
+function riskColor(risk: number, status: string): string {
   if (status !== 'ACTIVE') return '#868e96'
   if (risk >= 60) return '#c92a2a'
   if (risk >= 30) return '#f08c00'
   return '#2f9e44'
 }
 
+import { useState } from 'react'
+
 export default function MapPage() {
   const navigate = useNavigate()
-  const mapRef = useRef<any>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [mapReady, setMapReady] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [cityFilter, setCityFilter] = useState<string | null>(null)
 
@@ -52,90 +38,12 @@ export default function MapPage() {
       return true
     }), [elevators, statusFilter, cityFilter])
 
-  // Init map once
-  useEffect(() => {
-    let cancelled = false
-
-    function initMap() {
-      if (cancelled || mapRef.current || !containerRef.current) return
-      const container = containerRef.current
-      // Clear any stale Leaflet init flag (React StrictMode double-invoke)
-      if ((container as any)._leaflet_id) delete (container as any)._leaflet_id
-      const L = (window as any).L
-      const map = L.map(container, { zoomControl: true })
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap',
-      }).addTo(map)
-      map.setView([32.08, 34.78], 9)
-      mapRef.current = map
-      if (!cancelled) setMapReady(true)
-    }
-
-    if ((window as any).L) {
-      initMap()
-    } else {
-      ensureLeaflet(initMap)
-    }
-
-    return () => {
-      cancelled = true
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null }
-      setMapReady(false)
-    }
-  }, [])
-
-  // Recalculate map size when loading completes (container may have been 0-sized on init)
-  useEffect(() => {
-    if (mapReady && mapRef.current && !isLoading) {
-      setTimeout(() => mapRef.current?.invalidateSize(), 50)
-    }
-  }, [isLoading, mapReady])
-
-  // Update markers when data/filters change
-  useEffect(() => {
-    if (!mapReady || !mapRef.current) return
-    const L = (window as any).L
-    const map = mapRef.current
-
-    // Remove old markers layer
-    if ((map as any)._markersLayer) map.removeLayer((map as any)._markersLayer)
-    const layer = L.layerGroup().addTo(map)
-    ;(map as any)._markersLayer = layer
-
-    const bounds: [number, number][] = []
-    mapped.forEach(e => {
-      const color = riskColor(e.risk_score, e.status)
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
-        iconSize: [22, 22], iconAnchor: [11, 11],
-      })
-      const marker = L.marker([e.latitude, e.longitude], { icon }).addTo(layer)
-      const waze = `https://waze.com/ul?ll=${e.latitude},${e.longitude}&navigate=yes`
-      marker.bindPopup(`
-        <div style="min-width:170px;font-family:sans-serif;direction:rtl">
-          <b>📍 ${e.address}, ${e.city}</b><br>
-          ${e.internal_number ? `<small>מס"ד: ${e.internal_number}</small><br>` : ''}
-          ${e.management_company_name ? `<small>🏗️ ${e.management_company_name}</small><br>` : ''}
-          <small>סיכון: ${Math.round(e.risk_score)}</small><br>
-          <a href="${waze}" target="_blank" style="font-size:12px">🚘 Waze</a>
-          &nbsp;
-          <a href="#" onclick="event.preventDefault();window.__navToElev('${e.id}')" style="font-size:12px">📋 פרטים</a>
-        </div>
-      `)
-      bounds.push([e.latitude!, e.longitude!])
-    })
-
-    if (bounds.length > 0) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 })
-  }, [mapped, mapReady])
-
-  // Expose navigation callback for popup links
-  useEffect(() => {
-    ;(window as any).__navToElev = (id: string) => navigate(`/elevators/${id}`)
-    return () => { delete (window as any).__navToElev }
-  }, [navigate])
-
   const noGeo = elevators.filter(e => !e.latitude || !e.longitude).length
+
+  const center: [number, number] = mapped.length > 0
+    ? [mapped.reduce((s, e) => s + e.latitude!, 0) / mapped.length,
+       mapped.reduce((s, e) => s + e.longitude!, 0) / mapped.length]
+    : [32.08, 34.78]
 
   return (
     <Stack gap="md">
@@ -170,7 +78,43 @@ export default function MapPage() {
             <Loader />
           </Center>
         )}
-        <Box ref={containerRef} style={{ height: 600, width: '100%' }} />
+        <MapContainer
+          center={center}
+          zoom={9}
+          style={{ height: 600, width: '100%' }}
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution="© OpenStreetMap"
+          />
+          {mapped.map(e => (
+            <CircleMarker
+              key={e.id}
+              center={[e.latitude!, e.longitude!]}
+              radius={10}
+              pathOptions={{
+                color: 'white',
+                fillColor: riskColor(e.risk_score, e.status),
+                fillOpacity: 1,
+                weight: 2,
+              }}
+            >
+              <Popup>
+                <div style={{ minWidth: 170, fontFamily: 'sans-serif', direction: 'rtl' }}>
+                  <b>📍 {e.address}, {e.city}</b><br />
+                  {e.internal_number && <><small>מס"ד: {e.internal_number}</small><br /></>}
+                  {e.management_company_name && <><small>🏗️ {e.management_company_name}</small><br /></>}
+                  <small>סיכון: {Math.round(e.risk_score ?? 0)}</small><br />
+                  <a href={`https://waze.com/ul?ll=${e.latitude},${e.longitude}&navigate=yes`}
+                     target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>🚘 Waze</a>
+                  &nbsp;
+                  <a href="#" onClick={e2 => { e2.preventDefault(); navigate(`/elevators/${e.id}`) }}
+                     style={{ fontSize: 12 }}>📋 פרטים</a>
+                </div>
+              </Popup>
+            </CircleMarker>
+          ))}
+        </MapContainer>
       </Paper>
     </Stack>
   )

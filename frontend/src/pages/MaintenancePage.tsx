@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Select, Modal,
-  Pagination, Table, ScrollArea, Loader, Center,
+  Pagination, Table, ScrollArea, Loader, Center, SimpleGrid, ThemeIcon, Tooltip,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useDisclosure } from '@mantine/hooks'
@@ -64,6 +64,21 @@ export default function MaintenancePage() {
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   const overdue = maintenance.filter(m => m.status === 'SCHEDULED' && isOverdue(m.scheduled_date)).length
 
+  // Traffic-light buckets from elevator next_service_date
+  const today = new Date(); today.setHours(0,0,0,0)
+  const elevatorServiceStatus = useMemo(() => {
+    const red: typeof elevators = [], yellow: typeof elevators = [], green: typeof elevators = []
+    for (const e of elevators) {
+      if (!e.next_service_date || e.status !== 'ACTIVE') continue
+      const d = new Date(e.next_service_date); d.setHours(0,0,0,0)
+      const days = Math.round((d.getTime() - today.getTime()) / 86400000)
+      if (days <= 5) red.push(e)
+      else if (days <= 15) yellow.push(e)
+      else green.push(e)
+    }
+    return { red, yellow, green }
+  }, [elevators])
+
   const createMutation = useMutation({
     mutationFn: createMaintenance,
     onSuccess: () => {
@@ -94,6 +109,66 @@ export default function MaintenancePage() {
         </Stack>
         <Button onClick={openAdd}>+ הוסף תחזוקה</Button>
       </Group>
+
+      {/* Traffic-light service status */}
+      {(elevatorServiceStatus.red.length > 0 || elevatorServiceStatus.yellow.length > 0) && (
+        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+          {elevatorServiceStatus.red.length > 0 && (
+            <Paper withBorder p="sm" radius="md" style={{ borderColor: '#fa5252' }}>
+              <Group gap="xs" mb={6}>
+                <ThemeIcon color="red" variant="light" size="md">🔴</ThemeIcon>
+                <Text fw={700} c="red">דחוף / באיחור ({elevatorServiceStatus.red.length})</Text>
+              </Group>
+              <Stack gap={2}>
+                {elevatorServiceStatus.red.map(e => {
+                  const d = new Date(e.next_service_date!)
+                  const days = Math.round((d.getTime() - today.getTime()) / 86400000)
+                  return (
+                    <Tooltip key={e.id} label={`${e.address}, ${e.city}`} position="top">
+                      <Text size="xs" truncate>
+                        #{e.serial_number} {e.city} —{' '}
+                        <Text span c="red" fw={600}>
+                          {days < 0 ? `איחור ${-days} ימים` : `${days} ימים`}
+                        </Text>
+                      </Text>
+                    </Tooltip>
+                  )
+                })}
+              </Stack>
+            </Paper>
+          )}
+          {elevatorServiceStatus.yellow.length > 0 && (
+            <Paper withBorder p="sm" radius="md" style={{ borderColor: '#fab005' }}>
+              <Group gap="xs" mb={6}>
+                <ThemeIcon color="yellow" variant="light" size="md">🟡</ThemeIcon>
+                <Text fw={700} c="yellow.8">מתקרב ({elevatorServiceStatus.yellow.length})</Text>
+              </Group>
+              <Stack gap={2}>
+                {elevatorServiceStatus.yellow.map(e => {
+                  const d = new Date(e.next_service_date!)
+                  const days = Math.round((d.getTime() - today.getTime()) / 86400000)
+                  return (
+                    <Tooltip key={e.id} label={`${e.address}, ${e.city}`} position="top">
+                      <Text size="xs" truncate>
+                        #{e.serial_number} {e.city} — <Text span c="yellow.8" fw={600}>{days} ימים</Text>
+                      </Text>
+                    </Tooltip>
+                  )
+                })}
+              </Stack>
+            </Paper>
+          )}
+          {elevatorServiceStatus.green.length > 0 && (
+            <Paper withBorder p="sm" radius="md" style={{ borderColor: '#40c057' }}>
+              <Group gap="xs" mb={6}>
+                <ThemeIcon color="green" variant="light" size="md">🟢</ThemeIcon>
+                <Text fw={700} c="green">תקין ({elevatorServiceStatus.green.length})</Text>
+              </Group>
+              <Text size="xs" c="dimmed">טיפול בעוד יותר מ-15 יום</Text>
+            </Paper>
+          )}
+        </SimpleGrid>
+      )}
 
       <Group>
         <Select
