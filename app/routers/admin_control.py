@@ -69,7 +69,7 @@ class StatsResponse(BaseModel):
 def get_stats(db: Session = Depends(get_db)):
     """Live metrics snapshot — polled every 5 minutes by the control plane."""
     elevators_total = db.query(func.count(Elevator.id)).scalar()
-    elevators_active = db.query(func.count(Elevator.id)).filter(Elevator.is_active == True).scalar()
+    elevators_active = db.query(func.count(Elevator.id)).filter(Elevator.status == "ACTIVE").scalar()
 
     calls_open = db.query(func.count(ServiceCall.id)).filter(ServiceCall.status == "OPEN").scalar()
     calls_assigned = db.query(func.count(ServiceCall.id)).filter(ServiceCall.status == "ASSIGNED").scalar()
