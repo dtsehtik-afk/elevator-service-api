@@ -67,16 +67,17 @@ export default function MaintenancePage() {
   // Traffic-light buckets from elevator next_service_date
   const today = new Date(); today.setHours(0,0,0,0)
   const elevatorServiceStatus = useMemo(() => {
-    const red: typeof elevators = [], yellow: typeof elevators = [], green: typeof elevators = []
+    const overdue: typeof elevators = [], red: typeof elevators = [], orange: typeof elevators = [], green: typeof elevators = []
     for (const e of elevators) {
       if (!e.next_service_date || e.status !== 'ACTIVE') continue
       const d = new Date(e.next_service_date); d.setHours(0,0,0,0)
       const days = Math.round((d.getTime() - today.getTime()) / 86400000)
-      if (days <= 5) red.push(e)
-      else if (days <= 15) yellow.push(e)
+      if (days < 0) overdue.push(e)
+      else if (days <= 5) red.push(e)
+      else if (days <= 10) orange.push(e)
       else green.push(e)
     }
-    return { red, yellow, green }
+    return { overdue, red, orange, green }
   }, [elevators])
 
   const createMutation = useMutation({
@@ -111,64 +112,82 @@ export default function MaintenancePage() {
       </Group>
 
       {/* Traffic-light service status */}
-      {(elevatorServiceStatus.red.length > 0 || elevatorServiceStatus.yellow.length > 0) && (
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
-          {elevatorServiceStatus.red.length > 0 && (
-            <Paper withBorder p="sm" radius="md" style={{ borderColor: '#fa5252' }}>
-              <Group gap="xs" mb={6}>
-                <ThemeIcon color="red" variant="light" size="md">🔴</ThemeIcon>
-                <Text fw={700} c="red">דחוף / באיחור ({elevatorServiceStatus.red.length})</Text>
-              </Group>
-              <Stack gap={2}>
+      <Text fw={700} size="sm">🚦 רמזור טיפול מונע</Text>
+      <SimpleGrid cols={{ base: 1, sm: 4 }} spacing="sm">
+        {/* Overdue — black blinking */}
+        <Paper withBorder p="sm" radius="md" style={{ borderColor: '#212529', borderWidth: 2 }}>
+          <Group gap="xs" mb={6}>
+            <Text fw={700} c="dark">⬛ חריגה ({elevatorServiceStatus.overdue.length})</Text>
+          </Group>
+          {elevatorServiceStatus.overdue.length === 0
+            ? <Text size="xs" c="dimmed">אין</Text>
+            : <Stack gap={2}>
+                {elevatorServiceStatus.overdue.map(e => {
+                  const days = Math.round((new Date(e.next_service_date!).getTime() - today.getTime()) / 86400000)
+                  return (
+                    <Tooltip key={e.id} label={`${e.address}, ${e.city}`} position="top">
+                      <Text size="xs" truncate style={{ animation: 'maint-blink 1s ease-in-out infinite' }}>
+                        ⚠️ #{e.serial_number} {e.city} — <Text span c="dark" fw={700}>איחור {-days} ימים</Text>
+                      </Text>
+                    </Tooltip>
+                  )
+                })}
+              </Stack>
+          }
+        </Paper>
+
+        {/* Red — ≤5 days */}
+        <Paper withBorder p="sm" radius="md" style={{ borderColor: '#fa5252' }}>
+          <Group gap="xs" mb={6}>
+            <Text fw={700} c="red">🔴 דחוף ({elevatorServiceStatus.red.length})</Text>
+          </Group>
+          {elevatorServiceStatus.red.length === 0
+            ? <Text size="xs" c="dimmed">אין</Text>
+            : <Stack gap={2}>
                 {elevatorServiceStatus.red.map(e => {
-                  const d = new Date(e.next_service_date!)
-                  const days = Math.round((d.getTime() - today.getTime()) / 86400000)
+                  const days = Math.round((new Date(e.next_service_date!).getTime() - today.getTime()) / 86400000)
                   return (
                     <Tooltip key={e.id} label={`${e.address}, ${e.city}`} position="top">
                       <Text size="xs" truncate>
-                        #{e.serial_number} {e.city} —{' '}
-                        <Text span c="red" fw={600}>
-                          {days < 0 ? `איחור ${-days} ימים` : `${days} ימים`}
-                        </Text>
+                        #{e.serial_number} {e.city} — <Text span c="red" fw={600}>{days} ימים</Text>
                       </Text>
                     </Tooltip>
                   )
                 })}
               </Stack>
-            </Paper>
-          )}
-          {elevatorServiceStatus.yellow.length > 0 && (
-            <Paper withBorder p="sm" radius="md" style={{ borderColor: '#fab005' }}>
-              <Group gap="xs" mb={6}>
-                <ThemeIcon color="yellow" variant="light" size="md">🟡</ThemeIcon>
-                <Text fw={700} c="yellow.8">מתקרב ({elevatorServiceStatus.yellow.length})</Text>
-              </Group>
-              <Stack gap={2}>
-                {elevatorServiceStatus.yellow.map(e => {
-                  const d = new Date(e.next_service_date!)
-                  const days = Math.round((d.getTime() - today.getTime()) / 86400000)
+          }
+        </Paper>
+
+        {/* Orange — ≤10 days */}
+        <Paper withBorder p="sm" radius="md" style={{ borderColor: '#fab005' }}>
+          <Group gap="xs" mb={6}>
+            <Text fw={700} c="orange">🟠 מתקרב ({elevatorServiceStatus.orange.length})</Text>
+          </Group>
+          {elevatorServiceStatus.orange.length === 0
+            ? <Text size="xs" c="dimmed">אין</Text>
+            : <Stack gap={2}>
+                {elevatorServiceStatus.orange.map(e => {
+                  const days = Math.round((new Date(e.next_service_date!).getTime() - today.getTime()) / 86400000)
                   return (
                     <Tooltip key={e.id} label={`${e.address}, ${e.city}`} position="top">
                       <Text size="xs" truncate>
-                        #{e.serial_number} {e.city} — <Text span c="yellow.8" fw={600}>{days} ימים</Text>
+                        #{e.serial_number} {e.city} — <Text span c="orange" fw={600}>{days} ימים</Text>
                       </Text>
                     </Tooltip>
                   )
                 })}
               </Stack>
-            </Paper>
-          )}
-          {elevatorServiceStatus.green.length > 0 && (
-            <Paper withBorder p="sm" radius="md" style={{ borderColor: '#40c057' }}>
-              <Group gap="xs" mb={6}>
-                <ThemeIcon color="green" variant="light" size="md">🟢</ThemeIcon>
-                <Text fw={700} c="green">תקין ({elevatorServiceStatus.green.length})</Text>
-              </Group>
-              <Text size="xs" c="dimmed">טיפול בעוד יותר מ-15 יום</Text>
-            </Paper>
-          )}
-        </SimpleGrid>
-      )}
+          }
+        </Paper>
+
+        {/* Green — >10 days */}
+        <Paper withBorder p="sm" radius="md" style={{ borderColor: '#40c057' }}>
+          <Group gap="xs" mb={6}>
+            <Text fw={700} c="green">🟢 תקין ({elevatorServiceStatus.green.length})</Text>
+          </Group>
+          <Text size="xs" c="dimmed">טיפול בעוד יותר מ-10 ימים</Text>
+        </Paper>
+      </SimpleGrid>
 
       <Group>
         <Select

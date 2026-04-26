@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Title, Tabs, Group, Badge, Text, Button, Stack, Paper, SimpleGrid,
   Switch, Loader, TextInput, PasswordInput, CopyButton, ActionIcon,
-  Tooltip, Alert, Code, Divider,
+  Tooltip, Alert, Code, Divider, Modal, ScrollArea,
 } from '@mantine/core'
 import { DataTable } from 'mantine-datatable'
 import { notifications } from '@mantine/notifications'
@@ -312,6 +312,7 @@ function DeployTab({ tenant, qc }: { tenant: any; qc: any }) {
     gmail_user_calls: '', gmail_app_password_calls: '',
     greenapi_instance_id: '', greenapi_api_token: '', google_maps_api_key: '',
   })
+  const [envModalOpen, setEnvModalOpen] = useState(false)
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
 
@@ -343,6 +344,25 @@ function DeployTab({ tenant, qc }: { tenant: any; qc: any }) {
 
   const isDeployed = !!tenant.hetzner_server_id
   const isDeploying = tenant.status === 'DEPLOYING'
+  const slug = tenant.slug
+
+  const generateEnvContent = () => {
+    const domain = `${slug}.lift-agent.com`
+    const lines = [
+      `DATABASE_URL=postgresql://user:${form.db_password || 'PASSWORD'}@db:5432/elevator_db`,
+      `SECRET_KEY=${form.secret_key || 'SECRET_KEY'}`,
+      `WEBHOOK_SECRET=${form.secret_key || 'WEBHOOK_SECRET'}`,
+      form.gemini_api_key ? `GEMINI_API_KEY=${form.gemini_api_key}` : '',
+      form.gmail_user_calls ? `GMAIL_USER_CALLS=${form.gmail_user_calls}` : '',
+      form.gmail_app_password_calls ? `GMAIL_APP_PASSWORD_CALLS=${form.gmail_app_password_calls}` : '',
+      form.greenapi_instance_id ? `GREENAPI_INSTANCE_ID=${form.greenapi_instance_id}` : '',
+      form.greenapi_api_token ? `GREENAPI_API_TOKEN=${form.greenapi_api_token}` : '',
+      form.google_maps_api_key ? `GOOGLE_MAPS_API_KEY=${form.google_maps_api_key}` : '',
+      `APP_BASE_URL=https://${domain}`,
+      `CORS_ORIGINS=https://${domain}`,
+    ].filter(Boolean).join('\n')
+    return lines
+  }
 
   return (
     <Stack>
@@ -362,19 +382,20 @@ function DeployTab({ tenant, qc }: { tenant: any; qc: any }) {
         </Alert>
       )}
 
-      {!isDeployed && !isDeploying && (
-        <Paper withBorder p="md" radius="md">
-          <Text fw={600} mb="md">1-Click Deploy — Hetzner Cloud</Text>
-          <SimpleGrid cols={2}>
-            <PasswordInput label="DB Password" required value={form.db_password} onChange={set('db_password')} dir="ltr" />
-            <PasswordInput label="Secret Key (JWT)" required value={form.secret_key} onChange={set('secret_key')} dir="ltr" />
-            <TextInput label="Gemini API Key" value={form.gemini_api_key} onChange={set('gemini_api_key')} dir="ltr" />
-            <TextInput label="Gmail (קריאות)" value={form.gmail_user_calls} onChange={set('gmail_user_calls')} dir="ltr" />
-            <PasswordInput label="Gmail App Password" value={form.gmail_app_password_calls} onChange={set('gmail_app_password_calls')} dir="ltr" />
-            <TextInput label="Green API Instance" value={form.greenapi_instance_id} onChange={set('greenapi_instance_id')} dir="ltr" />
-            <PasswordInput label="Green API Token" value={form.greenapi_api_token} onChange={set('greenapi_api_token')} dir="ltr" />
-            <TextInput label="Google Maps API Key" value={form.google_maps_api_key} onChange={set('google_maps_api_key')} dir="ltr" />
-          </SimpleGrid>
+      <Paper withBorder p="md" radius="md">
+        <Text fw={600} mb="md">{isDeployed ? '⚙️ הגדרות שרת' : '1-Click Deploy — Hetzner Cloud'}</Text>
+        <SimpleGrid cols={2}>
+          <PasswordInput label="DB Password" required={!isDeployed} value={form.db_password} onChange={set('db_password')} dir="ltr" />
+          <PasswordInput label="Secret Key (JWT)" required={!isDeployed} value={form.secret_key} onChange={set('secret_key')} dir="ltr" />
+          <TextInput label="Gemini API Key" value={form.gemini_api_key} onChange={set('gemini_api_key')} dir="ltr" />
+          <TextInput label="Gmail (קריאות)" value={form.gmail_user_calls} onChange={set('gmail_user_calls')} dir="ltr" />
+          <PasswordInput label="Gmail App Password" value={form.gmail_app_password_calls} onChange={set('gmail_app_password_calls')} dir="ltr" />
+          <TextInput label="Green API Instance" value={form.greenapi_instance_id} onChange={set('greenapi_instance_id')} dir="ltr" />
+          <PasswordInput label="Green API Token" value={form.greenapi_api_token} onChange={set('greenapi_api_token')} dir="ltr" />
+          <TextInput label="Google Maps API Key" value={form.google_maps_api_key} onChange={set('google_maps_api_key')} dir="ltr" />
+        </SimpleGrid>
+
+        {!isDeployed && !isDeploying && (
           <Button
             mt="md"
             onClick={() => deployMutation.mutate()}
@@ -384,8 +405,14 @@ function DeployTab({ tenant, qc }: { tenant: any; qc: any }) {
           >
             🚀 Deploy to Hetzner
           </Button>
-        </Paper>
-      )}
+        )}
+
+        {isDeployed && (
+          <Button mt="md" variant="light" color="blue" onClick={() => setEnvModalOpen(true)} fullWidth>
+            📋 הצג .env לעדכון ידני בשרת
+          </Button>
+        )}
+      </Paper>
 
       {isDeployed && (
         <>
@@ -397,6 +424,30 @@ function DeployTab({ tenant, qc }: { tenant: any; qc: any }) {
           </Button>
         </>
       )}
+
+      <Modal
+        opened={envModalOpen}
+        onClose={() => setEnvModalOpen(false)}
+        title="תוכן .env לעדכון ידני"
+        size="lg"
+        dir="ltr"
+      >
+        <Stack>
+          <Text size="sm" c="dimmed" dir="rtl">העתק את התוכן הבא ל-/opt/liftapp/.env בשרת, ואז הרץ: docker compose restart app</Text>
+          <ScrollArea h={300}>
+            <Code block dir="ltr" style={{ whiteSpace: 'pre', fontSize: 12 }}>
+              {generateEnvContent()}
+            </Code>
+          </ScrollArea>
+          <CopyButton value={generateEnvContent()}>
+            {({ copied, copy }) => (
+              <Button onClick={copy} color={copied ? 'green' : 'blue'} fullWidth>
+                {copied ? '✓ הועתק!' : '📋 העתק הכל'}
+              </Button>
+            )}
+          </CopyButton>
+        </Stack>
+      </Modal>
     </Stack>
   )
 }
