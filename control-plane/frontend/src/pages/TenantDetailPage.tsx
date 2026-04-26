@@ -13,7 +13,7 @@ import dayjs from 'dayjs'
 import {
   fetchTenant, fetchModules, updateModules, syncModules,
   deployTenant, destroyServer, fetchSnapshots, pollNow, rotateKey,
-  createSubscription, cancelSubscription, provisionSSL,
+  createSubscription, cancelSubscription, provisionSSL, updateTenant,
 } from '../api/client'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
@@ -98,12 +98,25 @@ export default function TenantDetailPage() {
 // ── Overview ──────────────────────────────────────────────────────────────────
 
 function OverviewTab({ tenant, qc }: { tenant: any; qc: any }) {
+  const [editingUrl, setEditingUrl] = useState(false)
+  const [apiUrlDraft, setApiUrlDraft] = useState(tenant.api_url ?? '')
+
   const rotateMutation = useMutation({
     mutationFn: () => rotateKey(tenant.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tenant', tenant.id] })
       notifications.show({ message: 'מפתח API חודש', color: 'green' })
     },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: (body: Partial<any>) => updateTenant(tenant.id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenant', tenant.id] })
+      setEditingUrl(false)
+      notifications.show({ message: 'עודכן', color: 'green' })
+    },
+    onError: (e: any) => notifications.show({ message: e.response?.data?.detail ?? 'שגיאה', color: 'red' }),
   })
 
   const stats = tenant.last_stats as Record<string, any> | null
@@ -122,7 +135,27 @@ function OverviewTab({ tenant, qc }: { tenant: any; qc: any }) {
           <Text fw={600}>פרטי חיבור</Text>
           <Group>
             <Text size="sm" c="dimmed" w={140}>API URL</Text>
-            <Code>{tenant.api_url ?? '—'}</Code>
+            {editingUrl ? (
+              <Group gap={4} style={{ flex: 1 }}>
+                <TextInput
+                  value={apiUrlDraft}
+                  onChange={(e) => setApiUrlDraft(e.target.value)}
+                  size="xs"
+                  dir="ltr"
+                  style={{ flex: 1 }}
+                  placeholder="https://example.lift-agent.com"
+                />
+                <ActionIcon size="sm" color="green" variant="subtle" onClick={() => updateMutation.mutate({ api_url: apiUrlDraft })} loading={updateMutation.isPending}>✓</ActionIcon>
+                <ActionIcon size="sm" variant="subtle" onClick={() => setEditingUrl(false)}>✕</ActionIcon>
+              </Group>
+            ) : (
+              <Group gap={4}>
+                <Code>{tenant.api_url ?? '—'}</Code>
+                <Tooltip label="ערוך">
+                  <ActionIcon size="sm" variant="subtle" onClick={() => { setApiUrlDraft(tenant.api_url ?? ''); setEditingUrl(true) }}>✏️</ActionIcon>
+                </Tooltip>
+              </Group>
+            )}
           </Group>
           <Group>
             <Text size="sm" c="dimmed" w={140}>API Key</Text>
