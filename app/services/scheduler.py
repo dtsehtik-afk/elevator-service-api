@@ -961,15 +961,46 @@ def _handle_technician_request(db, phone: str, text: str) -> None:
     logger.info("🙋 %s requested call %s at %s — awaiting dispatcher approval", tech.name, matched_call.id, addr)
 
 
+def _handle_send_route(db, phone: str) -> None:
+    """Send the current route to a technician on demand."""
+    from app.models.technician import Technician
+    from app.services.whatsapp_service import _send_message
+    from app.services.route_service import send_route_to_technician, build_route, format_route_message
+
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    tech = (db.query(Technician)
+            .filter(Technician.phone.contains(digits[-9:]) |
+                    Technician.whatsapp_number.contains(digits[-9:]))
+            .first())
+    if not tech:
+        return
+
+    if not tech.current_latitude or not tech.current_longitude:
+        _send_message(tech.whatsapp_number or tech.phone,
+            "📍 לא נמצא מיקום עדכני שלך.\n"
+            "שתף מיקום חי דרך WhatsApp ואשלח את המסלול מיד.")
+        return
+
+    stops = build_route(db, tech)
+    msg = format_route_message(tech.name, stops)
+    _send_message(tech.whatsapp_number or tech.phone, msg)
+    logger.info("🗺️ Route sent on demand to %s (%d stops)", tech.name, len(stops))
+
+
 def _quick_detect_intent(text: str, settings) -> str:
-    """Fast intent detection for manager routing — returns REPORT/TAKE/DEFER/REQUEST/OTHER."""
+    """Fast intent detection for manager routing — returns REPORT/TAKE/DEFER/REQUEST/ROUTE/OTHER."""
     t = text.strip().lower()
     report_kw = ("דוח", "סיום", "סיימתי", "טיפלתי", "סגור", "סגירה", 'דו"ח')
     take_kw = ("לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך", "אני על זה")
     defer_kw = ("דחה למחר", "אטפל מחר", "לדחות")
     request_kw = ("מבקש", "מבקשת", "אשמח לטפל", "רוצה לטפל")
+    route_kw = ("מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום")
     if any(k in t for k in report_kw):
         return "REPORT"
+    if any(k in t for k in route_kw):
+        return "ROUTE"
     if any(k in t for k in take_kw):
         return "TAKE"
     if any(k in t for k in defer_kw):
@@ -1010,6 +1041,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
         # Fallback to keyword routing if Gemini not configured
         if any(w in text for w in ["דוח", "סיום", "סיימתי", "טיפלתי", "סגור"]):
             _handle_technician_report(db, phone, text)
+        elif any(w in text for w in ["מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום"]):
+            _handle_send_route(db, phone)
         elif any(w in text for w in ["לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך"]):
             _handle_self_assign(db, phone, text)
         elif any(w in text for w in ["דחה למחר", "אטפל מחר", "מחר", "לדחות"]):
@@ -1074,6 +1107,7 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה — 'לקחתי', 'אני לוקח')\n"
             "- DEFER    (הטכנאי מבקש לדחות קריאה ליום הבא — 'דחה למחר', 'מחר', 'אטפל מחר', 'לדחות')\n"
             "- REQUEST  (הטכנאי מבקש לטפל בקריאה הממתינה לשיבוץ ידני — 'מבקש', 'אשמח לטפל', 'רוצה לטפל', 'אני מבקש את הקריאה')\n"
+            "- ROUTE    (הטכנאי מבקש לקבל את המסלול / רשימת הקריאות שלו — 'מסלול', 'שלח מסלול', 'מפה', 'קריאות שלי', 'מה יש לי היום')\n"
             "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה, סטטוס)\n"
             "- IGNORE   (ברכה קצרה כמו 'אוקיי', 'תודה', 'סבבה', אמוג'י בלבד)\n"
             "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה / סיכום הדחייה).\n\n"
@@ -1115,6 +1149,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
             _handle_technician_defer(db, phone, extract or text)
         elif intent == "REQUEST":
             _handle_technician_request(db, phone, extract or text)
+        elif intent == "ROUTE":
+            _handle_send_route(db, phone)
         elif intent == "QUESTION":
             _handle_chat_question(db, phone, text, settings, with_history=is_reply)
         else:

@@ -511,11 +511,14 @@ export default function InspectionsPage() {
             <Autocomplete
               placeholder="הקלד כתובת, עיר או מס׳ מעלית..."
               value={elevSearch}
-              onChange={v => { searchElevators(v); setSelectedElevId('') }}
+              onChange={v => {
+                setElevSearch(v)
+                setSelectedElevId('')
+                searchElevators(v)
+              }}
               onOptionSubmit={v => {
                 const opt = elevOptions.find(o => o.label === v)
-                if (opt) setSelectedElevId(opt.id)
-                setElevSearch(v)
+                if (opt) { setSelectedElevId(opt.id); setElevSearch(v) }
               }}
               data={elevOptions.map(o => o.label)}
             />
