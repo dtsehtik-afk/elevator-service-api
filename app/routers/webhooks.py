@@ -475,30 +475,45 @@ def _transcribe_audio_gemini(msg_data: dict) -> str:
         except Exception as exc:
             logger.warning("_transcribe_audio: Gemini failed (%s) — trying Whisper", exc)
 
-    # ── Fallback: OpenAI Whisper ─────────────────────────────────────────────
-    if settings.openai_api_key:
+    # ── Fallback: Gemini 2.5 flash (different model, same key) ──────────────
+    if settings.gemini_api_key:
         try:
-            import openai
-            import tempfile
-            import os
-            suffix = ".ogg"
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-            try:
-                client = openai.OpenAI(api_key=settings.openai_api_key)
-                with open(tmp_path, "rb") as f:
-                    result = client.audio.transcriptions.create(
-                        model="whisper-1", file=f, language="he"
-                    )
-                text = result.text.strip()
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            fallback_url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"gemini-2.5-flash-preview-04-17:generateContent?key={settings.gemini_api_key}"
+            )
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"inline_data": {"mime_type": clean_mime, "data": audio_b64}},
+                            {
+                                "text": (
+                                    "תמלל את הודעת הקול הזו לעברית בדיוק כפי שנאמרה. "
+                                    "החזר רק את הטקסט המתומלל, ללא הסברים נוספים."
+                                )
+                            },
+                        ]
+                    }
+                ],
+                "generationConfig": {"maxOutputTokens": 500, "temperature": 0.0},
+            }
+            with httpx.Client(timeout=30) as client:
+                resp = client.post(fallback_url, json=payload)
+                resp.raise_for_status()
+                text = (
+                    resp.json().get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                    .strip()
+                )
                 if text:
-                    logger.info("🎤 Whisper fallback transcription succeeded")
+                    logger.info("🎤 Gemini 2.5 flash fallback transcription succeeded")
                     return text
-            finally:
-                os.unlink(tmp_path)
         except Exception as exc:
-            logger.error("_transcribe_audio: Whisper fallback failed: %s", exc)
+            logger.error("_transcribe_audio: Gemini 2.5 fallback failed: %s", exc)
 
     return ""
 
