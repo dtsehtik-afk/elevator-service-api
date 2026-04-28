@@ -83,6 +83,8 @@ class Elevator(Base):
     intercom_phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     # Known caller phones (auto-populated from incoming calls)
     caller_phones: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
+    # Known tenants/residents: [{"name": "...", "phone": "..."}] — auto-populated from calls
+    known_callers: Mapped[list] = mapped_column(_FlexArray, nullable=False, default=list)
 
     # ── Service contract ──────────────────────────────────────────────────────
     # REGULAR / COMPREHENSIVE (רגיל / מקיף)

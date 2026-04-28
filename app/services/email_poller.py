@@ -295,22 +295,82 @@ def _extract_street_name(address: str) -> str:
     return s.lower()
 
 
+def _phone_lookup(candidates, caller_phone: str):
+    """Check if caller_phone matches any phone in caller_phones or known_callers of candidates."""
+    if not caller_phone or len(caller_phone) < 9:
+        return None
+    phone_tail = re.sub(r"[^\d]", "", caller_phone)[-9:]
+    for elev in candidates:
+        for p in (elev.caller_phones or []):
+            if re.sub(r"[^\d]", "", str(p))[-9:] == phone_tail:
+                return elev
+        for entry in (elev.known_callers or []):
+            p = entry.get("phone", "") if isinstance(entry, dict) else ""
+            if p and re.sub(r"[^\d]", "", str(p))[-9:] == phone_tail:
+                return elev
+    return None
+
+
+def _gemini_fuzzy_match(candidates, email_address: str, api_key: str):
+    """Ask Gemini which DB address best matches the email address (typo-tolerant)."""
+    if not api_key or not candidates or not email_address:
+        return None
+    try:
+        import httpx
+        options = "\n".join(
+            f"{i+1}. {elev.address}, {elev.city} [id:{elev.id}]"
+            for i, elev in enumerate(candidates)
+        )
+        prompt = (
+            "אתה עוזר לזהות מעלית לפי כתובת. "
+            "ייתכנו שגיאות כתיב, קיצורים, או ניסוח שונה.\n"
+            f"כתובת מהמייל: \"{email_address}\"\n"
+            f"רשימת כתובות במערכת:\n{options}\n\n"
+            "אם אחת הכתובות ברשימה תואמת (גם עם שגיאת כתיב קלה), "
+            "החזר JSON בלבד: {\"match\": <מספר_שורה>, \"confidence\": \"HIGH\"|\"LOW\"}\n"
+            "אם אין התאמה סבירה, החזר: {\"match\": null}"
+        )
+        resp = httpx.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        result = json.loads(raw.strip())
+        idx = result.get("match")
+        confidence = result.get("confidence", "LOW")
+        if idx and confidence == "HIGH" and 1 <= int(idx) <= len(candidates):
+            return candidates[int(idx) - 1]
+    except Exception as exc:
+        logger.warning("Gemini fuzzy address match failed: %s", exc)
+    return None
+
+
 def _find_elevator(db, city: str, address: str, fields: dict):
     """
-    Try to find an existing elevator by city + address. NEVER creates a new elevator.
+    Multi-signal elevator lookup. NEVER creates a new elevator.
 
-    Matching rules (strict — when in doubt, flag for dispatcher review):
-      1. Exact address match (same city + same address string) → auto-match
-      2. Same street name AND same building number → auto-match
-      3. Same street name but DIFFERENT building number → notify dispatcher, return None
-      4. No match at all → notify dispatcher with full call details, return None
+    Pipeline:
+      1. Exact address match in same city
+      2. Street name + building number match
+      3. Caller phone → caller_phones / known_callers lookup
+      4. Gemini fuzzy address matching (typo-tolerant)
+      5. Same street, different number → ambiguous, notify dispatcher
+      6. No match → notify dispatcher
     """
+    from app.config import get_settings
     from app.models.elevator import Elevator
 
     addr_norm = (address or "").strip()
     city_norm = (city or "").strip()
     building_num = _extract_building_number(addr_norm)
+    caller_phone = re.sub(r"[^\d]", "", fields.get("phone", ""))
+    api_key = getattr(get_settings(), "gemini_api_key", "")
 
+    candidates = []
     if city_norm:
         candidates = (
             db.query(Elevator)
@@ -318,32 +378,52 @@ def _find_elevator(db, city: str, address: str, fields: dict):
             .all()
         )
 
-        # 1. Exact address match
-        for elev in candidates:
-            if addr_norm and (elev.address or "").strip().lower() == addr_norm.lower():
-                return elev
+    # 1. Exact address match
+    for elev in candidates:
+        if addr_norm and (elev.address or "").strip().lower() == addr_norm.lower():
+            logger.info("✅ Matched by exact address: %s", elev.address)
+            return elev
 
-        # 2 & 3. Street-name match — require full street name equality + building number
-        street_email = _extract_street_name(addr_norm)
-        for elev in candidates:
-            street_db = _extract_street_name(elev.address or "")
-            if not street_email or not street_db or street_email != street_db:
-                continue  # street names differ — not a match candidate
-            elev_num = _extract_building_number(elev.address or "")
-            if building_num and elev_num and building_num == elev_num:
-                return elev  # same street name + same number → match
-            # Same street, different number — ambiguous
-            logger.warning(
-                "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
-                addr_norm, elev.address,
-            )
-            _notify_no_match(
-                city_norm, addr_norm, fields,
-                extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{elev.address}, {elev.city}*\n"
-            )
-            return None
+    # 2. Street name + building number match; collect ambiguous street hits
+    street_email = _extract_street_name(addr_norm)
+    ambiguous = None
+    for elev in candidates:
+        street_db = _extract_street_name(elev.address or "")
+        if not street_email or not street_db or street_email != street_db:
+            continue
+        elev_num = _extract_building_number(elev.address or "")
+        if building_num and elev_num and building_num == elev_num:
+            logger.info("✅ Matched by street+number: %s", elev.address)
+            return elev
+        ambiguous = elev  # same street, different number
 
-    # 4. Nothing found — notify dispatcher with full context, no auto-creation
+    # 3. Phone lookup — check caller phone against all city candidates
+    if caller_phone:
+        phone_match = _phone_lookup(candidates, caller_phone)
+        if phone_match:
+            logger.info("✅ Matched by caller phone %s → elevator %s", caller_phone, phone_match.id)
+            return phone_match
+
+    # 4. Gemini fuzzy address match (only if we have candidates and an address to compare)
+    if addr_norm and candidates:
+        fuzzy_match = _gemini_fuzzy_match(candidates, addr_norm, api_key)
+        if fuzzy_match:
+            logger.info("✅ Matched by Gemini fuzzy: email=%s → db=%s", addr_norm, fuzzy_match.address)
+            return fuzzy_match
+
+    # 5. Ambiguous street (same street, different building number)
+    if ambiguous:
+        logger.warning(
+            "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
+            addr_norm, ambiguous.address,
+        )
+        _notify_no_match(
+            city_norm, addr_norm, fields,
+            extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{ambiguous.address}, {ambiguous.city}*\n"
+        )
+        return None
+
+    # 6. Nothing found
     logger.info("📍 No elevator found for %s %s — notifying dispatcher", city_norm, addr_norm)
     _notify_no_match(city_norm, addr_norm, fields)
     return None
@@ -401,6 +481,19 @@ def _enrich_elevator(db, elevator, fields: dict) -> None:
         if not any(re.sub(r"[^\d]", "", p)[-9:] == phone[-9:] for p in existing):
             existing.append(phone)
             elevator.caller_phones = existing
+            changed = True
+
+    # Save caller name+phone to known_callers (if name is known and not already stored)
+    caller_name = (fields.get("name") or "").strip()
+    if caller_name and caller_name not in ("לא ידוע", "") and phone and len(phone) >= 9:
+        existing_callers = list(elevator.known_callers or [])
+        already_known = any(
+            isinstance(c, dict) and re.sub(r"[^\d]", "", str(c.get("phone", "")))[-9:] == phone[-9:]
+            for c in existing_callers
+        )
+        if not already_known:
+            existing_callers.append({"name": caller_name, "phone": phone})
+            elevator.known_callers = existing_callers
             changed = True
 
     # Floor count — only update if current value is default (1) and email has a real value
