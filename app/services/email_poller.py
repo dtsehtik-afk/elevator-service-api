@@ -289,6 +289,12 @@ def _extract_building_number(address: str) -> str:
     return m.group(1) if m else ""
 
 
+def _extract_street_name(address: str) -> str:
+    """Extract street name — all words before the building number, lowercased."""
+    s = re.sub(r"\s*\b\d+[א-ת]?\b.*$", "", (address or "").strip()).strip()
+    return s.lower()
+
+
 def _find_elevator(db, city: str, address: str, fields: dict):
     """
     Try to find an existing elevator by city + address. NEVER creates a new elevator.
@@ -317,23 +323,25 @@ def _find_elevator(db, city: str, address: str, fields: dict):
             if addr_norm and (elev.address or "").strip().lower() == addr_norm.lower():
                 return elev
 
-        # 2 & 3. Street-name match — check building number
-        street_word = addr_norm.split()[0] if addr_norm else ""
+        # 2 & 3. Street-name match — require full street name equality + building number
+        street_email = _extract_street_name(addr_norm)
         for elev in candidates:
-            if street_word and street_word in (elev.address or ""):
-                elev_num = _extract_building_number(elev.address or "")
-                if building_num and elev_num and building_num == elev_num:
-                    return elev  # same street + same number → match
-                # Same street but different number — flag for review
-                logger.warning(
-                    "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
-                    addr_norm, elev.address,
-                )
-                _notify_no_match(
-                    city_norm, addr_norm, fields,
-                    extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{elev.address}, {elev.city}*\n"
-                )
-                return None
+            street_db = _extract_street_name(elev.address or "")
+            if not street_email or not street_db or street_email != street_db:
+                continue  # street names differ — not a match candidate
+            elev_num = _extract_building_number(elev.address or "")
+            if building_num and elev_num and building_num == elev_num:
+                return elev  # same street name + same number → match
+            # Same street, different number — ambiguous
+            logger.warning(
+                "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
+                addr_norm, elev.address,
+            )
+            _notify_no_match(
+                city_norm, addr_norm, fields,
+                extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{elev.address}, {elev.city}*\n"
+            )
+            return None
 
     # 4. Nothing found — notify dispatcher with full context, no auto-creation
     logger.info("📍 No elevator found for %s %s — notifying dispatcher", city_norm, addr_norm)
