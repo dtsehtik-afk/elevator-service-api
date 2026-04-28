@@ -481,7 +481,7 @@ def _transcribe_audio_gemini(msg_data: dict) -> str:
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
             fallback_url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-2.5-flash-preview-04-17:generateContent?key={settings.gemini_api_key}"
+                f"gemini-2.5-flash:generateContent?key={settings.gemini_api_key}"
             )
             payload = {
                 "contents": [
