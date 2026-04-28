@@ -507,8 +507,8 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     if not s.gemini_api_key:
         return "❌ שירות השאלות אינו מוגדר (חסר GEMINI_API_KEY)"
 
-    # Load recent conversation history only when this is a reply/quoted message
-    history = _load_conversation_history(db, phone) if (phone and with_history) else []
+    # Always load recent conversation history to maintain fluid conversation
+    history = _load_conversation_history(db, phone) if phone else []
 
     # Append current question; if history ends with user-role we merge
     current = {"role": "user", "parts": [{"text": f"{asker_name} שואל: {question}"}]}

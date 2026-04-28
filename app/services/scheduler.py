@@ -535,17 +535,27 @@ def _poll_whatsapp_replies():
 
                     elif msg_kind in ("textMessage", "extendedTextMessage"):
                         # textMessage = plain text; extendedTextMessage = reply/quote
-                        if msg_kind == "extendedTextMessage":
-                            text = msg_data.get("extendedTextMessageData", {}).get("text", "").strip()
+                        is_reply = msg_kind == "extendedTextMessage"
+                        if is_reply:
+                            ext = msg_data.get("extendedTextMessageData", {})
+                            text = ext.get("text", "").strip()
+                            # Include quoted context so agent knows what's being replied to
+                            quoted = ext.get("quotedMessage", {})
+                            quoted_text = (
+                                quoted.get("textMessage", "")
+                                or quoted.get("extendedTextMessage", {}).get("text", "")
+                            ).strip()
+                            if quoted_text and quoted_text not in text:
+                                text = f'[מגיב להודעה: "{quoted_text[:120]}"]\n{text}'
                         else:
                             text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
 
-                        logger.info("📩 Message from %s: %r", phone, text)
+                        logger.info("📩 Message from %s (reply=%s): %r", phone, is_reply, text)
                         pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
                         if pending:
                             _handle_tech_reply(db, phone, text, pending, s)
                         elif len(text) > 0:
-                            _handle_free_text(db, phone, text, s)
+                            _handle_free_text(db, phone, text, s, is_reply=is_reply)
                 finally:
                     db.close()
 

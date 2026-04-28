@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
@@ -100,6 +100,7 @@ export default function InspectionsPage() {
   const [addDefFor, setAddDefFor] = useState<string | null>(null)
   const [newDefDesc, setNewDefDesc] = useState('')
   const [newDefSeverity, setNewDefSeverity] = useState('MEDIUM')
+  const justSelectedRef = useRef(false)
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ['inspections'],
@@ -512,13 +513,18 @@ export default function InspectionsPage() {
               placeholder="הקלד כתובת, עיר או מס׳ מעלית..."
               value={elevSearch}
               onChange={v => {
+                if (justSelectedRef.current) { justSelectedRef.current = false; return }
                 setElevSearch(v)
                 setSelectedElevId('')
                 searchElevators(v)
               }}
               onOptionSubmit={v => {
                 const opt = elevOptions.find(o => o.label === v)
-                if (opt) { setSelectedElevId(opt.id); setElevSearch(v) }
+                if (opt) {
+                  justSelectedRef.current = true
+                  setSelectedElevId(opt.id)
+                  setElevSearch(v)
+                }
               }}
               data={elevOptions.map(o => o.label)}
             />
