@@ -512,7 +512,7 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
 
     if s.anthropic_api_key:
         try:
-            return _answer_anthropic(s, question, asker_name)
+            return _answer_anthropic(s, question, asker_name, db=db)
         except Exception as exc:
             logger.warning("Anthropic fallback also failed: %s", exc)
 
@@ -565,22 +565,104 @@ def _answer_gemini(db, s, contents: list) -> str:
     return "לא הצלחתי לענות על השאלה."
 
 
-def _answer_anthropic(s, question: str, asker_name: str) -> str:
-    """Fallback: answer via Anthropic Claude Haiku (no tool use — plain text only)."""
-    resp = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": s.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 400,
-            "system": _SYSTEM_PROMPT + "\n\nחשוב: אין לך גישה לנתוני המערכת כרגע. ענה בכנות שאינך יכול לשלוף נתונים בזמן אמת, אך תעזור עם כל שאלה כללית.",
-            "messages": [{"role": "user", "content": f"{asker_name} שואל: {question}"}],
-        },
-        timeout=20,
-    )
-    resp.raise_for_status()
-    return resp.json()["content"][0]["text"].strip()
+_ANTHROPIC_TOOLS = [
+    {
+        "name": "search_elevators",
+        "description": "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי.",
+        "input_schema": {"type": "object", "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer"},
+        }, "required": ["query"]},
+    },
+    {
+        "name": "get_elevator_calls",
+        "description": "מחזיר היסטוריית קריאות שירות עבור מעלית ספציפית לפי מזהה.",
+        "input_schema": {"type": "object", "properties": {
+            "elevator_id": {"type": "string"},
+            "limit": {"type": "integer"},
+        }, "required": ["elevator_id"]},
+    },
+    {
+        "name": "get_recent_calls",
+        "description": "מחזיר קריאות שירות מהימים האחרונים. ניתן לסנן לפי סטטוס, טכנאי, עיר.",
+        "input_schema": {"type": "object", "properties": {
+            "days": {"type": "integer"},
+            "status": {"type": "string"},
+            "city": {"type": "string"},
+            "technician_name": {"type": "string"},
+            "limit": {"type": "integer"},
+        }, "required": []},
+    },
+    {
+        "name": "get_technician_info",
+        "description": "מחזיר פרטים ומידע על טכנאי.",
+        "input_schema": {"type": "object", "properties": {
+            "name": {"type": "string"},
+        }, "required": ["name"]},
+    },
+    {
+        "name": "get_system_summary",
+        "description": "מחזיר סיכום כללי — קריאות פתוחות, טכנאים פעילים.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_technician_location",
+        "description": "מחזיר מיקום נוכחי של טכנאי.",
+        "input_schema": {"type": "object", "properties": {
+            "technician_name": {"type": "string"},
+            "near_address": {"type": "string"},
+        }, "required": []},
+    },
+    {
+        "name": "search_by_phone",
+        "description": "חפש מעליות לפי מספר טלפון.",
+        "input_schema": {"type": "object", "properties": {
+            "phone": {"type": "string"},
+        }, "required": ["phone"]},
+    },
+]
+
+
+def _answer_anthropic(s, question: str, asker_name: str, db=None) -> str:
+    """Fallback: answer via Anthropic Claude with full tool-use DB access."""
+    headers = {
+        "x-api-key": s.anthropic_api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    messages = [{"role": "user", "content": f"{asker_name} שואל: {question}"}]
+
+    with httpx.Client(timeout=30) as client:
+        for _iteration in range(6):
+            payload = {
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 600,
+                "system": _SYSTEM_PROMPT,
+                "tools": _ANTHROPIC_TOOLS if db else [],
+                "messages": messages,
+            }
+            resp = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Collect text and tool_use blocks
+            tool_uses = [b for b in data["content"] if b["type"] == "tool_use"]
+            text_blocks = [b for b in data["content"] if b["type"] == "text"]
+
+            if not tool_uses:
+                return text_blocks[0]["text"].strip() if text_blocks else "לא הצלחתי לענות."
+
+            # Execute tools and feed results back
+            messages.append({"role": "assistant", "content": data["content"]})
+            tool_results = []
+            for tu in tool_uses:
+                logger.info("🔧 Anthropic tool: %s(%s)", tu["name"], tu["input"])
+                result = _run_tool(db, tu["name"], tu["input"]) if db else {"error": "no db"}
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+            messages.append({"role": "user", "content": tool_results})
+
+    return "לא הצלחתי לענות על השאלה."
