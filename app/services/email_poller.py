@@ -279,51 +279,87 @@ def _parse_email(body: str, api_key: str = "") -> Optional[dict]:
 
 # ── elevator matching ──────────────────────────────────────────────────────────
 
+def _extract_building_number(address: str) -> str:
+    """Extract the building/house number from an address string."""
+    import re
+    m = re.search(r"\b(\d+)\b", address or "")
+    return m.group(1) if m else ""
+
+
 def _find_or_create_elevator(db, city: str, address: str):
     """
-    Try to find an existing elevator by city + street.
-    If not found, create a new record so the service call can be linked.
+    Try to find an existing elevator by city + address.
+
+    Matching rules (strict — when in doubt, flag for dispatcher review):
+      1. Exact address match (same city + same address string) → auto-match
+      2. Same street name AND same building number → auto-match
+      3. Same street name but DIFFERENT building number → PENDING_REVIEW (return None)
+      4. No match at all → create placeholder + alert dispatcher
     """
     from app.models.elevator import Elevator
 
-    if city:
+    addr_norm = (address or "").strip()
+    city_norm = (city or "").strip()
+    building_num = _extract_building_number(addr_norm)
+
+    if city_norm:
         candidates = (
             db.query(Elevator)
-            .filter(Elevator.city.ilike(f"%{city}%"))
+            .filter(Elevator.city.ilike(f"%{city_norm}%"))
             .all()
         )
-        # Try street-name match (first word of address)
-        street_word = address.split()[0] if address else ""
+
+        # 1. Exact address match
+        for elev in candidates:
+            if addr_norm and (elev.address or "").strip().lower() == addr_norm.lower():
+                return elev
+
+        # 2 & 3. Street-name match — check building number
+        street_word = addr_norm.split()[0] if addr_norm else ""
         for elev in candidates:
             if street_word and street_word in (elev.address or ""):
-                return elev
-        # City-only match — return first hit
-        if candidates:
-            return candidates[0]
+                elev_num = _extract_building_number(elev.address or "")
+                if building_num and elev_num and building_num == elev_num:
+                    return elev  # same street + same number → match
+                # Same street but different number — flag for review
+                logger.warning(
+                    "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
+                    addr_norm, elev.address,
+                )
+                try:
+                    from app.config import get_settings
+                    from app.services.whatsapp_service import notify_dispatcher
+                    s = get_settings()
+                    notify_dispatcher(
+                        f"⚠️ *כתובת לא ודאית — נדרש אימות*\n"
+                        f"📧 בקריאה: *{addr_norm}, {city_norm}*\n"
+                        f"🏢 במערכת: *{elev.address}, {elev.city}*\n"
+                        f"נא לאשר את השיוך הנכון בממשק הקריאות."
+                    )
+                except Exception:
+                    pass
+                return None  # signal: needs manual review
 
-    # Nothing found — create a placeholder and alert dispatcher
-    logger.info("📍 No elevator found for %s %s — creating placeholder", city, address)
+    # 4. Nothing found — create placeholder and alert dispatcher
+    logger.info("📍 No elevator found for %s %s — creating placeholder", city_norm, addr_norm)
     elev = Elevator(
-        address=address or "—",
-        city=city or "—",
+        address=addr_norm or "—",
+        city=city_norm or "—",
         floor_count=1,
         status="ACTIVE",
     )
     db.add(elev)
     db.flush()
 
-    # Alert dispatcher: unknown address
     try:
         from app.config import get_settings
-        from app.services.whatsapp_service import _send_message
+        from app.services.whatsapp_service import notify_dispatcher
         s = get_settings()
-        if s.dispatcher_whatsapp:
-            _send_message(
-                s.dispatcher_whatsapp,
-                f"⚠️ *קריאה מכתובת לא מוכרת*\n"
-                f"📍 {city}, {address}\n"
-                f"המערכת יצרה מעלית חדשה אוטומטית — נא לאמת ולעדכן."
-            )
+        notify_dispatcher(
+            f"⚠️ *קריאה מכתובת לא מוכרת*\n"
+            f"📍 {city_norm}, {addr_norm}\n"
+            f"המערכת יצרה מעלית חדשה אוטומטית — נא לאמת ולעדכן."
+        )
     except Exception:
         pass
 
@@ -517,6 +553,16 @@ def poll_emails(db) -> int:
                     continue
 
                 elevator = _find_or_create_elevator(db, fields["city"], fields["address"])
+
+                if elevator is None:
+                    # Ambiguous address — dispatcher already notified inside _find_or_create_elevator
+                    logger.info(
+                        "📍 Skipping call creation — address ambiguous (%s %s), awaiting dispatcher review",
+                        fields.get("city"), fields.get("address"),
+                    )
+                    _record_as_scanned(db, message_id)
+                    mail.store(mid, "+FLAGS", "\\Seen")
+                    continue
 
                 # Build a clean human-readable description
                 desc_parts = []

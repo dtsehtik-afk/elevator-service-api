@@ -1323,11 +1323,15 @@ def _check_pending_assignment_timeouts():
             .filter(Assignment.status.in_(["PENDING_CONFIRMATION", "CONFIRMED"]))
             .all()
         }
-        orphaned = [c for c in open_calls if c.id not in active_assignment_call_ids]
+        orphaned = [
+            c for c in open_calls
+            if c.id not in active_assignment_call_ids
+            and c.fault_type != "MAINTENANCE"  # maintenance calls are scheduled, not auto-assigned
+        ]
 
-        local_hour = datetime.now().hour
-        if orphaned and not (7 <= local_hour < 22):
-            logger.info("⏰ Off-hours (%d:xx) — skipping %d orphaned call(s)", local_hour, len(orphaned))
+        from app.services.working_hours import is_working_hours as _iwh
+        if orphaned and not _iwh():
+            logger.info("⏰ Off-hours — skipping %d orphaned call(s)", len(orphaned))
             orphaned = []
 
         if orphaned:
