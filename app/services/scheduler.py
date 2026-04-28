@@ -1000,13 +1000,16 @@ def _handle_send_route(db, phone: str) -> None:
 
 
 def _quick_detect_intent(text: str, settings) -> str:
-    """Fast intent detection for manager routing — returns REPORT/TAKE/DEFER/REQUEST/ROUTE/OTHER."""
+    """Keyword-based intent detection — no API call. Returns intent or OTHER for ambiguous cases."""
     t = text.strip().lower()
-    report_kw = ("דוח", "סיום", "סיימתי", "טיפלתי", "סגור", "סגירה", 'דו"ח')
-    take_kw = ("לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך", "אני על זה")
-    defer_kw = ("דחה למחר", "אטפל מחר", "לדחות")
+    report_kw  = ("דוח", "סיום", "סיימתי", "טיפלתי", "סגור", "סגירה", 'דו"ח', "טיפלנו", "בוצע")
+    take_kw    = ("לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך", "אני על זה", "אני מגיע")
+    defer_kw   = ("דחה למחר", "אטפל מחר", "לדחות", "מחר בבוקר")
     request_kw = ("מבקש", "מבקשת", "אשמח לטפל", "רוצה לטפל")
-    route_kw = ("מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום")
+    route_kw   = ("מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום", "מה יש לי")
+    ignore_kw  = ("תודה", "אוקיי", "אוק", "סבבה", "בסדר", "👍", "🙏", "✅", "ממש תודה")
+    question_kw = ("אפשר", "מה ה", "כמה", "מתי", "היסטוריה", "פרטים", "מי ה", "איפה",
+                   "קריאות פתוחות", "סטטוס", "רשימה", "כתובת", "פירוט", "מה קרה", "מה המצב")
     if any(k in t for k in report_kw):
         return "REPORT"
     if any(k in t for k in route_kw):
@@ -1017,6 +1020,10 @@ def _quick_detect_intent(text: str, settings) -> str:
         return "DEFER"
     if any(k in t for k in request_kw):
         return "REQUEST"
+    if any(k in t for k in ignore_kw) and len(t) < 20:
+        return "IGNORE"
+    if any(k in t for k in question_kw):
+        return "QUESTION"
     return "OTHER"
 
 
@@ -1108,68 +1115,61 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
         handle_dispatcher_command(db, phone, text, settings)
         return
 
-    try:
-        import json, urllib.request as _ur, urllib.error
-        _prompt = (
-            "אתה מנתח כוונות של הודעות ווצאפ מטכנאים של חברת מעליות. "
-            "החזר JSON בלבד (ללא הסברים) עם שדה 'intent' אחד מתוך:\n"
-            "- REPORT   (הטכנאי מדווח שסיים טיפול / שולח סיכום)\n"
-            "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה — 'לקחתי', 'אני לוקח')\n"
-            "- DEFER    (הטכנאי מבקש לדחות קריאה ליום הבא — 'דחה למחר', 'מחר', 'אטפל מחר', 'לדחות')\n"
-            "- REQUEST  (הטכנאי מבקש לטפל בקריאה הממתינה לשיבוץ ידני — 'מבקש', 'אשמח לטפל', 'רוצה לטפל', 'אני מבקש את הקריאה')\n"
-            "- ROUTE    (הטכנאי מבקש לקבל את המסלול / רשימת הקריאות שלו — 'מסלול', 'שלח מסלול', 'מפה', 'קריאות שלי', 'מה יש לי היום')\n"
-            "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה, סטטוס)\n"
-            "- IGNORE   (ברכה קצרה כמו 'אוקיי', 'תודה', 'סבבה', אמוג'י בלבד)\n"
-            "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה / סיכום הדחייה).\n\n"
-            "הבדל בין TAKE לבין REQUEST:\n"
-            "- TAKE: הטכנאי לוקח קריאה ישירות ללא אישור ('לקחתי', 'קיבלתי', 'אני על זה').\n"
-            "- REQUEST: הטכנאי מבקש אישור מהמוקד ('מבקש', 'אשמח', 'רוצה', 'אפשר לטפל').\n\n"
-            "חשוב: רק הודעות קצרות וחסרות תוכן כמו 'אוקיי', 'תודה', 'סבבה' הן IGNORE. "
-            "כל הודעה שיש בה תוכן מהותי — אפילו אם לא ברור — תהיה QUESTION.\n\n"
-            f"הודעה: {text}"
-        )
-        import urllib.request, json as _json
-        import urllib.error
-        _payload = json.dumps({
-            "contents": [{"parts": [{"text": _prompt}]}],
-            "generationConfig": {"maxOutputTokens": 150},
-        }).encode()
-        _req = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.gemini_api_key}",
-            data=_payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(_req, timeout=10) as _r:
-            _data = json.loads(_r.read())
-        raw = _data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
-        parsed  = json.loads(raw)
-        intent  = parsed.get("intent", "QUESTION")
-        extract = parsed.get("extract", text)
+    # Keyword-based intent detection — no Gemini API call needed for common intents
+    intent = _quick_detect_intent(text, settings)
+    extract = text
 
-        logger.info("🧠 Intent '%s' detected for msg: %s", intent, text[:60])
+    # For ambiguous cases (OTHER), try Gemini only if quota available
+    if intent == "OTHER" and getattr(settings, "gemini_api_key", ""):
+        try:
+            import json, urllib.request, urllib.error
+            _prompt = (
+                "אתה מנתח כוונות של הודעות ווצאפ מטכנאים. "
+                "החזר JSON בלבד עם שדה 'intent' אחד מתוך: "
+                "REPORT/TAKE/DEFER/REQUEST/ROUTE/QUESTION/IGNORE "
+                "ושדה 'extract' עם הטקסט הרלוונטי.\n"
+                "IGNORE רק לברכות קצרות ('אוקיי','תודה','👍'). "
+                "כל שאלה/בקשה מהותית = QUESTION.\n"
+                f"הודעה: {text}"
+            )
+            _payload = json.dumps({
+                "contents": [{"parts": [{"text": _prompt}]}],
+                "generationConfig": {"maxOutputTokens": 80},
+            }).encode()
+            _req = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.gemini_api_key}",
+                data=_payload, headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(_req, timeout=8) as _r:
+                _data = json.loads(_r.read())
+            raw = _data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
+            parsed = json.loads(raw)
+            intent  = parsed.get("intent", "QUESTION")
+            extract = parsed.get("extract", text)
+        except Exception as exc:
+            logger.warning("Gemini intent detection failed (%s) — treating as QUESTION", exc)
+            intent = "QUESTION"
 
-        if intent == "REPORT":
-            _handle_technician_report(db, phone, extract or text)
-        elif intent == "TAKE":
-            _handle_self_assign(db, phone, extract or text)
-        elif intent == "DEFER":
-            _handle_technician_defer(db, phone, extract or text)
-        elif intent == "REQUEST":
-            _handle_technician_request(db, phone, extract or text)
-        elif intent == "ROUTE":
-            _handle_send_route(db, phone)
-        elif intent == "QUESTION":
-            _handle_chat_question(db, phone, text, settings, with_history=is_reply)
-        else:
-            # IGNORE — short ack only (ok, thanks, 👍) — brief confirmation
-            _send_message(phone, "👍")
+    logger.info("🧠 Intent '%s' for: %s", intent, text[:60])
 
-    except Exception as exc:
-        logger.error("Intent detection failed: %s — falling back to clarification", exc)
-        _fallback_reply()
+    if intent == "REPORT":
+        _handle_technician_report(db, phone, extract or text)
+    elif intent == "TAKE":
+        _handle_self_assign(db, phone, extract or text)
+    elif intent == "DEFER":
+        _handle_technician_defer(db, phone, extract or text)
+    elif intent == "REQUEST":
+        _handle_technician_request(db, phone, extract or text)
+    elif intent == "ROUTE":
+        _handle_send_route(db, phone)
+    elif intent == "QUESTION":
+        _handle_chat_question(db, phone, text, settings, with_history=is_reply)
+    elif intent == "IGNORE":
+        _send_message(phone, "👍")
+    else:
+        _handle_chat_question(db, phone, text, settings, with_history=is_reply)
 
 
 def _handle_chat_question_simple(db, phone: str, question: str, settings) -> None:
