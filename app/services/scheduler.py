@@ -1236,9 +1236,9 @@ def _handle_chat_question_simple(db, phone: str, question: str, settings) -> Non
         )
         return
 
-    # Generic fallback — tell user to add API key or explain what's available
+    # Generic fallback
     _send_message(phone,
-        f"🤖 שאלות פתוחות דורשות מפתח ANTHROPIC_API_KEY.\n"
+        f"🤖 לא הצלחתי להבין את השאלה.\n"
         f"כרגע אני יכול לענות על:\n"
         f"• *כמה קריאות פתוחות יש*\n"
         f"• *מה הקריאה שלי*"
