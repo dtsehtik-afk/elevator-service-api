@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # Google Gemini — used for email parsing and WhatsApp chat agent
     gemini_api_key: str = ""
 
+    # Anthropic — fallback for chat agent when Gemini is unavailable
+    anthropic_api_key: str = ""
+
     # Control plane — secret key sent by admin.lift-agent.com in X-Control-Plane-Key header
     control_plane_api_key: str = ""
 

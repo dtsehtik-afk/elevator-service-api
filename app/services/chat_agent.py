@@ -492,9 +492,6 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     from app.config import get_settings
     s = get_settings()
 
-    if not s.gemini_api_key:
-        return "❌ שירות השאלות אינו מוגדר (חסר GEMINI_API_KEY)"
-
     # Always load recent conversation history to maintain fluid conversation
     history = _load_conversation_history(db, phone) if phone else []
 
@@ -506,6 +503,24 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     else:
         contents = history + [current]
 
+    # Try Gemini first (with tool use), fall back to Anthropic if unavailable
+    if s.gemini_api_key:
+        try:
+            return _answer_gemini(db, s, contents)
+        except Exception as exc:
+            logger.warning("Gemini unavailable (%s) — trying Anthropic fallback", exc)
+
+    if s.anthropic_api_key:
+        try:
+            return _answer_anthropic(s, question, asker_name)
+        except Exception as exc:
+            logger.warning("Anthropic fallback also failed: %s", exc)
+
+    return "השירות אינו זמין כרגע — נסה שוב בעוד מספר דקות."
+
+
+def _answer_gemini(db, s, contents: list) -> str:
+    """Run the Gemini tool-use loop and return Hebrew answer."""
     with httpx.Client(timeout=30) as client:
         for _iteration in range(6):
             payload = {
@@ -514,48 +529,58 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
                 "contents": contents,
                 "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600},
             }
-            # Try primary model, fall back to gemini-1.5-flash on quota/503
             for url in (_GEMINI_PRIMARY, _GEMINI_FALLBACK):
                 resp = client.post(f"{url}?key={s.gemini_api_key}", json=payload)
                 if resp.status_code not in (429, 503):
                     break
-                logger.warning("Gemini %s returned %s, trying fallback", url, resp.status_code)
+                logger.warning("Gemini %s returned %s, trying fallback model", url, resp.status_code)
             if not resp.is_success:
-                logger.error("Gemini API error %s: %s", resp.status_code, resp.text[:500])
                 raise httpx.HTTPStatusError(f"Gemini {resp.status_code}", request=resp.request, response=resp)
-            resp.raise_for_status()
+
             data = resp.json()
-
             parts = data["candidates"][0]["content"]["parts"]
-
-            # Collect function calls
             fn_calls = [p["functionCall"] for p in parts if "functionCall" in p]
 
             if not fn_calls:
-                # No tool calls — return text answer
                 for p in parts:
                     if "text" in p and p["text"]:
                         return p["text"].strip()
                 return "לא הצלחתי לעבד את השאלה."
 
-            # Append model turn
             contents.append({"role": "model", "parts": parts})
-
-            # Execute tools and build response turn
             fn_responses = []
             for fn_call in fn_calls:
                 name = fn_call["name"]
                 args = fn_call.get("args", {})
-                logger.warning("🔧 Chat agent calling tool: %s(%s)", name, args)
+                logger.warning("🔧 Gemini tool: %s(%s)", name, args)
                 result = _run_tool(db, name, args)
-                logger.warning("🔧 Tool result: %s", str(result)[:300])
                 fn_responses.append({
                     "functionResponse": {
                         "name": name,
                         "response": {"result": json.dumps(result, ensure_ascii=False)},
                     }
                 })
-
             contents.append({"role": "user", "parts": fn_responses})
 
-    return "לא הצלחתי לענות על השאלה — נסה לנסח אחרת."
+    return "לא הצלחתי לענות על השאלה."
+
+
+def _answer_anthropic(s, question: str, asker_name: str) -> str:
+    """Fallback: answer via Anthropic Claude Haiku (no tool use — plain text only)."""
+    resp = httpx.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": s.anthropic_api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 400,
+            "system": _SYSTEM_PROMPT + "\n\nחשוב: אין לך גישה לנתוני המערכת כרגע. ענה בכנות שאינך יכול לשלוף נתונים בזמן אמת, אך תעזור עם כל שאלה כללית.",
+            "messages": [{"role": "user", "content": f"{asker_name} שואל: {question}"}],
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return resp.json()["content"][0]["text"].strip()
