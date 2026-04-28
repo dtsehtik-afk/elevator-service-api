@@ -1083,7 +1083,7 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
 
     if is_manager and tech:
         # Manager who is also a technician — detect tech intents first
-        _tech_intents = {"REPORT", "TAKE", "DEFER", "REQUEST"}
+        _tech_intents = {"REPORT", "TAKE", "DEFER", "REQUEST", "ROUTE"}
         quick_intent = _quick_detect_intent(text, settings)
         if quick_intent in _tech_intents:
             pass  # fall through to technician flow below
