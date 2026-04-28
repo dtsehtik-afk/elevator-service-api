@@ -111,13 +111,17 @@ def _field(body: str, label: str) -> str:
 _GEMINI_PROMPT = (
     "אתה מנתח מיילים של קריאות שירות למעליות שמגיעות מחברת beepertalk. "
     "המיילים כתובים בעברית ועשויים להכיל אימוג'ים כמו 📍 לכתובת, 👤 לשם, 📞 לטלפון. "
-    "חלץ את השדות הבאים והחזר JSON בלבד, ללא הסברים, ללא markdown:\n"
+    "חלץ את כל השדות הבאים והחזר JSON בלבד, ללא הסברים, ללא markdown:\n"
     "{\n"
-    '  "name": "שם המתקשר",\n'
+    '  "name": "שם המתקשר/הדייר",\n'
     '  "city": "שם העיר בלבד",\n'
     '  "address": "שם הרחוב + מספר בית (ללא שם עיר)",\n'
-    '  "phone": "מספר טלפון ספרות בלבד",\n'
-    '  "floor": "מספר קומה או ריקה",\n'
+    '  "phone": "מספר טלפון של המתקשר, ספרות בלבד",\n'
+    '  "floor": "מספר קומה שבה האירוע, או ריקה",\n'
+    '  "floor_count": "סך מספר קומות/תחנות במעלית, מספר בלבד, או ריקה",\n'
+    '  "serial_number": "מספר סידורי של המעלית אם מצוין, או ריקה",\n'
+    '  "internal_number": "מספר מ.ע / מספר פנימי / מספר מעלית אם מצוין, או ריקה",\n'
+    '  "building_name": "שם הבניין/הפרויקט אם מצוין, או ריקה",\n'
     '  "call_type": "סוג הפניה כפי שנכתב במייל",\n'
     '  "fault_type": "STUCK|DOOR|ELECTRICAL|MECHANICAL|SOFTWARE|OTHER",\n'
     '  "description": "תיאור קצר של התקלה"\n'
@@ -281,20 +285,19 @@ def _parse_email(body: str, api_key: str = "") -> Optional[dict]:
 
 def _extract_building_number(address: str) -> str:
     """Extract the building/house number from an address string."""
-    import re
     m = re.search(r"\b(\d+)\b", address or "")
     return m.group(1) if m else ""
 
 
-def _find_or_create_elevator(db, city: str, address: str):
+def _find_elevator(db, city: str, address: str, fields: dict):
     """
-    Try to find an existing elevator by city + address.
+    Try to find an existing elevator by city + address. NEVER creates a new elevator.
 
     Matching rules (strict — when in doubt, flag for dispatcher review):
       1. Exact address match (same city + same address string) → auto-match
       2. Same street name AND same building number → auto-match
-      3. Same street name but DIFFERENT building number → PENDING_REVIEW (return None)
-      4. No match at all → create placeholder + alert dispatcher
+      3. Same street name but DIFFERENT building number → notify dispatcher, return None
+      4. No match at all → notify dispatcher with full call details, return None
     """
     from app.models.elevator import Elevator
 
@@ -326,44 +329,106 @@ def _find_or_create_elevator(db, city: str, address: str):
                     "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
                     addr_norm, elev.address,
                 )
-                try:
-                    from app.config import get_settings
-                    from app.services.whatsapp_service import notify_dispatcher
-                    s = get_settings()
-                    notify_dispatcher(
-                        f"⚠️ *כתובת לא ודאית — נדרש אימות*\n"
-                        f"📧 בקריאה: *{addr_norm}, {city_norm}*\n"
-                        f"🏢 במערכת: *{elev.address}, {elev.city}*\n"
-                        f"נא לאשר את השיוך הנכון בממשק הקריאות."
-                    )
-                except Exception:
-                    pass
-                return None  # signal: needs manual review
+                _notify_no_match(
+                    city_norm, addr_norm, fields,
+                    extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{elev.address}, {elev.city}*\n"
+                )
+                return None
 
-    # 4. Nothing found — create placeholder and alert dispatcher
-    logger.info("📍 No elevator found for %s %s — creating placeholder", city_norm, addr_norm)
-    elev = Elevator(
-        address=addr_norm or "—",
-        city=city_norm or "—",
-        floor_count=1,
-        status="ACTIVE",
-    )
-    db.add(elev)
-    db.flush()
+    # 4. Nothing found — notify dispatcher with full context, no auto-creation
+    logger.info("📍 No elevator found for %s %s — notifying dispatcher", city_norm, addr_norm)
+    _notify_no_match(city_norm, addr_norm, fields)
+    return None
 
+
+def _notify_no_match(city: str, address: str, fields: dict, extra: str = "") -> None:
+    """Send dispatcher a detailed WhatsApp with all parsed call data when no elevator matched."""
     try:
-        from app.config import get_settings
         from app.services.whatsapp_service import notify_dispatcher
-        s = get_settings()
-        notify_dispatcher(
-            f"⚠️ *קריאה מכתובת לא מוכרת*\n"
-            f"📍 {city_norm}, {addr_norm}\n"
-            f"המערכת יצרה מעלית חדשה אוטומטית — נא לאמת ולעדכן."
-        )
-    except Exception:
-        pass
+        name    = fields.get("name", "")
+        phone   = fields.get("phone", "")
+        floors  = fields.get("floor_count", "")
+        serial  = fields.get("serial_number", "")
+        intnum  = fields.get("internal_number", "")
+        bname   = fields.get("building_name", "")
+        ctype   = fields.get("call_type", "")
+        desc    = fields.get("description", "")
 
-    return elev
+        lines = [extra or f"⚠️ *קריאה מכתובת לא מוכרת — נדרש שיוך ידני*\n"]
+        lines.append(f"📍 *{address}, {city}*")
+        if bname:
+            lines.append(f"🏢 {bname}")
+        if name:
+            lines.append(f"👤 {name}")
+        if phone:
+            lines.append(f"📞 {phone}")
+        if ctype:
+            lines.append(f"🔧 {ctype}")
+        if desc:
+            lines.append(f"📝 {desc}")
+        if floors:
+            lines.append(f"🏗️ קומות: {floors}")
+        if serial:
+            lines.append(f"🔢 סריאלי: {serial}")
+        if intnum:
+            lines.append(f"#️⃣ מ.ע: {intnum}")
+        lines.append("\nנא לפתוח קריאה ידנית ולשייך למעלית הנכונה.")
+        notify_dispatcher("\n".join(lines))
+    except Exception as exc:
+        logger.error("Failed to notify dispatcher about unmatched address: %s", exc)
+
+
+def _enrich_elevator(db, elevator, fields: dict) -> None:
+    """
+    Update elevator record with any new data extracted from the email.
+    Only fills in fields that are currently empty — never overwrites existing data.
+    """
+    changed = False
+
+    # Caller phone → add to caller_phones list if not already there
+    phone = re.sub(r"[^\d]", "", fields.get("phone", ""))
+    if phone and len(phone) >= 9:
+        existing = list(elevator.caller_phones or [])
+        # Normalise to last 9 digits for comparison
+        if not any(re.sub(r"[^\d]", "", p)[-9:] == phone[-9:] for p in existing):
+            existing.append(phone)
+            elevator.caller_phones = existing
+            changed = True
+
+    # Floor count — only update if current value is default (1) and email has a real value
+    fc = fields.get("floor_count", "")
+    if fc and str(fc).isdigit() and int(fc) > 1 and elevator.floor_count <= 1:
+        elevator.floor_count = int(fc)
+        changed = True
+
+    # Serial number
+    serial = (fields.get("serial_number") or "").strip()
+    if serial and not elevator.serial_number:
+        elevator.serial_number = serial
+        changed = True
+
+    # Internal number (מ.ע)
+    intnum = (fields.get("internal_number") or "").strip()
+    if intnum and not elevator.internal_number:
+        try:
+            elevator.internal_number = intnum
+            changed = True
+        except Exception:
+            pass  # unique constraint — ignore if duplicate
+
+    # Building name
+    bname = (fields.get("building_name") or "").strip()
+    if bname and not elevator.building_name:
+        elevator.building_name = bname
+        changed = True
+
+    if changed:
+        try:
+            db.commit()
+            logger.info("🔄 Elevator %s enriched from email data", elevator.id)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Elevator enrichment failed: %s", exc)
 
 
 # ── rescue blast ──────────────────────────────────────────────────────────────
@@ -552,17 +617,20 @@ def poll_emails(db) -> int:
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
-                elevator = _find_or_create_elevator(db, fields["city"], fields["address"])
+                elevator = _find_elevator(db, fields["city"], fields["address"], fields)
 
                 if elevator is None:
-                    # Ambiguous address — dispatcher already notified inside _find_or_create_elevator
+                    # No match or ambiguous address — dispatcher already notified inside _find_elevator
                     logger.info(
-                        "📍 Skipping call creation — address ambiguous (%s %s), awaiting dispatcher review",
+                        "📍 Skipping call creation — no elevator match for (%s %s), awaiting dispatcher review",
                         fields.get("city"), fields.get("address"),
                     )
                     _record_as_scanned(db, message_id)
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
+
+                # Enrich the matched elevator with any new data from this email
+                _enrich_elevator(db, elevator, fields)
 
                 # Build a clean human-readable description
                 desc_parts = []
