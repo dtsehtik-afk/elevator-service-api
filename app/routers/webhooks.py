@@ -515,6 +515,30 @@ def _transcribe_audio_gemini(msg_data: dict) -> str:
         except Exception as exc:
             logger.error("_transcribe_audio: Gemini 2.5 fallback failed: %s", exc)
 
+    # ── Last resort: OpenAI Whisper ──────────────────────────────────────────
+    if settings.openai_api_key:
+        try:
+            import openai
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            try:
+                oai = openai.OpenAI(api_key=settings.openai_api_key)
+                with open(tmp_path, "rb") as f:
+                    result = oai.audio.transcriptions.create(
+                        model="whisper-1", file=f, language="he"
+                    )
+                text = result.text.strip()
+                if text:
+                    logger.info("🎤 Whisper fallback transcription succeeded")
+                    return text
+            finally:
+                os.unlink(tmp_path)
+        except Exception as exc:
+            logger.error("_transcribe_audio: Whisper fallback failed: %s", exc)
+
     return ""
 
 
