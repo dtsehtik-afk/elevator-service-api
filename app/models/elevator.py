@@ -125,6 +125,10 @@ class Elevator(Base):
     management_company_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("management_companies.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # CRM customer link
+    customer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -146,4 +150,7 @@ class Elevator(Base):
     )
     management_company: Mapped[Optional["ManagementCompany"]] = relationship(  # noqa: F821
         "ManagementCompany", back_populates="elevators", foreign_keys=[management_company_id]
+    )
+    customer: Mapped[Optional["Customer"]] = relationship(  # noqa: F821
+        "Customer", back_populates="elevators", foreign_keys="Elevator.customer_id"
     )

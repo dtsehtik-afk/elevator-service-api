@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -21,6 +21,9 @@ class Building(Base):
     latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    customer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     elevators: Mapped[list["Elevator"]] = relationship(  # noqa: F821
@@ -28,4 +31,7 @@ class Building(Base):
     )
     contacts: Mapped[list["Contact"]] = relationship(  # noqa: F821
         "Contact", back_populates="building", cascade="all, delete-orphan"
+    )
+    customer: Mapped[Optional["Customer"]] = relationship(  # noqa: F821
+        "Customer", back_populates="buildings", foreign_keys="Building.customer_id"
     )

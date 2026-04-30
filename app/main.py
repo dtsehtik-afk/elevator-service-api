@@ -13,6 +13,7 @@ from slowapi.util import get_remote_address
 
 from app.config import get_settings
 from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import, admin_control
+from app.routers import customers, quotes, contracts, invoices, inventory, leads, erp_dashboard
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -67,6 +68,11 @@ async def lifespan(app: FastAPI):
                     modules JSONB NOT NULL DEFAULT '{}',
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )""",
+                # ERP: customer_id on elevators + buildings
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_customer_id ON elevators (customer_id)",
+                "ALTER TABLE buildings ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_buildings_customer_id ON buildings (customer_id)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -108,6 +114,7 @@ _API_ONLY_PREFIXES = (
     "/auth", "/docs", "/redoc", "/openapi", "/health",
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/admin",
+    "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
 )
 
 
@@ -145,6 +152,13 @@ app.include_router(buildings.router)
 app.include_router(contacts.router)
 app.include_router(data_import.router)
 app.include_router(admin_control.router)
+app.include_router(customers.router)
+app.include_router(quotes.router)
+app.include_router(contracts.router)
+app.include_router(invoices.router)
+app.include_router(inventory.router)
+app.include_router(leads.router)
+app.include_router(erp_dashboard.router)
 
 
 @app.get("/health", tags=["Health"])

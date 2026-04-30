@@ -53,6 +53,7 @@ export interface Elevator {
   // Grouping
   management_company_id: string | null
   management_company_name: string | null
+  customer_id: string | null
   created_at: string
   updated_at: string
 }
@@ -152,4 +153,184 @@ export interface CallFilters {
   technician_id?: string
   skip?: number
   limit?: number
+}
+
+// ── ERP Types ──────────────────────────────────────────────────────────────
+
+export interface Customer {
+  id: string
+  name: string
+  customer_type: 'OWNER' | 'MANAGEMENT_COMPANY' | 'COMMITTEE' | 'PRIVATE' | 'CORPORATE'
+  parent_id: string | null
+  parent_name: string | null
+  phone: string | null
+  email: string | null
+  address: string | null
+  city: string | null
+  contact_person: string | null
+  vat_number: string | null
+  payment_terms: number
+  credit_limit: number | null
+  notes: string | null
+  is_active: boolean
+  children_count: number
+  elevator_count: number
+  active_contracts: number
+  open_invoices: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CustomerDetail extends Customer {
+  children: { id: string; name: string; customer_type: string }[]
+}
+
+export interface QuoteItem {
+  description: string
+  quantity: number
+  unit_price: number
+  total: number
+}
+
+export interface Quote {
+  id: string
+  number: string
+  customer_id: string
+  customer_name: string | null
+  elevator_id: string | null
+  elevator_address: string | null
+  items: QuoteItem[]
+  subtotal: number
+  vat_rate: number
+  vat_amount: number
+  total: number
+  status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
+  valid_until: string | null
+  notes: string | null
+  contract_id: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Contract {
+  id: string
+  number: string
+  customer_id: string
+  customer_name: string | null
+  contract_type: 'SERVICE' | 'MAINTENANCE' | 'INSPECTION' | 'RENOVATION' | 'OTHER'
+  status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'CANCELLED'
+  start_date: string | null
+  end_date: string | null
+  monthly_price: number | null
+  total_value: number | null
+  payment_terms: number
+  auto_invoice: boolean
+  invoice_frequency: string | null
+  last_invoiced_at: string | null
+  notes: string | null
+  elevator_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Invoice {
+  id: string
+  number: string
+  customer_id: string
+  customer_name: string | null
+  contract_id: string | null
+  items: QuoteItem[]
+  subtotal: number
+  vat_rate: number
+  vat_amount: number
+  total: number
+  amount_paid: number
+  balance: number
+  status: 'DRAFT' | 'SENT' | 'PAID' | 'PARTIAL' | 'OVERDUE' | 'CANCELLED'
+  issue_date: string
+  due_date: string | null
+  paid_at: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Receipt {
+  id: string
+  invoice_id: string
+  amount: number
+  payment_method: 'CASH' | 'BANK_TRANSFER' | 'CHECK' | 'CREDIT_CARD' | 'OTHER'
+  reference: string | null
+  payment_date: string
+  notes: string | null
+  created_at: string
+}
+
+export interface Part {
+  id: string
+  sku: string | null
+  name: string
+  description: string | null
+  category: string | null
+  unit: string
+  quantity: number
+  min_quantity: number
+  cost_price: number | null
+  sell_price: number | null
+  supplier_name: string | null
+  supplier_phone: string | null
+  supplier_email: string | null
+  is_active: boolean
+  is_low_stock: boolean
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Lead {
+  id: string
+  name: string
+  company: string | null
+  phone: string | null
+  email: string | null
+  source: 'WEBSITE' | 'PHONE' | 'REFERRAL' | 'EMAIL' | 'SOCIAL' | 'OTHER'
+  status: 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'PROPOSAL' | 'WON' | 'LOST'
+  stage: string | null
+  owner: string | null
+  estimated_value: number | null
+  customer_id: string | null
+  customer_name: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ERPDashboard {
+  service: {
+    open_calls: number
+    critical_calls: number
+    overdue_maintenance: number
+    upcoming_maintenance: number
+  }
+  crm: {
+    total_customers: number
+    active_contracts: number
+    expiring_contracts: number
+    new_leads: number
+  }
+  financial: {
+    month_revenue: number
+    open_receivables: number
+    overdue_invoices: number
+  }
+  inventory: {
+    low_stock_parts: number
+  }
+  elevators: {
+    total_active: number
+    high_risk: number
+    with_debt: number
+  }
+  alerts: { level: 'error' | 'warning' | 'info'; message: string }[]
 }

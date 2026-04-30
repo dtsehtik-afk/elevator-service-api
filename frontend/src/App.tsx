@@ -14,6 +14,16 @@ import PendingCallsPage from './pages/PendingCallsPage'
 import ManagementCompaniesPage from './pages/ManagementCompaniesPage'
 import ImportPage from './pages/ImportPage'
 import MapPage from './pages/MapPage'
+// ERP modules
+import ERPDashboardPage from './pages/ERPDashboardPage'
+import CustomersPage from './pages/CustomersPage'
+import CustomerDetailPage from './pages/CustomerDetailPage'
+import QuotesPage from './pages/QuotesPage'
+import QuoteDetailPage from './pages/QuoteDetailPage'
+import ContractsPage from './pages/ContractsPage'
+import InvoicesPage from './pages/InvoicesPage'
+import InventoryPage from './pages/InventoryPage'
+import LeadsPage from './pages/LeadsPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -36,16 +46,29 @@ export default function App() {
               <Shell>
                 <Routes>
                   <Route path="/" element={<DashboardPage />} />
+                  {/* Field service */}
                   <Route path="/elevators" element={<ElevatorsPage />} />
                   <Route path="/elevators/:id" element={<ElevatorDetailPage />} />
                   <Route path="/calls" element={<CallsPage />} />
+                  <Route path="/pending-calls" element={<PendingCallsPage />} />
                   <Route path="/technicians" element={<TechniciansPage />} />
                   <Route path="/maintenance" element={<MaintenancePage />} />
                   <Route path="/inspections" element={<InspectionsPage />} />
-                  <Route path="/pending-calls" element={<PendingCallsPage />} />
                   <Route path="/management-companies" element={<ManagementCompaniesPage />} />
-                  <Route path="/import" element={<ImportPage />} />
                   <Route path="/map" element={<MapPage />} />
+                  <Route path="/import" element={<ImportPage />} />
+                  {/* ERP */}
+                  <Route path="/erp" element={<ERPDashboardPage />} />
+                  <Route path="/customers" element={<CustomersPage />} />
+                  <Route path="/customers/:id" element={<CustomerDetailPage />} />
+                  <Route path="/quotes" element={<QuotesPage />} />
+                  <Route path="/quotes/:id" element={<QuoteDetailPage />} />
+                  <Route path="/contracts" element={<ContractsPage />} />
+                  <Route path="/contracts/:id" element={<ContractsPage />} />
+                  <Route path="/invoices" element={<InvoicesPage />} />
+                  <Route path="/invoices/:id" element={<InvoicesPage />} />
+                  <Route path="/inventory" element={<InventoryPage />} />
+                  <Route path="/leads" element={<LeadsPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Shell>
