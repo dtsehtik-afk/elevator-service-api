@@ -25,6 +25,9 @@ import ContractsPage from './pages/ContractsPage'
 import InvoicesPage from './pages/InvoicesPage'
 import InventoryPage from './pages/InventoryPage'
 import LeadsPage from './pages/LeadsPage'
+import ReportsPage from './pages/ReportsPage'
+import CustomFieldsPage from './pages/CustomFieldsPage'
+import RolesPage from './pages/RolesPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -71,6 +74,10 @@ export default function App() {
                   <Route path="/invoices/:id" element={<InvoicesPage />} />
                   <Route path="/inventory" element={<InventoryPage />} />
                   <Route path="/leads" element={<LeadsPage />} />
+                  {/* Reports & Settings */}
+                  <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/custom-fields" element={<CustomFieldsPage />} />
+                  <Route path="/roles" element={<RolesPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Shell>

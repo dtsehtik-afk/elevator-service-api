@@ -43,6 +43,15 @@ const NAV_ITEMS: NavItem[] = [
       { label: 'מלאי', path: '/inventory', icon: '📦' },
     ],
   },
+  { label: 'דוחות', path: '/reports', icon: '📈' },
+  {
+    label: 'הגדרות', path: '/settings', icon: '⚙️',
+    children: [
+      { label: 'שעות עבודה', path: '/settings', icon: '🕐' },
+      { label: 'שדות מותאמים', path: '/custom-fields', icon: '🗂️' },
+      { label: 'הרשאות תפקיד', path: '/roles', icon: '🔐' },
+    ],
+  },
 ]
 
 function NavGroup({ item, depth = 0 }: { item: NavItem; depth?: number }) {

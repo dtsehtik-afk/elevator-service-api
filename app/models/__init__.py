@@ -19,6 +19,8 @@ from app.models.contract import Contract, ElevatorContract
 from app.models.invoice import Invoice, Receipt
 from app.models.part import Part, PartUsage
 from app.models.lead import Lead
+from app.models.saved_view import SavedView
+from app.models.custom_field import CustomField, CustomFieldValue
 
 __all__ = [
     "Building",
@@ -44,4 +46,7 @@ __all__ = [
     "Part",
     "PartUsage",
     "Lead",
+    "SavedView",
+    "CustomField",
+    "CustomFieldValue",
 ]

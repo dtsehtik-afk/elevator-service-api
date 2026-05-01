@@ -1,10 +1,12 @@
 """System settings router — working hours and other configurable parameters."""
+import json
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from app.database import get_db
-from app.auth.dependencies import require_admin
+from app.auth.dependencies import get_current_user, require_admin
+from app.models.technician import Technician
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -84,3 +86,102 @@ def _reload_working_hours(wh_module, data: dict) -> None:
         eh, em = [int(x) for x in d["end"].split(":")]
         new_schedule[idx] = (sh, sm, eh, em)
     wh_module._SCHEDULE = new_schedule
+
+
+# ── Role permissions ──────────────────────────────────────────────────────────
+
+_DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, List[str]]] = {
+    "ADMIN": {
+        "service_calls": ["view", "create", "assign", "close", "delete"],
+        "invoices":       ["view", "create", "send", "mark_paid", "delete"],
+        "inventory":      ["view", "manage", "purchase_orders"],
+        "crm":            ["view", "manage"],
+        "hr":             ["view", "manage"],
+        "reports":        ["view", "export"],
+        "settings":       ["view", "edit"],
+        "users":          ["view", "manage", "assign_roles"],
+    },
+    "CEO": {
+        "service_calls": ["view", "create", "assign", "close"],
+        "invoices":       ["view", "create", "send", "mark_paid"],
+        "inventory":      ["view", "manage", "purchase_orders"],
+        "crm":            ["view", "manage"],
+        "hr":             ["view", "manage"],
+        "reports":        ["view", "export"],
+        "settings":       ["view", "edit"],
+        "users":          ["view", "manage", "assign_roles"],
+    },
+    "VP": {
+        "service_calls": ["view", "create", "assign", "close"],
+        "invoices":       ["view", "create", "send", "mark_paid"],
+        "inventory":      ["view", "manage"],
+        "crm":            ["view", "manage"],
+        "hr":             ["view"],
+        "reports":        ["view", "export"],
+        "settings":       ["view"],
+        "users":          ["view"],
+    },
+    "SERVICE_MANAGER": {
+        "service_calls": ["view", "create", "assign", "close"],
+        "invoices":       ["view"],
+        "inventory":      ["view"],
+        "crm":            ["view"],
+        "reports":        ["view", "export"],
+        "settings":       ["view"],
+        "users":          ["view"],
+    },
+    "DISPATCHER": {
+        "service_calls": ["view", "create", "assign"],
+        "inventory":      ["view"],
+        "reports":        ["view"],
+    },
+    "TECHNICIAN": {
+        "service_calls": ["view"],
+    },
+    "ACCOUNTANT": {
+        "invoices": ["view", "create", "send", "mark_paid"],
+        "reports":  ["view", "export"],
+    },
+    "SECRETARY": {
+        "service_calls": ["view"],
+        "invoices":       ["view"],
+        "reports":        ["view"],
+    },
+    "SALES": {
+        "crm":      ["view", "manage"],
+        "invoices": ["view"],
+        "reports":  ["view"],
+    },
+    "INVENTORY_MANAGER": {
+        "inventory": ["view", "manage", "purchase_orders"],
+        "reports":   ["view"],
+    },
+}
+
+
+@router.get("/roles", summary="Get all role permissions (merged defaults + overrides)")
+def get_role_permissions(
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    raw = _get_setting(db, "role_permissions")
+    overrides = json.loads(raw) if raw else {}
+    merged = {}
+    for role, perms in _DEFAULT_ROLE_PERMISSIONS.items():
+        merged[role] = overrides.get(role, perms)
+    return merged
+
+
+@router.put("/roles", summary="Save role permissions overrides (admin only)")
+def save_role_permissions(
+    payload: Dict[str, Dict[str, List[str]]],
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    _set_setting(db, "role_permissions", json.dumps(payload))
+    return {"ok": True}
+
+
+@router.get("/roles/defaults", summary="Get built-in role permission defaults")
+def get_role_defaults(current_user: Technician = Depends(get_current_user)):
+    return _DEFAULT_ROLE_PERMISSIONS

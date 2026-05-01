@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import, admin_control
 from app.routers import customers, quotes, contracts, invoices, inventory, leads, erp_dashboard
 from app.routers import settings as settings_router, conversations
+from app.routers import reports as reports_router, custom_fields as custom_fields_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -82,6 +83,47 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS ix_elevators_customer_id ON elevators (customer_id)",
                 "ALTER TABLE buildings ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
                 "CREATE INDEX IF NOT EXISTS ix_buildings_customer_id ON buildings (customer_id)",
+                # Report Builder: saved_views, custom_fields, custom_field_values
+                """CREATE TABLE IF NOT EXISTS saved_views (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES technicians(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(50) NOT NULL,
+                    name VARCHAR(150) NOT NULL,
+                    columns JSONB NOT NULL DEFAULT '[]',
+                    filters JSONB NOT NULL DEFAULT '[]',
+                    sort_by VARCHAR(100),
+                    sort_dir VARCHAR(4) NOT NULL DEFAULT 'desc',
+                    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_saved_views_user_id ON saved_views (user_id)",
+                "CREATE INDEX IF NOT EXISTS ix_saved_views_entity_type ON saved_views (entity_type)",
+                """CREATE TABLE IF NOT EXISTS custom_fields (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    entity_type VARCHAR(50) NOT NULL,
+                    field_name VARCHAR(100) NOT NULL,
+                    field_label VARCHAR(150) NOT NULL,
+                    field_type VARCHAR(20) NOT NULL DEFAULT 'TEXT',
+                    options JSONB,
+                    required BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    display_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT uq_custom_field_entity_name UNIQUE (entity_type, field_name)
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_custom_fields_entity_type ON custom_fields (entity_type)",
+                """CREATE TABLE IF NOT EXISTS custom_field_values (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    entity_id UUID NOT NULL,
+                    entity_type VARCHAR(50) NOT NULL,
+                    field_id UUID NOT NULL REFERENCES custom_fields(id) ON DELETE CASCADE,
+                    value TEXT,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT uq_cfv_entity_field UNIQUE (entity_id, entity_type, field_id)
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_custom_field_values_entity_id ON custom_field_values (entity_id)",
+                "CREATE INDEX IF NOT EXISTS ix_custom_field_values_entity_type ON custom_field_values (entity_type)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -124,6 +166,7 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
+    "/reports", "/custom-fields", "/roles",
 )
 
 
@@ -170,6 +213,8 @@ app.include_router(leads.router)
 app.include_router(erp_dashboard.router)
 app.include_router(settings_router.router)
 app.include_router(conversations.router)
+app.include_router(reports_router.router)
+app.include_router(custom_fields_router.router)
 
 
 @app.get("/health", tags=["Health"])
