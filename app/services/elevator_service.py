@@ -11,6 +11,87 @@ from app.models.service_call import ServiceCall
 from app.schemas.elevator import ElevatorCreate, ElevatorUpdate, ElevatorAnalytics
 
 
+def _ensure_elevator_customer(db: Session, elevator: Elevator) -> None:
+    """Guarantee every elevator has a customer_id.
+
+    Priority:
+    1. Already has customer_id → nothing to do.
+    2. Has management_company_id but no customer_id → find or create a Customer
+       that mirrors the ManagementCompany.
+    3. Neither → create a COMMITTEE (ועד בית) customer for the building address.
+    """
+    if elevator.customer_id:
+        return
+
+    from app.models.customer import Customer
+    from app.models.management_company import ManagementCompany
+
+    if elevator.management_company_id:
+        mc: Optional[ManagementCompany] = db.query(ManagementCompany).filter(
+            ManagementCompany.id == elevator.management_company_id
+        ).first()
+        if mc:
+            # Find existing Customer mirroring this ManagementCompany (by name+type)
+            customer = db.query(Customer).filter(
+                Customer.name == mc.name,
+                Customer.customer_type == "MANAGEMENT_COMPANY",
+            ).first()
+            if not customer:
+                customer = Customer(
+                    id=uuid.uuid4(),
+                    name=mc.name,
+                    customer_type="MANAGEMENT_COMPANY",
+                    phone=mc.phone,
+                    email=mc.email,
+                    contact_person=mc.contact_name,
+                )
+                db.add(customer)
+                db.flush()
+            elevator.customer_id = customer.id
+            return
+
+    # No management company — create/find a ועד בית customer for this address
+    vaad_name = f"ועד בית — {elevator.address or ''}, {elevator.city or ''}".strip(", ")
+    customer = db.query(Customer).filter(
+        Customer.name == vaad_name,
+        Customer.customer_type == "COMMITTEE",
+    ).first()
+    if not customer:
+        customer = Customer(
+            id=uuid.uuid4(),
+            name=vaad_name,
+            customer_type="COMMITTEE",
+            address=elevator.address,
+            city=elevator.city,
+            phone=elevator.contact_phone,
+        )
+        db.add(customer)
+        db.flush()
+    elevator.customer_id = customer.id
+
+
+def _sync_elevator_to_customer(db: Session, elevator: Elevator, updated_fields: set) -> None:
+    """Propagate elevator contact/address changes to its auto-managed customer.
+
+    Only syncs COMMITTEE and MANAGEMENT_COMPANY customers that were auto-created —
+    manually managed customers are not overwritten.
+    """
+    if not elevator.customer_id:
+        return
+
+    from app.models.customer import Customer
+    customer = db.query(Customer).filter(Customer.id == elevator.customer_id).first()
+    if not customer or customer.customer_type not in ("COMMITTEE", "MANAGEMENT_COMPANY"):
+        return
+
+    if "address" in updated_fields and elevator.address:
+        customer.address = elevator.address
+    if "city" in updated_fields and elevator.city:
+        customer.city = elevator.city
+    if "contact_phone" in updated_fields and elevator.contact_phone:
+        customer.phone = elevator.contact_phone
+
+
 def calculate_risk_score(db: Session, elevator_id: uuid.UUID) -> float:
     """Calculate a risk score (0-100) based on service call history.
 
@@ -57,6 +138,8 @@ def create_elevator(db: Session, data: ElevatorCreate) -> Elevator:
     """
     elevator = Elevator(**data.model_dump())
     db.add(elevator)
+    db.flush()  # get elevator.id before _ensure_elevator_customer
+    _ensure_elevator_customer(db, elevator)
     db.commit()
     db.refresh(elevator)
     return elevator
@@ -165,6 +248,9 @@ def update_elevator(
     if "contract_start" in updates and "contract_renewal" not in updates:
         elevator.contract_renewal = None  # force recalc
         _recalculate_contract_renewal(elevator)
+    # Ensure every elevator has a customer; sync contact/address changes
+    _ensure_elevator_customer(db, elevator)
+    _sync_elevator_to_customer(db, elevator, set(updates.keys()))
     try:
         db.commit()
     except IntegrityError as exc:
