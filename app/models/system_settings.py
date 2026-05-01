@@ -3,8 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import DateTime, JSON, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
@@ -21,7 +20,7 @@ class SystemSettings(Base):
     key: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, default="default")
 
     # Module flags: {"whatsapp": true, "email_calls": true, "google_drive": false, ...}
-    modules: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    modules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
