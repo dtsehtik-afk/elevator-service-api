@@ -1,17 +1,27 @@
 """
 Manager/dispatcher WhatsApp command handler.
-Supports: CLOSE_CALL, ASSIGN_TECH, STATUS_QUERY, UNKNOWN
+Supports: CLOSE_CALL, ASSIGN_TECH, STATUS_QUERY, REASSIGN_CALL, UPDATE_ADDRESS,
+          DAILY_REPORT, WEEKLY_REPORT, MONTHLY_REPORT, FIND_BY_PHONE,
+          APPROVE_REQUEST, REJECT_REQUEST, ADD_ELEVATOR,
+          TECH_DEPLOYMENT, TECH_CALLS, DETAILED_REPORT, UNKNOWN
 """
 import logging
 import re
 import json as _json
+from datetime import datetime, timezone, timedelta
 import httpx
 from app.services.whatsapp_service import _send_message, notify_dispatcher
 
 logger = logging.getLogger(__name__)
 
+# Destructive commands that require explicit confirmation before executing
+_DESTRUCTIVE = {"CLOSE_CALL", "ASSIGN_TECH", "REASSIGN_CALL"}
+
+# phone → {command, address, tech_name, new_address, phone_num, expires_at}
+_pending_confirmations: dict[str, dict] = {}
+
 _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעליות. החזר JSON בלבד:
-{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|FIND_BY_PHONE|APPROVE_REQUEST|REJECT_REQUEST|ADD_ELEVATOR|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת", "phone": "מספר טלפון אם קיים"}}
+{{"command": "CLOSE_CALL|ASSIGN_TECH|STATUS_QUERY|REASSIGN_CALL|UPDATE_ADDRESS|DAILY_REPORT|WEEKLY_REPORT|MONTHLY_REPORT|FIND_BY_PHONE|APPROVE_REQUEST|REJECT_REQUEST|ADD_ELEVATOR|TECH_DEPLOYMENT|TECH_CALLS|DETAILED_REPORT|UNKNOWN", "address": "כתובת אם קיימת", "tech_name": "שם טכנאי אם קיים", "new_address": "כתובת חדשה אם קיימת", "phone": "מספר טלפון אם קיים"}}
 
 דוגמאות:
 "סגור קריאה ברחוב הרצל 5" → CLOSE_CALL
@@ -24,6 +34,8 @@ _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעל�
 "דוח יומי" → DAILY_REPORT
 "דוח שבועי" → WEEKLY_REPORT
 "דוח חודשי" → MONTHLY_REPORT
+"דוח מפורט" → DETAILED_REPORT (tech_name ריק = כללי)
+"דוח מפורט על תומר" → DETAILED_REPORT (tech_name=תומר)
 "איזו מעלית שייכת למספר 05XXXXXXXX?" → FIND_BY_PHONE (address contains the phone)
 "אשר בקשת תומר" → APPROVE_REQUEST (tech_name=תומר)
 "אשר" → APPROVE_REQUEST (tech_name ריק — אשר את כל הבקשות הממתינות)
@@ -32,6 +44,8 @@ _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעל�
 "כן, תוסיף מעלית" → ADD_ELEVATOR
 "הוסף מעלית" → ADD_ELEVATOR
 "הוסף" → ADD_ELEVATOR (רק אם ההודעה קצרה ומתייחסת להוספת מעלית)
+"פריסת טכנאים" / "איפה הטכנאים" / "מה הסטטוס של הטכנאים" → TECH_DEPLOYMENT
+"כמה קריאות לכל טכנאי" / "עומס טכנאים" → TECH_CALLS
 
 חשוב מאוד — שאלות על מיקום טכנאים, קרבה לאזור, היכן נמצא טכנאי — תמיד UNKNOWN (לא STATUS_QUERY):
 "יש לנו מישהו באזור עפולה?" → UNKNOWN
@@ -42,17 +56,30 @@ _COMMAND_PROMPT = """אתה מנתח פקודות מנהל של חברת מעל�
 הודעה: {text}"""
 
 
-def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
+def handle_dispatcher_command(db, phone: str, text: str, settings, technician=None) -> None:
     from app.models.service_call import ServiceCall
     from app.models.technician import Technician
     from app.models.assignment import Assignment, AuditLog
     from app.models.elevator import Elevator
-    from datetime import datetime, timezone
+
+    # ── Handle pending confirmation ───────────────────────────────────────────
+    text_clean = text.strip()
+    if phone in _pending_confirmations:
+        pending = _pending_confirmations.pop(phone)
+        if datetime.now(timezone.utc) > pending.get("expires_at", datetime.now(timezone.utc)):
+            _send_message(phone, "⏰ הפעולה פגה — נא לשלוח מחדש.")
+            return
+        if text_clean in ("כן", "אישור", "yes", "✅", "אוקיי", "בטוח"):
+            _execute_confirmed_action(db, phone, pending, settings)
+        else:
+            _send_message(phone, "↩️ הפעולה בוטלה.")
+        return
 
     api_key = getattr(settings, "gemini_api_key", "")
 
-    # Parse command with Gemini
-    command, address, tech_name, phone_number = "UNKNOWN", "", "", ""
+    # ── Parse command with Gemini ─────────────────────────────────────────────
+    command, address, tech_name, phone_number, new_address = "UNKNOWN", "", "", "", ""
+    parsed = {}
     if api_key:
         try:
             prompt = _COMMAND_PROMPT.format(text=text)
@@ -68,25 +95,31 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
             address = parsed.get("address", "")
             tech_name = parsed.get("tech_name", "")
             phone_number = parsed.get("phone", "")
+            new_address = parsed.get("new_address", "")
         except Exception as exc:
             logger.error("Dispatcher command parse failed: %s", exc)
 
     logger.warning("🎯 Dispatcher command: %s | address: %s | tech: %s", command, address, tech_name)
 
+    # ── Destructive commands → ask confirmation first ─────────────────────────
+    if command in _DESTRUCTIVE:
+        _ask_confirmation(db, phone, command, address, tech_name, new_address)
+        return
+
+    # ── Non-destructive commands ──────────────────────────────────────────────
     if command == "STATUS_QUERY":
         _cmd_status(db, phone)
-    elif command == "CLOSE_CALL":
-        _cmd_close_call(db, phone, address, text)
-    elif command == "ASSIGN_TECH":
-        _cmd_assign_tech(db, phone, address, tech_name)
-    elif command == "REASSIGN_CALL":
-        _cmd_reassign_call(db, phone, address, tech_name)
     elif command == "UPDATE_ADDRESS":
-        new_addr = parsed.get("new_address", "")
-        _cmd_update_address(db, phone, address, new_addr)
+        _cmd_update_address(db, phone, address, new_address)
     elif command in ("DAILY_REPORT", "WEEKLY_REPORT", "MONTHLY_REPORT"):
         days = 1 if command == "DAILY_REPORT" else 7 if command == "WEEKLY_REPORT" else 30
         _cmd_daily_report(db, phone, days)
+    elif command == "DETAILED_REPORT":
+        _cmd_detailed_report(db, phone, tech_name)
+    elif command == "TECH_DEPLOYMENT":
+        _cmd_tech_deployment(db, phone)
+    elif command == "TECH_CALLS":
+        _cmd_tech_calls(db, phone)
     elif command == "FIND_BY_PHONE":
         _cmd_find_by_phone(db, phone, phone_number)
     elif command == "APPROVE_REQUEST":
@@ -96,9 +129,77 @@ def handle_dispatcher_command(db, phone: str, text: str, settings) -> None:
     elif command == "ADD_ELEVATOR":
         _cmd_add_elevator(db, phone)
     else:
-        # Free question — route to chat agent
         from app.services.scheduler import _handle_chat_question
         _handle_chat_question(db, phone, text, settings)
+
+
+def _ask_confirmation(db, phone: str, command: str, address: str, tech_name: str, new_address: str) -> None:
+    """Preview the destructive action and ask for confirmation."""
+    from app.models.elevator import Elevator
+
+    # Build a human-readable description of what will happen
+    if command == "CLOSE_CALL":
+        call = _find_call_by_address(db, address)
+        if not call:
+            _send_message(phone, f"❌ לא נמצאה קריאה פתוחה: *{address or 'לא צוינה'}*")
+            return
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+        desc = f"סגירת הקריאה ב*{addr}* (עדיפות: {call.priority})"
+
+    elif command == "ASSIGN_TECH":
+        from app.models.technician import Technician
+        tech = db.query(Technician).filter(Technician.name.ilike(f"%{tech_name}%")).first() if tech_name else None
+        call = _find_call_by_address(db, address)
+        if not tech:
+            _send_message(phone, f"❌ לא נמצא טכנאי: *{tech_name or 'לא צוין'}*")
+            return
+        if not call:
+            _send_message(phone, f"❌ לא נמצאה קריאה: *{address or 'לא צוינה'}*")
+            return
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+        desc = f"שיבוץ *{tech.name}* לקריאה ב*{addr}*"
+
+    elif command == "REASSIGN_CALL":
+        from app.models.technician import Technician
+        tech = db.query(Technician).filter(Technician.name.ilike(f"%{tech_name}%")).first() if tech_name else None
+        call = _find_call_by_address(db, address)
+        if not tech:
+            _send_message(phone, f"❌ לא נמצא טכנאי: *{tech_name or 'לא צוין'}*")
+            return
+        if not call:
+            _send_message(phone, f"❌ לא נמצאה קריאה: *{address or 'לא צוינה'}*")
+            return
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+        desc = f"העברת הקריאה ב*{addr}* ל*{tech.name}* (יבטל שיבוצים קיימים)"
+    else:
+        return
+
+    _pending_confirmations[phone] = {
+        "command": command, "address": address, "tech_name": tech_name,
+        "new_address": new_address,
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=3),
+    }
+    _send_message(phone,
+        f"⚠️ *אישור נדרש*\n"
+        f"הפעולה המבוקשת: {desc}\n\n"
+        f"השב *כן* לאישור, כל תשובה אחרת תבטל."
+    )
+
+
+def _execute_confirmed_action(db, phone: str, pending: dict, settings) -> None:
+    """Execute a previously confirmed destructive action."""
+    command = pending["command"]
+    address = pending.get("address", "")
+    tech_name = pending.get("tech_name", "")
+    if command == "CLOSE_CALL":
+        _cmd_close_call(db, phone, address, f"אושר ע\"י מנהל")
+    elif command == "ASSIGN_TECH":
+        _cmd_assign_tech(db, phone, address, tech_name)
+    elif command == "REASSIGN_CALL":
+        _cmd_reassign_call(db, phone, address, tech_name)
 
 
 def _cmd_status(db, phone: str) -> None:
@@ -566,6 +667,161 @@ def _cmd_reject_request(db, dispatcher_phone: str, tech_name: str) -> None:
         _send_message(dispatcher_phone, f"✅ *נדחו {len(rejected)} בקשות:*\n{lines}")
     else:
         _send_message(dispatcher_phone, "❌ לא נמצאו בקשות מתאימות לדחייה.")
+
+
+def _cmd_tech_deployment(db, phone: str) -> None:
+    """פריסת טכנאים — סטטוס וקריאות פעילות לכל טכנאי."""
+    from app.models.technician import Technician
+    from app.models.assignment import Assignment
+    from app.models.elevator import Elevator
+
+    techs = db.query(Technician).filter(Technician.is_active == True).order_by(Technician.name).all()  # noqa: E712
+    if not techs:
+        _send_message(phone, "ℹ️ אין טכנאים פעילים.")
+        return
+
+    lines = ["📍 *פריסת טכנאים*\n────────────────"]
+    for t in techs:
+        confirmed = (
+            db.query(Assignment)
+            .filter(Assignment.technician_id == t.id, Assignment.status == "CONFIRMED")
+            .all()
+        )
+        if t.is_on_call:
+            status_icon = "🌙"
+            status_label = "כוננות"
+        elif not t.is_available:
+            status_icon = "🔴"
+            status_label = "לא זמין"
+        else:
+            status_icon = "🟢"
+            status_label = "זמין"
+
+        call_info = ""
+        if confirmed:
+            addrs = []
+            for a in confirmed[:2]:
+                from app.models.service_call import ServiceCall
+                call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
+                if call and call.elevator_id:
+                    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+                    if elev:
+                        addrs.append(f"{elev.address}")
+            call_info = f" | {', '.join(addrs)}" if addrs else f" | {len(confirmed)} קריאות"
+
+        lines.append(f"{status_icon} *{t.name}* — {status_label}{call_info}")
+
+    _send_message(phone, "\n".join(lines))
+
+
+def _cmd_tech_calls(db, phone: str) -> None:
+    """קריאות פתוחות פר טכנאי."""
+    from app.models.technician import Technician
+    from app.models.assignment import Assignment
+    from app.models.service_call import ServiceCall
+
+    techs = db.query(Technician).filter(Technician.is_active == True).order_by(Technician.name).all()  # noqa: E712
+    unassigned = db.query(ServiceCall).filter(ServiceCall.status == "OPEN").count()
+
+    lines = ["📊 *קריאות פר טכנאי*\n────────────────"]
+    for t in techs:
+        confirmed = db.query(Assignment).filter(
+            Assignment.technician_id == t.id,
+            Assignment.status == "CONFIRMED"
+        ).count()
+        pending = db.query(Assignment).filter(
+            Assignment.technician_id == t.id,
+            Assignment.status == "PENDING_CONFIRMATION"
+        ).count()
+        if confirmed == 0 and pending == 0:
+            lines.append(f"⚪ *{t.name}* — פנוי")
+        else:
+            parts = []
+            if confirmed:
+                parts.append(f"{confirmed} בטיפול")
+            if pending:
+                parts.append(f"{pending} ממתין")
+            lines.append(f"🔵 *{t.name}* — {', '.join(parts)}")
+
+    if unassigned:
+        lines.append(f"\n🔴 *לא משויך:* {unassigned} קריאות")
+
+    _send_message(phone, "\n".join(lines))
+
+
+def _cmd_detailed_report(db, phone: str, tech_name: str = "") -> None:
+    """דוח מפורט — כללי או פר טכנאי."""
+    from app.models.technician import Technician
+    from app.models.assignment import Assignment
+    from app.models.service_call import ServiceCall
+    from datetime import timedelta
+
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+
+    if tech_name:
+        tech = db.query(Technician).filter(Technician.name.ilike(f"%{tech_name}%")).first()
+        if not tech:
+            _send_message(phone, f"❌ לא נמצא טכנאי בשם: *{tech_name}*")
+            return
+
+        # Calls this technician handled in last 30 days
+        confirmed_assignments = (
+            db.query(Assignment)
+            .filter(Assignment.technician_id == tech.id, Assignment.created_at >= since)
+            .all()
+        )
+        call_ids = {a.service_call_id for a in confirmed_assignments}
+        resolved = db.query(ServiceCall).filter(
+            ServiceCall.id.in_(call_ids), ServiceCall.status == "RESOLVED"
+        ).count() if call_ids else 0
+        active = db.query(Assignment).filter(
+            Assignment.technician_id == tech.id, Assignment.status == "CONFIRMED"
+        ).count()
+        rejected = db.query(Assignment).filter(
+            Assignment.technician_id == tech.id,
+            Assignment.status == "REJECTED",
+            Assignment.created_at >= since
+        ).count()
+        total = len(call_ids)
+        pct = round(resolved / total * 100) if total else 0
+
+        status_parts = []
+        if tech.is_on_call:
+            status_parts.append("כוננות")
+        elif tech.is_available:
+            status_parts.append("זמין")
+        else:
+            status_parts.append("לא זמין")
+
+        _send_message(phone,
+            f"📋 *דוח מפורט — {tech.name}* (30 יום)\n"
+            f"────────────────\n"
+            f"✅ טיפל: *{total}* קריאות | פתר: *{resolved}* ({pct}%)\n"
+            f"🔵 פעילות כרגע: *{active}*\n"
+            f"❌ דחיות: *{rejected}*\n"
+            f"📌 סטטוס: {', '.join(status_parts)}\n"
+            f"📞 {'|'.join(filter(None, [tech.phone, tech.whatsapp_number]))}"
+        )
+    else:
+        # General report
+        resolved_30 = db.query(ServiceCall).filter(
+            ServiceCall.status == "RESOLVED", ServiceCall.resolved_at >= since
+        ).count()
+        open_now = db.query(ServiceCall).filter(ServiceCall.status == "OPEN").count()
+        progress_now = db.query(ServiceCall).filter(ServiceCall.status == "IN_PROGRESS").count()
+        assigned_now = db.query(ServiceCall).filter(ServiceCall.status == "ASSIGNED").count()
+        critical_open = db.query(ServiceCall).filter(
+            ServiceCall.status.in_(["OPEN", "ASSIGNED"]), ServiceCall.priority == "CRITICAL"
+        ).count()
+
+        _send_message(phone,
+            f"📋 *דוח מפורט כללי* (30 יום)\n"
+            f"────────────────\n"
+            f"✅ טופלו: *{resolved_30}*\n"
+            f"🔴 פתוחות: *{open_now}* {f'(⚠️ {critical_open} קריטיות)' if critical_open else ''}\n"
+            f"🟡 ממתינות: *{assigned_now}*\n"
+            f"🔵 בטיפול: *{progress_now}*"
+        )
 
 
 def _cmd_add_elevator(db, dispatcher_phone: str) -> None:

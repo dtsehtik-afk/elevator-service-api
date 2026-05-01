@@ -111,13 +111,17 @@ def _field(body: str, label: str) -> str:
 _GEMINI_PROMPT = (
     "אתה מנתח מיילים של קריאות שירות למעליות שמגיעות מחברת beepertalk. "
     "המיילים כתובים בעברית ועשויים להכיל אימוג'ים כמו 📍 לכתובת, 👤 לשם, 📞 לטלפון. "
-    "חלץ את השדות הבאים והחזר JSON בלבד, ללא הסברים, ללא markdown:\n"
+    "חלץ את כל השדות הבאים והחזר JSON בלבד, ללא הסברים, ללא markdown:\n"
     "{\n"
-    '  "name": "שם המתקשר",\n'
+    '  "name": "שם המתקשר/הדייר",\n'
     '  "city": "שם העיר בלבד",\n'
     '  "address": "שם הרחוב + מספר בית (ללא שם עיר)",\n'
-    '  "phone": "מספר טלפון ספרות בלבד",\n'
-    '  "floor": "מספר קומה או ריקה",\n'
+    '  "phone": "מספר טלפון של המתקשר, ספרות בלבד",\n'
+    '  "floor": "מספר קומה שבה האירוע, או ריקה",\n'
+    '  "floor_count": "סך מספר קומות/תחנות במעלית, מספר בלבד, או ריקה",\n'
+    '  "serial_number": "מספר סידורי של המעלית אם מצוין, או ריקה",\n'
+    '  "internal_number": "מספר מ.ע / מספר פנימי / מספר מעלית אם מצוין, או ריקה",\n'
+    '  "building_name": "שם הבניין/הפרויקט אם מצוין, או ריקה",\n'
     '  "call_type": "סוג הפניה כפי שנכתב במייל",\n'
     '  "fault_type": "STUCK|DOOR|ELECTRICAL|MECHANICAL|SOFTWARE|OTHER",\n'
     '  "description": "תיאור קצר של התקלה"\n'
@@ -279,70 +283,282 @@ def _parse_email(body: str, api_key: str = "") -> Optional[dict]:
 
 # ── elevator matching ──────────────────────────────────────────────────────────
 
-def _find_or_create_elevator(db, city: str, address: str):
+def _extract_building_number(address: str) -> str:
+    """Extract the building/house number from an address string."""
+    m = re.search(r"\b(\d+)\b", address or "")
+    return m.group(1) if m else ""
+
+
+def _extract_street_name(address: str) -> str:
+    """Extract street name — all words before the building number, lowercased."""
+    s = re.sub(r"\s*\b\d+[א-ת]?\b.*$", "", (address or "").strip()).strip()
+    return s.lower()
+
+
+def _phone_lookup(candidates, caller_phone: str):
+    """Check if caller_phone matches any phone in caller_phones or known_callers of candidates."""
+    if not caller_phone or len(caller_phone) < 9:
+        return None
+    phone_tail = re.sub(r"[^\d]", "", caller_phone)[-9:]
+    for elev in candidates:
+        for p in (elev.caller_phones or []):
+            if re.sub(r"[^\d]", "", str(p))[-9:] == phone_tail:
+                return elev
+        for entry in (elev.known_callers or []):
+            p = entry.get("phone", "") if isinstance(entry, dict) else ""
+            if p and re.sub(r"[^\d]", "", str(p))[-9:] == phone_tail:
+                return elev
+    return None
+
+
+def _gemini_fuzzy_match(candidates, email_address: str, api_key: str):
+    """Ask Gemini which DB address best matches the email address (typo-tolerant)."""
+    if not api_key or not candidates or not email_address:
+        return None
+    try:
+        import httpx
+        options = "\n".join(
+            f"{i+1}. {elev.address}, {elev.city} [id:{elev.id}]"
+            for i, elev in enumerate(candidates)
+        )
+        prompt = (
+            "אתה עוזר לזהות מעלית לפי כתובת. "
+            "ייתכנו שגיאות כתיב, קיצורים, או ניסוח שונה.\n"
+            f"כתובת מהמייל: \"{email_address}\"\n"
+            f"רשימת כתובות במערכת:\n{options}\n\n"
+            "אם אחת הכתובות ברשימה תואמת (גם עם שגיאת כתיב קלה), "
+            "החזר JSON בלבד: {\"match\": <מספר_שורה>, \"confidence\": \"HIGH\"|\"LOW\"}\n"
+            "אם אין התאמה סבירה, החזר: {\"match\": null}"
+        )
+        resp = httpx.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        result = json.loads(raw.strip())
+        idx = result.get("match")
+        confidence = result.get("confidence", "LOW")
+        if idx and confidence == "HIGH" and 1 <= int(idx) <= len(candidates):
+            return candidates[int(idx) - 1]
+    except Exception as exc:
+        logger.warning("Gemini fuzzy address match failed: %s", exc)
+    return None
+
+
+def _find_elevator(db, city: str, address: str, fields: dict):
     """
-    Try to find an existing elevator by city + street.
-    If not found, create a new record so the service call can be linked.
+    Multi-signal elevator lookup. NEVER creates a new elevator.
+
+    Pipeline:
+      1. Exact address match in same city
+      2. Street name + building number match
+      3. Caller phone → caller_phones / known_callers lookup
+      4. Gemini fuzzy address matching (typo-tolerant)
+      5. Same street, different number → ambiguous, notify dispatcher
+      6. No match → notify dispatcher
     """
+    from app.config import get_settings
     from app.models.elevator import Elevator
 
-    if city:
+    addr_norm = (address or "").strip()
+    city_norm = (city or "").strip()
+    building_num = _extract_building_number(addr_norm)
+    caller_phone = re.sub(r"[^\d]", "", fields.get("phone", ""))
+    api_key = getattr(get_settings(), "gemini_api_key", "")
+
+    candidates = []
+    if city_norm:
         candidates = (
             db.query(Elevator)
-            .filter(Elevator.city.ilike(f"%{city}%"))
+            .filter(Elevator.city.ilike(f"%{city_norm}%"))
             .all()
         )
-        # Try street-name match (first word of address)
-        street_word = address.split()[0] if address else ""
-        for elev in candidates:
-            if street_word and street_word in (elev.address or ""):
-                return elev
-        # City-only match — return first hit
-        if candidates:
-            return candidates[0]
 
-    # Nothing found — create a placeholder and alert dispatcher
-    logger.info("📍 No elevator found for %s %s — creating placeholder", city, address)
-    elev = Elevator(
-        address=address or "—",
-        city=city or "—",
-        floor_count=1,
-        status="ACTIVE",
-    )
-    db.add(elev)
-    db.flush()
+    # 1. Exact address match
+    for elev in candidates:
+        if addr_norm and (elev.address or "").strip().lower() == addr_norm.lower():
+            logger.info("✅ Matched by exact address: %s", elev.address)
+            return elev
 
-    # Alert dispatcher: unknown address
+    # 2. Street name + building number match; collect ambiguous street hits
+    street_email = _extract_street_name(addr_norm)
+    ambiguous = None
+    for elev in candidates:
+        street_db = _extract_street_name(elev.address or "")
+        if not street_email or not street_db or street_email != street_db:
+            continue
+        elev_num = _extract_building_number(elev.address or "")
+        if building_num and elev_num and building_num == elev_num:
+            logger.info("✅ Matched by street+number: %s", elev.address)
+            return elev
+        ambiguous = elev  # same street, different number
+
+    # 3. Phone lookup — check caller phone against all city candidates
+    if caller_phone:
+        phone_match = _phone_lookup(candidates, caller_phone)
+        if phone_match:
+            logger.info("✅ Matched by caller phone %s → elevator %s", caller_phone, phone_match.id)
+            return phone_match
+
+    # 4. Gemini fuzzy address match (only if we have candidates and an address to compare)
+    if addr_norm and candidates:
+        fuzzy_match = _gemini_fuzzy_match(candidates, addr_norm, api_key)
+        if fuzzy_match:
+            logger.info("✅ Matched by Gemini fuzzy: email=%s → db=%s", addr_norm, fuzzy_match.address)
+            return fuzzy_match
+
+    # 5. Ambiguous street (same street, different building number)
+    if ambiguous:
+        logger.warning(
+            "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
+            addr_norm, ambiguous.address,
+        )
+        _notify_no_match(
+            city_norm, addr_norm, fields,
+            extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{ambiguous.address}, {ambiguous.city}*\n"
+        )
+        return None
+
+    # 6. Nothing found
+    logger.info("📍 No elevator found for %s %s — notifying dispatcher", city_norm, addr_norm)
+    _notify_no_match(city_norm, addr_norm, fields)
+    return None
+
+
+def _notify_no_match(city: str, address: str, fields: dict, extra: str = "") -> None:
+    """Send dispatcher a detailed WhatsApp with all parsed call data when no elevator matched."""
     try:
-        from app.config import get_settings
-        from app.services.whatsapp_service import _send_message
-        s = get_settings()
-        if s.dispatcher_whatsapp:
-            _send_message(
-                s.dispatcher_whatsapp,
-                f"⚠️ *קריאה מכתובת לא מוכרת*\n"
-                f"📍 {city}, {address}\n"
-                f"המערכת יצרה מעלית חדשה אוטומטית — נא לאמת ולעדכן."
-            )
-    except Exception:
-        pass
+        from app.services.whatsapp_service import notify_dispatcher
+        name    = fields.get("name", "")
+        phone   = fields.get("phone", "")
+        floors  = fields.get("floor_count", "")
+        serial  = fields.get("serial_number", "")
+        intnum  = fields.get("internal_number", "")
+        bname   = fields.get("building_name", "")
+        ctype   = fields.get("call_type", "")
+        desc    = fields.get("description", "")
 
-    return elev
+        lines = [extra or f"⚠️ *קריאה מכתובת לא מוכרת — נדרש שיוך ידני*\n"]
+        lines.append(f"📍 *{address}, {city}*")
+        if bname:
+            lines.append(f"🏢 {bname}")
+        if name:
+            lines.append(f"👤 {name}")
+        if phone:
+            lines.append(f"📞 {phone}")
+        if ctype:
+            lines.append(f"🔧 {ctype}")
+        if desc:
+            lines.append(f"📝 {desc}")
+        if floors:
+            lines.append(f"🏗️ קומות: {floors}")
+        if serial:
+            lines.append(f"🔢 סריאלי: {serial}")
+        if intnum:
+            lines.append(f"#️⃣ מ.ע: {intnum}")
+        lines.append("\nנא לפתוח קריאה ידנית ולשייך למעלית הנכונה.")
+        notify_dispatcher("\n".join(lines))
+    except Exception as exc:
+        logger.error("Failed to notify dispatcher about unmatched address: %s", exc)
+
+
+def _enrich_elevator(db, elevator, fields: dict) -> None:
+    """
+    Update elevator record with any new data extracted from the email.
+    Only fills in fields that are currently empty — never overwrites existing data.
+    """
+    changed = False
+
+    # Caller phone → add to caller_phones list if not already there
+    phone = re.sub(r"[^\d]", "", fields.get("phone", ""))
+    if phone and len(phone) >= 9:
+        existing = list(elevator.caller_phones or [])
+        # Normalise to last 9 digits for comparison
+        if not any(re.sub(r"[^\d]", "", p)[-9:] == phone[-9:] for p in existing):
+            existing.append(phone)
+            elevator.caller_phones = existing
+            changed = True
+
+    # Save caller name+phone to known_callers (if name is known and not already stored)
+    caller_name = (fields.get("name") or "").strip()
+    if caller_name and caller_name not in ("לא ידוע", "") and phone and len(phone) >= 9:
+        existing_callers = list(elevator.known_callers or [])
+        already_known = any(
+            isinstance(c, dict) and re.sub(r"[^\d]", "", str(c.get("phone", "")))[-9:] == phone[-9:]
+            for c in existing_callers
+        )
+        if not already_known:
+            existing_callers.append({"name": caller_name, "phone": phone})
+            elevator.known_callers = existing_callers
+            changed = True
+
+    # Floor count — only update if current value is default (1) and email has a real value
+    fc = fields.get("floor_count", "")
+    if fc and str(fc).isdigit() and int(fc) > 1 and elevator.floor_count <= 1:
+        elevator.floor_count = int(fc)
+        changed = True
+
+    # Serial number
+    serial = (fields.get("serial_number") or "").strip()
+    if serial and not elevator.serial_number:
+        elevator.serial_number = serial
+        changed = True
+
+    # Internal number (מ.ע)
+    intnum = (fields.get("internal_number") or "").strip()
+    if intnum and not elevator.internal_number:
+        try:
+            elevator.internal_number = intnum
+            changed = True
+        except Exception:
+            pass  # unique constraint — ignore if duplicate
+
+    # Building name
+    bname = (fields.get("building_name") or "").strip()
+    if bname and not elevator.building_name:
+        elevator.building_name = bname
+        changed = True
+
+    if changed:
+        try:
+            db.commit()
+            logger.info("🔄 Elevator %s enriched from email data", elevator.id)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Elevator enrichment failed: %s", exc)
 
 
 # ── rescue blast ──────────────────────────────────────────────────────────────
 
 def _send_rescue_blast(db, fields: dict, caller_name: str, caller_phone: str, description: str):
-    """Send an emergency rescue alert to ALL active technicians."""
+    """Send an emergency rescue alert.
+    Working hours → ALL active technicians.
+    Outside hours  → only on-call technician + ADMIN/MANAGER role.
+    """
     import math
     from app.models.technician import Technician
     from app.services.whatsapp_service import notify_rescue_emergency
+    from app.services.working_hours import is_working_hours
 
-    technicians = (
-        db.query(Technician)
-        .filter(Technician.is_active == True, Technician.role == "TECHNICIAN")  # noqa: E712
-        .all()
-    )
+    if is_working_hours():
+        technicians = (
+            db.query(Technician)
+            .filter(Technician.is_active == True, Technician.role == "TECHNICIAN")  # noqa: E712
+            .all()
+        )
+    else:
+        technicians = (
+            db.query(Technician)
+            .filter(
+                Technician.is_active == True,  # noqa: E712
+                (Technician.is_on_call == True) | (Technician.role.in_(["ADMIN", "MANAGER"]))  # noqa: E712
+            )
+            .all()
+        )
     if not technicians:
         return
 
@@ -501,7 +717,20 @@ def poll_emails(db) -> int:
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
-                elevator = _find_or_create_elevator(db, fields["city"], fields["address"])
+                elevator = _find_elevator(db, fields["city"], fields["address"], fields)
+
+                if elevator is None:
+                    # No match or ambiguous address — dispatcher already notified inside _find_elevator
+                    logger.info(
+                        "📍 Skipping call creation — no elevator match for (%s %s), awaiting dispatcher review",
+                        fields.get("city"), fields.get("address"),
+                    )
+                    _record_as_scanned(db, message_id)
+                    mail.store(mid, "+FLAGS", "\\Seen")
+                    continue
+
+                # Enrich the matched elevator with any new data from this email
+                _enrich_elevator(db, elevator, fields)
 
                 # Build a clean human-readable description
                 desc_parts = []
@@ -566,22 +795,36 @@ def poll_emails(db) -> int:
                     " [RESCUE]" if is_rescue else "",
                 )
 
-                # Rescue: blast ALL technicians immediately
+                # Rescue: blast immediately (working-hours-aware)
                 if is_rescue:
                     try:
                         _send_rescue_blast(db, fields, caller_name, caller_phone, description)
                     except Exception as exc:
                         logger.error("Rescue blast failed: %s", exc)
 
-                # Regular assignment — always ask for confirmation (1/2)
+                # Outside hours, non-rescue: notify customer about extra charge
+                if not is_rescue:
+                    from app.services.working_hours import is_working_hours
+                    if not is_working_hours():
+                        try:
+                            from app.services.whatsapp_service import notify_customer_outside_hours
+                            notify_customer_outside_hours(caller_phone or "", caller_name or "")
+                        except Exception as exc:
+                            logger.error("Customer outside-hours message failed: %s", exc)
+
+                # Regular assignment — only during working hours (rescues already handled above)
                 assignment = None
-                try:
-                    from app.services import ai_assignment_agent
-                    assignment = ai_assignment_agent.assign_with_confirmation(
-                        db, call, needs_confirmation=True
-                    )
-                except Exception as exc:
-                    logger.error("AI assignment failed for email-polled call: %s", exc)
+                from app.services.working_hours import is_working_hours as _is_wh
+                if not is_rescue and not _is_wh():
+                    logger.info("⏰ Off-hours — skipping assignment for non-rescue call, will be picked up in morning")
+                else:
+                    try:
+                        from app.services import ai_assignment_agent
+                        assignment = ai_assignment_agent.assign_with_confirmation(
+                            db, call, needs_confirmation=True
+                        )
+                    except Exception as exc:
+                        logger.error("AI assignment failed for email-polled call: %s", exc)
 
                 # Fall back: notify dispatcher if no technician could be assigned
                 if not assignment:

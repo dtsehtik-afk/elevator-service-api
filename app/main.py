@@ -12,7 +12,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import get_settings
-from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import, settings as settings_router
+from app.routers import elevators, service_calls, technicians, assignments, maintenance, analytics, schedule, webhooks, technician_app, inspections, management_companies, buildings, contacts, data_import, admin_control
+from app.routers import customers, quotes, contracts, invoices, inventory, leads, erp_dashboard
+from app.routers import settings as settings_router, conversations
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -45,7 +47,6 @@ async def lifespan(app: FastAPI):
                 # management_companies — caller_phones may be missing
                 "ALTER TABLE management_companies ADD COLUMN IF NOT EXISTS caller_phones TEXT[] DEFAULT '{}'",
                 # Fix: if column was created as JSONB by create_all, convert to TEXT[]
-                # Uses a temp-column swap because USING with a subquery is not allowed in ALTER TABLE
                 """DO $$ BEGIN
                     IF (SELECT data_type FROM information_schema.columns
                         WHERE table_name='management_companies' AND column_name='caller_phones') = 'jsonb'
@@ -69,6 +70,18 @@ async def lifespan(app: FastAPI):
                 )""",
                 # Remove service calls auto-created from inspection escalation (now silent flow)
                 "DELETE FROM service_calls WHERE reported_by = 'system | escalation' AND description LIKE '%ליקויי בודק%' AND status IN ('OPEN','ASSIGNED')",
+                # system_settings — control plane module flags
+                """CREATE TABLE IF NOT EXISTS system_settings (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    key VARCHAR(50) UNIQUE NOT NULL DEFAULT 'default',
+                    modules JSONB NOT NULL DEFAULT '{}',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                # ERP: customer_id on elevators + buildings
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_customer_id ON elevators (customer_id)",
+                "ALTER TABLE buildings ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_buildings_customer_id ON buildings (customer_id)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -109,7 +122,8 @@ app.add_middleware(
 _API_ONLY_PREFIXES = (
     "/auth", "/docs", "/redoc", "/openapi", "/health",
     "/uploads", "/assets", "/webhooks", "/analytics",
-    "/schedule", "/buildings", "/contacts", "/app/", "/settings",
+    "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
+    "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
 )
 
 
@@ -146,7 +160,16 @@ app.include_router(management_companies.router)
 app.include_router(buildings.router)
 app.include_router(contacts.router)
 app.include_router(data_import.router)
+app.include_router(admin_control.router)
+app.include_router(customers.router)
+app.include_router(quotes.router)
+app.include_router(contracts.router)
+app.include_router(invoices.router)
+app.include_router(inventory.router)
+app.include_router(leads.router)
+app.include_router(erp_dashboard.router)
 app.include_router(settings_router.router)
+app.include_router(conversations.router)
 
 
 @app.get("/health", tags=["Health"])
@@ -156,6 +179,8 @@ def health_check():
 
 
 # ── Serve React frontend (must be last) ──────────────────────────────────────
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 if _FRONTEND_DIST.exists():

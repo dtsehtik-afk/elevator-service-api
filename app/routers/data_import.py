@@ -134,63 +134,6 @@ def _parse_tsv(content: bytes) -> list[dict]:
     return rows
 
 
-def _cell_str(c) -> str:
-    """Convert a cell value to a clean string, handling dates and floats."""
-    if c is None:
-        return ""
-    from datetime import datetime, date
-    if isinstance(c, (datetime, date)):
-        return c.strftime("%d/%m/%Y")
-    s = str(c).strip()
-    # Excel stores integers as floats: "121.0" → "121"
-    if s.endswith(".0") and s[:-2].lstrip("-").isdigit():
-        s = s[:-2]
-    return s
-
-
-_KNOWN_HEADERS = {"sysnumber", "sysname", "technumber", "sherut", "lastinspect", "shcut3"}
-
-
-def _parse_xlsx(content: bytes) -> list[dict]:
-    """Parse .xlsx (openpyxl) or .xls (xlrd) into list of row dicts.
-    Skips leading title/timestamp rows until the real header row is found.
-    """
-    import io
-    try:
-        import openpyxl
-        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-        ws = wb.active
-        raw_rows = list(ws.iter_rows(values_only=True))
-    except Exception:
-        import xlrd
-        wb = xlrd.open_workbook(file_contents=content)
-        ws = wb.sheet_by_index(0)
-        raw_rows = [ws.row_values(i) for i in range(ws.nrows)]
-
-    header = None
-    rows = []
-    for row in raw_rows:
-        values = [_cell_str(c) for c in row]
-        if not any(values):
-            continue
-        if header is None:
-            # Accept this row as header only if it contains known column names
-            low = {v.lower().strip() for v in values}
-            if low & _KNOWN_HEADERS:
-                header = [v.strip() for v in values]
-            continue
-        rows.append(dict(zip(header, values)))
-    return rows
-
-
-def _parse_file(content: bytes, filename: str) -> list[dict]:
-    """Dispatch to xlsx or tsv parser based on file extension."""
-    if filename.lower().endswith((".xlsx", ".xls")):
-        return _parse_xlsx(content)
-    return _parse_tsv(content)
-
-
-
 def _process_file1(rows: list[dict]) -> dict[str, dict]:
     """Parse main file rows into dict keyed by internal_number."""
     result = {}
@@ -220,10 +163,6 @@ def _process_file1(rows: list[dict]) -> dict[str, dict]:
             service_num = 1
         service_type = "COMPREHENSIVE" if service_num == 2 else "REGULAR"
 
-        # shcut3 = labor file number (מ.ע)
-        labor_raw = str(row.get("shcut3", "")).strip()
-        labor = labor_raw if labor_raw and labor_raw != "0" and labor_raw.isdigit() else None
-
         result[num] = {
             "internal_number": num,
             "address": address,
@@ -231,11 +170,8 @@ def _process_file1(rows: list[dict]) -> dict[str, dict]:
             "building_name": building_name or None,
             "contact_name": row.get("contactName", "").strip() or None,
             "main_phone": _normalize_phone(row.get("mainPhone", "")),
-            "labor_file_number": labor,
             "last_service_date": _parse_date(row.get("lastprev", "")),
             "last_inspection_date": _parse_date(row.get("lastinspect", "")),
-            "contract_start": _parse_date(row.get("begineservice", "")),
-            "installation_date": _parse_date(row.get("installdate", "")),
             "service_type": service_type,
             "service_contract": "ANNUAL_12" if service_type == "COMPREHENSIVE" else "ANNUAL_6",
             "maintenance_interval_days": 30 if service_type == "COMPREHENSIVE" else 60,
@@ -243,103 +179,36 @@ def _process_file1(rows: list[dict]) -> dict[str, dict]:
     return result
 
 
-_DATE_PAT = re.compile(r'^\d{1,2}/\d{1,2}/\d{2,4}$')
-_PHONE_PAT = re.compile(r'^0?\d{8,9}$')
-
-
-def _detect_contact_row(row: dict) -> Optional[dict]:
-    """
-    Smart column detector for headerless contact files.
-    Identifies sysnumber, contact_name, phone, dates by value patterns.
-    Returns None if no sysnumber found in this row.
-    """
-    sysnumber = None
-    contact_name = None
-    sysname = None
-    phone = None
-    dates = []
-    service_type = None
-
-    for v in row.values():
-        v = str(v).strip()
-        if not v:
-            continue
-        digits_only = re.sub(r"[^\d]", "", v)
-
-        if _DATE_PAT.match(v):
-            dates.append(v)
-        elif v in ("מקיף",):
-            service_type = "COMPREHENSIVE"
-        elif v in ("רגיל",):
-            service_type = "REGULAR"
-        elif digits_only and len(digits_only) >= 9 and _PHONE_PAT.match(digits_only):
-            phone = digits_only if digits_only.startswith("0") else "0" + digits_only
-        elif v.isdigit() and 50 <= int(v) <= 9999:
-            sysnumber = v
-        elif any("\u05d0" <= c <= "\u05ea" for c in v):
-            # Hebrew text: address has digits, contact name typically doesn't
-            if re.search(r"\d", v):
-                sysname = v
-            elif contact_name is None:
-                contact_name = v
-
-    if not sysnumber:
-        return None
-    return {
-        "contact_name": contact_name,
-        "main_phone": phone,
-        "service_type": service_type,
-        "last_inspection_date": _parse_date(dates[0]) if len(dates) >= 1 else None,
-        "last_service_date": _parse_date(dates[1]) if len(dates) >= 2 else None,
-    }
-
-
 def _process_file2(rows: list[dict]) -> dict[str, dict]:
-    """Parse details file rows into dict keyed by internal_number.
-    Supports both named-header files and headerless contact files.
-    """
+    """Parse details file rows into dict keyed by internal_number."""
     result = {}
+    for row in rows:
+        # Column names vary — try multiple
+        num = str(row.get("מעלית", row.get("sysnumber", ""))).strip()
+        if not num or not num.isdigit():
+            continue
 
-    # Check if first row has known Hebrew headers
-    if rows and any(k in ("מעלית", "מס' מע'", "ד. בודק", "ט.מ") for k in rows[0]):
-        # Named-header format (legacy file2)
-        for row in rows:
-            num = str(row.get("מעלית", row.get("sysnumber", ""))).strip()
-            if not num or not num.isdigit():
-                continue
-            labor = str(row.get("מס' מע'", row.get("מס מע", ""))).strip()
-            if labor == "0" or not labor.isdigit():
-                labor = None
-            service_raw = str(row.get("סוג שרות", row.get("סוג שירות", "1"))).strip()
-            try:
-                service_num = int(service_raw)
-            except ValueError:
-                service_num = 1
-            service_type = "COMPREHENSIVE" if service_num == 2 else "REGULAR"
-            result[num] = {
-                "labor_file_number": labor,
-                "last_inspection_date": _parse_date(row.get("ד. בודק", row.get("ד.בודק", ""))),
-                "next_service_date": _parse_date(row.get("ט.מ", "")),
-                "contract_start": _parse_date(row.get("תחילת חיוב", "")),
-                "warranty_end": _parse_date(row.get("תום אחריות", "")),
-                "service_type": service_type,
-                "service_contract": "ANNUAL_12" if service_type == "COMPREHENSIVE" else "ANNUAL_6",
-                "maintenance_interval_days": 30 if service_type == "COMPREHENSIVE" else 60,
-            }
-    else:
-        # Headerless contact file — detect columns by value patterns
-        for row in rows:
-            num = None
-            for v in row.values():
-                s = str(v).strip()
-                if s.isdigit() and 50 <= int(s) <= 9999:
-                    num = s
-                    break
-            if not num:
-                continue
-            detected = _detect_contact_row(row)
-            if detected:
-                result[num] = detected
+        labor = str(row.get("מס' מע'", row.get("מס מע", ""))).strip()
+        if labor == "0" or not labor.isdigit():
+            labor = None
+
+        service_raw = str(row.get("סוג שרות", row.get("סוג שירות", "1"))).strip()
+        try:
+            service_num = int(service_raw)
+        except ValueError:
+            service_num = 1
+        service_type = "COMPREHENSIVE" if service_num == 2 else "REGULAR"
+
+        result[num] = {
+            "labor_file_number": labor,
+            "last_inspection_date": _parse_date(row.get("ד. בודק", row.get("ד.בודק", ""))),
+            "next_service_date": _parse_date(row.get("ט.מ", "")),
+            "contract_start": _parse_date(row.get("תחילת חיוב", "")),
+            "warranty_end": _parse_date(row.get("תום אחריות", "")),
+            "service_type": service_type,
+            "service_contract": "ANNUAL_12" if service_type == "COMPREHENSIVE" else "ANNUAL_6",
+            "maintenance_interval_days": 30 if service_type == "COMPREHENSIVE" else 60,
+        }
     return result
 
 
@@ -354,16 +223,12 @@ def preview_import(
     Dry-run: parse both files and return what would be imported.
     Does NOT write to DB.
     """
-    rows1 = _parse_file(file1.file.read(), file1.filename or "")
-    print(f"[IMPORT DEBUG] rows={len(rows1)} cols={list(rows1[0].keys()) if rows1 else []}", flush=True)
-    if rows1:
-        print(f"[IMPORT DEBUG] row0={dict(list(rows1[0].items())[:6])}", flush=True)
+    rows1 = _parse_tsv(file1.file.read())
     data1 = _process_file1(rows1)
-    print(f"[IMPORT DEBUG] data1 entries={len(data1)}", flush=True)
 
     data2 = {}
     if file2:
-        rows2 = _parse_file(file2.file.read(), file2.filename or "")
+        rows2 = _parse_tsv(file2.file.read())
         data2 = _process_file2(rows2)
 
     # Merge
@@ -420,12 +285,12 @@ def commit_import(
     - Creates Contact records for ועד contacts
     - Optionally geocodes new elevators via Nominatim (free)
     """
-    rows1 = _parse_file(file1.file.read(), file1.filename or "")
+    rows1 = _parse_tsv(file1.file.read())
     data1 = _process_file1(rows1)
 
     data2 = {}
     if file2:
-        rows2 = _parse_file(file2.file.read(), file2.filename or "")
+        rows2 = _parse_tsv(file2.file.read())
         data2 = _process_file2(rows2)
 
     # Merge: file2 wins for fields it provides
@@ -457,48 +322,30 @@ def commit_import(
         return b
 
     for num, d in sorted(merged.items(), key=lambda x: int(x[0])):
-        sp = db.begin_nested()  # savepoint — rollback only this elevator on failure
         try:
             address = (d.get("address") or "").strip()
             city = (d.get("city") or "").strip()
 
             existing = db.query(Elevator).filter(Elevator.internal_number == num).first()
-            # Also check by labor_file_number to avoid UniqueViolation
-            if not existing and d.get("labor_file_number"):
-                existing = db.query(Elevator).filter(
-                    Elevator.labor_file_number == d["labor_file_number"]
-                ).first()
 
             if existing:
                 # UPDATE — only fill missing fields
-                for field in ("labor_file_number", "last_service_date", "last_inspection_date",
-                              "next_service_date", "contract_start", "warranty_end",
-                              "installation_date"):
-                    if not getattr(existing, field, None) and d.get(field):
-                        setattr(existing, field, d[field])
+                if not existing.labor_file_number and d.get("labor_file_number"):
+                    existing.labor_file_number = d["labor_file_number"]
+                if not existing.last_service_date and d.get("last_service_date"):
+                    existing.last_service_date = d["last_service_date"]
+                if not existing.last_inspection_date and d.get("last_inspection_date"):
+                    existing.last_inspection_date = d["last_inspection_date"]
+                if not existing.next_service_date and d.get("next_service_date"):
+                    existing.next_service_date = d["next_service_date"]
+                if not existing.contract_start and d.get("contract_start"):
+                    existing.contract_start = d["contract_start"]
+                if not existing.warranty_end and d.get("warranty_end"):
+                    existing.warranty_end = d["warranty_end"]
                 if not existing.service_type and d.get("service_type"):
                     existing.service_type = d["service_type"]
                     existing.service_contract = d.get("service_contract")
                     existing.maintenance_interval_days = d.get("maintenance_interval_days")
-                # Also persist phone directly on the elevator record
-                if d.get("main_phone") and not existing.contact_phone:
-                    existing.contact_phone = d["main_phone"]
-                # Save contact if provided and building exists
-                contact_name = d.get("contact_name")
-                main_phone = d.get("main_phone")
-                if contact_name and existing.building_id:
-                    exists = db.query(Contact).filter(
-                        Contact.building_id == existing.building_id,
-                        Contact.name == contact_name,
-                    ).first()
-                    if not exists:
-                        db.add(Contact(
-                            building_id=existing.building_id,
-                            name=contact_name,
-                            phone=main_phone,
-                            role="VAAD",
-                        ))
-                sp.commit()
                 updated += 1
             else:
                 # CREATE
@@ -515,7 +362,6 @@ def commit_import(
                     address=address,
                     city=city,
                     building_name=d.get("building_name"),
-                    contact_phone=d.get("main_phone"),
                     latitude=lat,
                     longitude=lon,
                     service_type=d.get("service_type"),
@@ -526,7 +372,6 @@ def commit_import(
                     next_service_date=d.get("next_service_date"),
                     contract_start=d.get("contract_start"),
                     warranty_end=d.get("warranty_end"),
-                    installation_date=d.get("installation_date"),
                     floor_count=1,
                 )
                 db.add(elev)
@@ -548,16 +393,13 @@ def commit_import(
                             role="VAAD",
                         ))
 
-                sp.commit()
                 created += 1
 
         except Exception as exc:
-            sp.rollback()
-            # Remove stale building from cache so it gets re-created fresh next time
-            key = (address.lower().strip(), city.lower().strip())
-            building_cache.pop(key, None)
             logger.error("Import error for elevator %s: %s", num, exc)
-            errors.append({"internal_number": num, "error": str(exc)[:200]})
+            errors.append({"internal_number": num, "error": str(exc)})
+            db.rollback()
+            continue
 
     db.commit()
 

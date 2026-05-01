@@ -14,6 +14,7 @@ import { getElevator, updateElevator, getElevatorCalls } from '../api/elevators'
 import client from '../api/client'
 import { Elevator } from '../types'
 import LocationPickerModal from '../components/LocationPickerModal'
+import RelatedPanel from '../components/RelatedPanel'
 import {
   ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS,
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -515,6 +516,9 @@ export default function ElevatorDetailPage() {
           </Stack>
         </Stack>
       </Modal>
+
+      {/* Related cross-reference panel */}
+      <RelatedPanel entityType="elevator" entityId={elevator.id} />
 
       <Group>
         <ActionIcon variant="subtle" onClick={() => navigate('/elevators')}>←</ActionIcon>

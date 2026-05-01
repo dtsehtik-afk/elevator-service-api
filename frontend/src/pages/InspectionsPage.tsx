@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
@@ -100,6 +100,7 @@ export default function InspectionsPage() {
   const [addDefFor, setAddDefFor] = useState<string | null>(null)
   const [newDefDesc, setNewDefDesc] = useState('')
   const [newDefSeverity, setNewDefSeverity] = useState('MEDIUM')
+  const justSelectedRef = useRef(false)
 
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ['inspections'],
@@ -338,6 +339,19 @@ export default function InspectionsPage() {
                       🏢 פתח מעלית
                     </Button>
                   )}
+                  {isAdmin && (
+                    <Button size="xs" variant="subtle" color="gray"
+                      onClick={() => {
+                        setConfirmReport(r)
+                        setElevSearch(''); setSelectedElevId(''); setCreateMode(false)
+                        if (r.raw_address) {
+                          const parts = r.raw_address.split(',')
+                          setCreateElev({ address: parts[0]?.trim() || '', city: r.raw_city || parts[1]?.trim() || '', building_name: '' })
+                        }
+                      }}>
+                      ✏️ שנה שיוך
+                    </Button>
+                  )}
                 </Group>
               )}
 
@@ -498,11 +512,19 @@ export default function InspectionsPage() {
             <Autocomplete
               placeholder="הקלד כתובת, עיר או מס׳ מעלית..."
               value={elevSearch}
-              onChange={v => { searchElevators(v); setSelectedElevId('') }}
+              onChange={v => {
+                if (justSelectedRef.current) { justSelectedRef.current = false; return }
+                setElevSearch(v)
+                setSelectedElevId('')
+                searchElevators(v)
+              }}
               onOptionSubmit={v => {
                 const opt = elevOptions.find(o => o.label === v)
-                if (opt) setSelectedElevId(opt.id)
-                setElevSearch(v)
+                if (opt) {
+                  justSelectedRef.current = true
+                  setSelectedElevId(opt.id)
+                  setElevSearch(v)
+                }
               }}
               data={elevOptions.map(o => o.label)}
             />

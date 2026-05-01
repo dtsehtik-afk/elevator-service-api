@@ -130,21 +130,17 @@ def _run_nightly_maintenance():
                     existing.priority = priority
                     db.commit()
                     upgraded += 1
-                if should_notify and "[maint_notified]" not in (existing.description or ""):
-                    notify_dispatcher(
-                        f"🔴 *טיפול מונע דחוף* — {addr}\n"
-                        f"⏳ {days_str}\n"
-                        f"📅 {elev.next_service_date.strftime('%d/%m/%Y')}"
-                    )
-                    existing.description = (existing.description or "") + " [maint_notified]"
+                # Mark for morning WhatsApp — don't send at midnight
+                if should_notify and "[maint_pending_notify]" not in (existing.description or "") \
+                        and "[maint_notified]" not in (existing.description or ""):
+                    existing.description = (existing.description or "") + " [maint_pending_notify]"
                     db.commit()
-                    notified += 1
                 continue
 
             sc = ServiceCall(
                 elevator_id=elev.id,
                 reported_by="מערכת — טיפול מונע",
-                description=f"טיפול מונע {days_str}",
+                description=f"טיפול מונע {days_str}" + (" [maint_pending_notify]" if should_notify else ""),
                 priority=priority,
                 fault_type="MAINTENANCE",
                 status="OPEN",
@@ -152,16 +148,6 @@ def _run_nightly_maintenance():
             db.add(sc)
             db.commit()
             opened += 1
-
-            if should_notify:
-                notify_dispatcher(
-                    f"🔴 *טיפול מונע דחוף* — {addr}\n"
-                    f"⏳ {days_str}\n"
-                    f"📅 {elev.next_service_date.strftime('%d/%m/%Y')}"
-                )
-                sc.description += " [maint_notified]"
-                db.commit()
-                notified += 1
 
         logger.info(
             "Nightly maintenance: %d overdue, %d calls opened, %d upgraded, %d notified",
@@ -355,6 +341,15 @@ def _handle_technician_report(db, phone: str, text: str):
             tech.whatsapp_number or tech.phone,
             f"✅ {closed} קריאות נסגרו בהצלחה. תודה {tech.name}!"
         )
+
+    # Rebuild route after closing — remove resolved stops
+    if closed > 0 and tech.current_latitude and tech.current_longitude:
+        try:
+            from app.services.route_service import send_route_to_technician
+            send_route_to_technician(db, tech)
+        except Exception as exc:
+            logger.error("Route rebuild after close failed for %s: %s", tech.name, exc)
+
     logger.info("📋 %d call(s) resolved by %s", closed, tech.name)
 
 
@@ -540,17 +535,27 @@ def _poll_whatsapp_replies():
 
                     elif msg_kind in ("textMessage", "extendedTextMessage"):
                         # textMessage = plain text; extendedTextMessage = reply/quote
-                        if msg_kind == "extendedTextMessage":
-                            text = msg_data.get("extendedTextMessageData", {}).get("text", "").strip()
+                        is_reply = msg_kind == "extendedTextMessage"
+                        if is_reply:
+                            ext = msg_data.get("extendedTextMessageData", {})
+                            text = ext.get("text", "").strip()
+                            # Include quoted context so agent knows what's being replied to
+                            quoted = ext.get("quotedMessage", {})
+                            quoted_text = (
+                                quoted.get("textMessage", "")
+                                or quoted.get("extendedTextMessage", {}).get("text", "")
+                            ).strip()
+                            if quoted_text and quoted_text not in text:
+                                text = f'[מגיב להודעה: "{quoted_text[:120]}"]\n{text}'
                         else:
                             text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
 
-                        logger.info("📩 Message from %s: %r", phone, text)
+                        logger.info("📩 Message from %s (reply=%s): %r", phone, is_reply, text)
                         pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
                         if pending:
                             _handle_tech_reply(db, phone, text, pending, s)
                         elif len(text) > 0:
-                            _handle_free_text(db, phone, text, s)
+                            _handle_free_text(db, phone, text, s, is_reply=is_reply)
                 finally:
                     db.close()
 
@@ -966,6 +971,62 @@ def _handle_technician_request(db, phone: str, text: str) -> None:
     logger.info("🙋 %s requested call %s at %s — awaiting dispatcher approval", tech.name, matched_call.id, addr)
 
 
+def _handle_send_route(db, phone: str) -> None:
+    """Send the current route to a technician on demand."""
+    from app.models.technician import Technician
+    from app.services.whatsapp_service import _send_message
+    from app.services.route_service import send_route_to_technician, build_route, format_route_message
+
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    tech = (db.query(Technician)
+            .filter(Technician.phone.contains(digits[-9:]) |
+                    Technician.whatsapp_number.contains(digits[-9:]))
+            .first())
+    if not tech:
+        return
+
+    if not tech.current_latitude or not tech.current_longitude:
+        _send_message(tech.whatsapp_number or tech.phone,
+            "📍 לא נמצא מיקום עדכני שלך.\n"
+            "שתף מיקום חי דרך WhatsApp ואשלח את המסלול מיד.")
+        return
+
+    stops = build_route(db, tech)
+    msg = format_route_message(tech.name, stops)
+    _send_message(tech.whatsapp_number or tech.phone, msg)
+    logger.info("🗺️ Route sent on demand to %s (%d stops)", tech.name, len(stops))
+
+
+def _quick_detect_intent(text: str, settings) -> str:
+    """Keyword-based intent detection — no API call. Returns intent or OTHER for ambiguous cases."""
+    t = text.strip().lower()
+    report_kw  = ("דוח", "סיום", "סיימתי", "טיפלתי", "סגור", "סגירה", 'דו"ח', "טיפלנו", "בוצע")
+    take_kw    = ("לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך", "אני על זה", "אני מגיע")
+    defer_kw   = ("דחה למחר", "אטפל מחר", "לדחות", "מחר בבוקר")
+    request_kw = ("מבקש", "מבקשת", "אשמח לטפל", "רוצה לטפל")
+    route_kw   = ("מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום", "מה יש לי")
+    ignore_kw  = ("תודה", "אוקיי", "אוק", "סבבה", "בסדר", "👍", "🙏", "✅", "ממש תודה")
+    question_kw = ("אפשר", "מה ה", "כמה", "מתי", "היסטוריה", "פרטים", "מי ה", "איפה",
+                   "קריאות פתוחות", "סטטוס", "רשימה", "כתובת", "פירוט", "מה קרה", "מה המצב")
+    if any(k in t for k in report_kw):
+        return "REPORT"
+    if any(k in t for k in route_kw):
+        return "ROUTE"
+    if any(k in t for k in take_kw):
+        return "TAKE"
+    if any(k in t for k in defer_kw):
+        return "DEFER"
+    if any(k in t for k in request_kw):
+        return "REQUEST"
+    if any(k in t for k in ignore_kw) and len(t) < 20:
+        return "IGNORE"
+    if any(k in t for k in question_kw):
+        return "QUESTION"
+    return "OTHER"
+
+
 def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = False) -> None:
     """
     Route ANY free-text message from a technician through Gemini for intent detection.
@@ -997,6 +1058,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
         # Fallback to keyword routing if Gemini not configured
         if any(w in text for w in ["דוח", "סיום", "סיימתי", "טיפלתי", "סגור"]):
             _handle_technician_report(db, phone, text)
+        elif any(w in text for w in ["מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום"]):
+            _handle_send_route(db, phone)
         elif any(w in text for w in ["לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך"]):
             _handle_self_assign(db, phone, text)
         elif any(w in text for w in ["דחה למחר", "אטפל מחר", "מחר", "לדחות"]):
@@ -1020,75 +1083,93 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
         "".join(c for c in n if c.isdigit())[-9:] == digits[-9:]
         for n in dispatcher_numbers
     )
+    is_manager = is_dispatcher or (tech and getattr(tech, "role", "") == "MANAGER")
 
-    if not tech and not is_dispatcher:
+    if not tech and not is_manager:
         logger.warning("📵 Message from unregistered number %s — ignored", phone)
         return
 
-    if is_dispatcher:
+    # Manager = dispatcher + technician capabilities.
+    # Tech-style intents (REPORT/TAKE/DEFER/REQUEST) handled as technician first;
+    # everything else routed to dispatcher handler (with confirmation for destructive actions).
+    if is_manager and not tech:
+        # Pure dispatcher (no tech record) — always dispatcher handler
         from app.services.dispatcher_commands import handle_dispatcher_command
         handle_dispatcher_command(db, phone, text, settings)
         return
 
-    try:
-        import json, urllib.request as _ur, urllib.error
-        _prompt = (
-            "אתה מנתח כוונות של הודעות ווצאפ מטכנאים של חברת מעליות. "
-            "החזר JSON בלבד (ללא הסברים) עם שדה 'intent' אחד מתוך:\n"
-            "- REPORT   (הטכנאי מדווח שסיים טיפול / שולח סיכום)\n"
-            "- TAKE     (הטכנאי מודיע שהוא לוקח/מטפל בקריאה — 'לקחתי', 'אני לוקח')\n"
-            "- DEFER    (הטכנאי מבקש לדחות קריאה ליום הבא — 'דחה למחר', 'מחר', 'אטפל מחר', 'לדחות')\n"
-            "- REQUEST  (הטכנאי מבקש לטפל בקריאה הממתינה לשיבוץ ידני — 'מבקש', 'אשמח לטפל', 'רוצה לטפל', 'אני מבקש את הקריאה')\n"
-            "- QUESTION (שאלה על המערכת, מעלית, לקוח, היסטוריה, סטטוס)\n"
-            "- IGNORE   (ברכה קצרה כמו 'אוקיי', 'תודה', 'סבבה', אמוג'י בלבד)\n"
-            "ושדה 'extract' עם הטקסט הרלוונטי לפעולה (כתובת / שם לקוח / תיאור תקלה / סיכום הדחייה).\n\n"
-            "הבדל בין TAKE לבין REQUEST:\n"
-            "- TAKE: הטכנאי לוקח קריאה ישירות ללא אישור ('לקחתי', 'קיבלתי', 'אני על זה').\n"
-            "- REQUEST: הטכנאי מבקש אישור מהמוקד ('מבקש', 'אשמח', 'רוצה', 'אפשר לטפל').\n\n"
-            "חשוב: רק הודעות קצרות וחסרות תוכן כמו 'אוקיי', 'תודה', 'סבבה' הן IGNORE. "
-            "כל הודעה שיש בה תוכן מהותי — אפילו אם לא ברור — תהיה QUESTION.\n\n"
-            f"הודעה: {text}"
-        )
-        import urllib.request, json as _json
-        import urllib.error
-        _payload = json.dumps({
-            "contents": [{"parts": [{"text": _prompt}]}],
-            "generationConfig": {"maxOutputTokens": 150},
-        }).encode()
-        _req = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.gemini_api_key}",
-            data=_payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(_req, timeout=10) as _r:
-            _data = json.loads(_r.read())
-        raw = _data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
-        parsed  = json.loads(raw)
-        intent  = parsed.get("intent", "QUESTION")
-        extract = parsed.get("extract", text)
-
-        logger.info("🧠 Intent '%s' detected for msg: %s", intent, text[:60])
-
-        if intent == "REPORT":
-            _handle_technician_report(db, phone, extract or text)
-        elif intent == "TAKE":
-            _handle_self_assign(db, phone, extract or text)
-        elif intent == "DEFER":
-            _handle_technician_defer(db, phone, extract or text)
-        elif intent == "REQUEST":
-            _handle_technician_request(db, phone, extract or text)
-        elif intent == "QUESTION":
-            _handle_chat_question(db, phone, text, settings, with_history=is_reply)
+    if is_manager and tech:
+        # Manager who is also a technician — detect tech intents first
+        _tech_intents = {"REPORT", "TAKE", "DEFER", "REQUEST", "ROUTE"}
+        quick_intent = _quick_detect_intent(text, settings)
+        if quick_intent in _tech_intents:
+            pass  # fall through to technician flow below
         else:
-            # IGNORE — short ack only (ok, thanks, 👍) — brief confirmation
-            _send_message(phone, "👍")
+            from app.services.dispatcher_commands import handle_dispatcher_command
+            handle_dispatcher_command(db, phone, text, settings, technician=tech)
+            return
 
-    except Exception as exc:
-        logger.error("Intent detection failed: %s — falling back to clarification", exc)
-        _fallback_reply()
+    if is_dispatcher and not tech:
+        # Fallback: dispatcher without tech record
+        from app.services.dispatcher_commands import handle_dispatcher_command
+        handle_dispatcher_command(db, phone, text, settings)
+        return
+
+    # Keyword-based intent detection — no Gemini API call needed for common intents
+    intent = _quick_detect_intent(text, settings)
+    extract = text
+
+    # For ambiguous cases (OTHER), try Gemini only if quota available
+    if intent == "OTHER" and getattr(settings, "gemini_api_key", ""):
+        try:
+            import json, urllib.request, urllib.error
+            _prompt = (
+                "אתה מנתח כוונות של הודעות ווצאפ מטכנאים. "
+                "החזר JSON בלבד עם שדה 'intent' אחד מתוך: "
+                "REPORT/TAKE/DEFER/REQUEST/ROUTE/QUESTION/IGNORE "
+                "ושדה 'extract' עם הטקסט הרלוונטי.\n"
+                "IGNORE רק לברכות קצרות ('אוקיי','תודה','👍'). "
+                "כל שאלה/בקשה מהותית = QUESTION.\n"
+                f"הודעה: {text}"
+            )
+            _payload = json.dumps({
+                "contents": [{"parts": [{"text": _prompt}]}],
+                "generationConfig": {"maxOutputTokens": 80},
+            }).encode()
+            _req = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.gemini_api_key}",
+                data=_payload, headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(_req, timeout=8) as _r:
+                _data = json.loads(_r.read())
+            raw = _data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
+            parsed = json.loads(raw)
+            intent  = parsed.get("intent", "QUESTION")
+            extract = parsed.get("extract", text)
+        except Exception as exc:
+            logger.warning("Gemini intent detection failed (%s) — treating as QUESTION", exc)
+            intent = "QUESTION"
+
+    logger.info("🧠 Intent '%s' for: %s", intent, text[:60])
+
+    if intent == "REPORT":
+        _handle_technician_report(db, phone, extract or text)
+    elif intent == "TAKE":
+        _handle_self_assign(db, phone, extract or text)
+    elif intent == "DEFER":
+        _handle_technician_defer(db, phone, extract or text)
+    elif intent == "REQUEST":
+        _handle_technician_request(db, phone, extract or text)
+    elif intent == "ROUTE":
+        _handle_send_route(db, phone)
+    elif intent == "QUESTION":
+        _handle_chat_question(db, phone, text, settings, with_history=is_reply)
+    elif intent == "IGNORE":
+        _send_message(phone, "👍")
+    else:
+        _handle_chat_question(db, phone, text, settings, with_history=is_reply)
 
 
 def _handle_chat_question_simple(db, phone: str, question: str, settings) -> None:
@@ -1155,9 +1236,9 @@ def _handle_chat_question_simple(db, phone: str, question: str, settings) -> Non
         )
         return
 
-    # Generic fallback — tell user to add API key or explain what's available
+    # Generic fallback
     _send_message(phone,
-        f"🤖 שאלות פתוחות דורשות מפתח ANTHROPIC_API_KEY.\n"
+        f"🤖 לא הצלחתי להבין את השאלה.\n"
         f"כרגע אני יכול לענות על:\n"
         f"• *כמה קריאות פתוחות יש*\n"
         f"• *מה הקריאה שלי*"
@@ -1252,11 +1333,15 @@ def _check_pending_assignment_timeouts():
             .filter(Assignment.status.in_(["PENDING_CONFIRMATION", "CONFIRMED"]))
             .all()
         }
-        orphaned = [c for c in open_calls if c.id not in active_assignment_call_ids]
+        orphaned = [
+            c for c in open_calls
+            if c.id not in active_assignment_call_ids
+            and c.fault_type != "MAINTENANCE"  # maintenance calls are scheduled, not auto-assigned
+        ]
 
-        local_hour = datetime.now().hour
-        if orphaned and not (7 <= local_hour < 22):
-            logger.info("⏰ Off-hours (%d:xx) — skipping %d orphaned call(s)", local_hour, len(orphaned))
+        from app.services.working_hours import is_working_hours as _iwh
+        if orphaned and not _iwh():
+            logger.info("⏰ Off-hours — skipping %d orphaned call(s)", len(orphaned))
             orphaned = []
 
         if orphaned:
@@ -1349,11 +1434,15 @@ def _check_pending_assignment_timeouts():
                     call.status = "OPEN"
                     db.commit()
                     from app.config import get_settings
+                    from app.services.working_hours import is_working_hours as _iwh
                     s = get_settings()
                     from app.services.whatsapp_service import notify_dispatcher
-                    notify_dispatcher(
-                        f"⚠️ קריאה ב{addr} לא אושרה אחרי {_ESCALATE_AFTER_MINUTES} דקות — נא לשבץ ידנית."
-                    )
+                    if _iwh():
+                        notify_dispatcher(
+                            f"⚠️ קריאה ב{addr} לא אושרה אחרי {_ESCALATE_AFTER_MINUTES} דקות — נא לשבץ ידנית."
+                        )
+                    else:
+                        logger.info("⏰ Off-hours — 180-min escalation for %s deferred to morning", addr)
 
             # ── Stage 1: hourly reminder to ALL available technicians ─────────
             elif age_minutes >= _REMINDER_AFTER_MINUTES and not assignment.reminder_sent_at:
@@ -1700,6 +1789,42 @@ def _check_inspection_deficiency_escalation():
         db.close()
 
 
+def _send_morning_maintenance_alerts():
+    """07:35 — send WhatsApp for urgent maintenance calls created overnight."""
+    from app.database import SessionLocal
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+    from app.services.whatsapp_service import notify_dispatcher
+
+    db = SessionLocal()
+    try:
+        pending = db.query(ServiceCall).filter(
+            ServiceCall.fault_type == "MAINTENANCE",
+            ServiceCall.status == "OPEN",
+            ServiceCall.priority.in_(["CRITICAL", "HIGH"]),
+            ServiceCall.description.contains("[maint_pending_notify]"),
+        ).all()
+
+        for sc in pending:
+            elev = db.get(Elevator, sc.elevator_id)
+            addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+            days_str = sc.description.split("[maint_pending_notify]")[0].replace("טיפול מונע ", "").strip()
+            notify_dispatcher(
+                f"🔴 *טיפול מונע דחוף* — {addr}\n"
+                f"⏳ {days_str}\n"
+                f"📅 {elev.next_service_date.strftime('%d/%m/%Y') if elev and elev.next_service_date else ''}"
+            )
+            sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
+            db.commit()
+
+        if pending:
+            logger.info("Morning maintenance alerts sent for %d calls", len(pending))
+    except Exception as exc:
+        logger.error("Morning maintenance alert job failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -1707,6 +1832,7 @@ def start_scheduler():
     # All cron times are in Israel local time (Asia/Jerusalem)
     _scheduler = BackgroundScheduler(timezone=ZoneInfo("Asia/Jerusalem"))
     _scheduler.add_job(_run_nightly_maintenance,             "cron",     hour=0,  minute=5)
+    _scheduler.add_job(_send_morning_maintenance_alerts,     "cron",     hour=7,  minute=35)
     # Morning location requests disabled — technicians use the app now
     # _scheduler.add_job(_send_morning_location_requests,   "cron",     hour=7,  minute=45)
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)

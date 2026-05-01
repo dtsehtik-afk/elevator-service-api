@@ -93,8 +93,8 @@ _GEMINI_TOOLS = [{
     ]
 }]
 
-_GEMINI_PRIMARY = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-_GEMINI_FALLBACK = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+_GEMINI_PRIMARY = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+_GEMINI_FALLBACK = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 _GEMINI_URL = _GEMINI_PRIMARY
 
 
@@ -426,28 +426,16 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
 
 # ── Main chat function ────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """אתה מנהל הלוגיסטיקה החכם של חברת אקורד מעליות.
-תפקידך לנהל את המערך השוטף של קריאות השירות — לוודא שהטכנאים מטפלים בקריאות, לענות על שאלותיהם, ולספק מידע מדויק בזמן אמת.
+_SYSTEM_PROMPT = """אתה עוזר לוגיסטיקה של חברת אקורד מעליות, זמין דרך ווצאפ לטכנאים ומנהלים.
 
-אתה מדבר עם טכנאים ומנהלים דרך ווצאפ — בעברית חמה, ישירה וקצרה.
-
-יש לך גישה לנתונים בזמן אמת:
-- קריאות שירות פתוחות, בטיפול וסגורות
-- מידע על מעליות לפי כתובת, עיר או בניין
-- היסטוריית טיפולים של כל מעלית
-- עומס עבודה וזמינות טכנאים
-- רשומות תחזוקה תקופתית
-- סיכום מצב כולל של המערכת
-- מיקום נוכחי של טכנאים (אם שיתפו מיקום)
-
-כללים חמורים:
-- ענה קצר וענייני — ווצאפ, לא דוח
-- פנה לטכנאי בשמו כשידוע
-- אם נשאלת על מעלית ספציפית — חפש אותה קודם בכלים
-- תאריכים בפורמט DD/MM/YYYY
-- אל תמציא מידע בשום מקרה — השתמש רק בנתונים שהכלים מחזירים
-- אם אין לך נתונים או שאינך בטוח — אמור בבירור "אין לי מידע על כך" או "לא מצאתי נתונים"
-- עדיף לא לענות מאשר להמציא"""
+כללי תגובה — חובה לפעול לפיהם:
+1. ענה אך ורק על מה שנשאלת — אל תוסיף מידע שלא התבקש
+2. אל תשלח סיכום קריאות / סטטוס כללי אלא אם ביקשו מפורשות
+3. שמור על ההקשר של השיחה הנוכחית — אם השאלה היא המשך, ענה בהתאם
+4. עברית קצרה וישירה — ווצאפ, לא דוח. משפט-שניים מספיקים ברוב המקרים
+5. אל תמציא — השתמש רק בנתונים מהכלים. אם אין מידע — "אין לי נתונים על כך"
+6. אם נשאלת על מעלית / כתובת ספציפית — חפש קודם בכלים לפני שתענה
+7. תאריכים בפורמט DD/MM/YYYY"""
 
 
 def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
@@ -504,11 +492,8 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     from app.config import get_settings
     s = get_settings()
 
-    if not s.gemini_api_key:
-        return "❌ שירות השאלות אינו מוגדר (חסר GEMINI_API_KEY)"
-
-    # Load recent conversation history only when this is a reply/quoted message
-    history = _load_conversation_history(db, phone) if (phone and with_history) else []
+    # Always load recent conversation history to maintain fluid conversation
+    history = _load_conversation_history(db, phone) if phone else []
 
     # Append current question; if history ends with user-role we merge
     current = {"role": "user", "parts": [{"text": f"{asker_name} שואל: {question}"}]}
@@ -518,6 +503,24 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     else:
         contents = history + [current]
 
+    # Try Gemini first (with tool use), fall back to Anthropic if unavailable
+    if s.gemini_api_key:
+        try:
+            return _answer_gemini(db, s, contents)
+        except Exception as exc:
+            logger.warning("Gemini unavailable (%s) — trying Anthropic fallback", exc)
+
+    if s.anthropic_api_key:
+        try:
+            return _answer_anthropic(s, question, asker_name, db=db)
+        except Exception as exc:
+            logger.warning("Anthropic fallback also failed: %s", exc)
+
+    return "השירות אינו זמין כרגע — נסה שוב בעוד מספר דקות."
+
+
+def _answer_gemini(db, s, contents: list) -> str:
+    """Run the Gemini tool-use loop and return Hebrew answer."""
     with httpx.Client(timeout=30) as client:
         for _iteration in range(6):
             payload = {
@@ -526,48 +529,140 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
                 "contents": contents,
                 "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600},
             }
-            # Try primary model, fall back to gemini-1.5-flash on quota/503
             for url in (_GEMINI_PRIMARY, _GEMINI_FALLBACK):
                 resp = client.post(f"{url}?key={s.gemini_api_key}", json=payload)
                 if resp.status_code not in (429, 503):
                     break
-                logger.warning("Gemini %s returned %s, trying fallback", url, resp.status_code)
+                logger.warning("Gemini %s returned %s, trying fallback model", url, resp.status_code)
             if not resp.is_success:
-                logger.error("Gemini API error %s: %s", resp.status_code, resp.text[:500])
                 raise httpx.HTTPStatusError(f"Gemini {resp.status_code}", request=resp.request, response=resp)
-            resp.raise_for_status()
+
             data = resp.json()
-
             parts = data["candidates"][0]["content"]["parts"]
-
-            # Collect function calls
             fn_calls = [p["functionCall"] for p in parts if "functionCall" in p]
 
             if not fn_calls:
-                # No tool calls — return text answer
                 for p in parts:
                     if "text" in p and p["text"]:
                         return p["text"].strip()
                 return "לא הצלחתי לעבד את השאלה."
 
-            # Append model turn
             contents.append({"role": "model", "parts": parts})
-
-            # Execute tools and build response turn
             fn_responses = []
             for fn_call in fn_calls:
                 name = fn_call["name"]
                 args = fn_call.get("args", {})
-                logger.warning("🔧 Chat agent calling tool: %s(%s)", name, args)
+                logger.warning("🔧 Gemini tool: %s(%s)", name, args)
                 result = _run_tool(db, name, args)
-                logger.warning("🔧 Tool result: %s", str(result)[:300])
                 fn_responses.append({
                     "functionResponse": {
                         "name": name,
                         "response": {"result": json.dumps(result, ensure_ascii=False)},
                     }
                 })
-
             contents.append({"role": "user", "parts": fn_responses})
 
-    return "לא הצלחתי לענות על השאלה — נסה לנסח אחרת."
+    return "לא הצלחתי לענות על השאלה."
+
+
+_ANTHROPIC_TOOLS = [
+    {
+        "name": "search_elevators",
+        "description": "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי.",
+        "input_schema": {"type": "object", "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer"},
+        }, "required": ["query"]},
+    },
+    {
+        "name": "get_elevator_calls",
+        "description": "מחזיר היסטוריית קריאות שירות עבור מעלית ספציפית לפי מזהה.",
+        "input_schema": {"type": "object", "properties": {
+            "elevator_id": {"type": "string"},
+            "limit": {"type": "integer"},
+        }, "required": ["elevator_id"]},
+    },
+    {
+        "name": "get_recent_calls",
+        "description": "מחזיר קריאות שירות מהימים האחרונים. ניתן לסנן לפי סטטוס, טכנאי, עיר.",
+        "input_schema": {"type": "object", "properties": {
+            "days": {"type": "integer"},
+            "status": {"type": "string"},
+            "city": {"type": "string"},
+            "technician_name": {"type": "string"},
+            "limit": {"type": "integer"},
+        }, "required": []},
+    },
+    {
+        "name": "get_technician_info",
+        "description": "מחזיר פרטים ומידע על טכנאי.",
+        "input_schema": {"type": "object", "properties": {
+            "name": {"type": "string"},
+        }, "required": ["name"]},
+    },
+    {
+        "name": "get_system_summary",
+        "description": "מחזיר סיכום כללי — קריאות פתוחות, טכנאים פעילים.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_technician_location",
+        "description": "מחזיר מיקום נוכחי של טכנאי.",
+        "input_schema": {"type": "object", "properties": {
+            "technician_name": {"type": "string"},
+            "near_address": {"type": "string"},
+        }, "required": []},
+    },
+    {
+        "name": "search_by_phone",
+        "description": "חפש מעליות לפי מספר טלפון.",
+        "input_schema": {"type": "object", "properties": {
+            "phone": {"type": "string"},
+        }, "required": ["phone"]},
+    },
+]
+
+
+def _answer_anthropic(s, question: str, asker_name: str, db=None) -> str:
+    """Fallback: answer via Anthropic Claude with full tool-use DB access."""
+    headers = {
+        "x-api-key": s.anthropic_api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    messages = [{"role": "user", "content": f"{asker_name} שואל: {question}"}]
+
+    with httpx.Client(timeout=30) as client:
+        for _iteration in range(6):
+            payload = {
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 600,
+                "system": _SYSTEM_PROMPT,
+                "tools": _ANTHROPIC_TOOLS if db else [],
+                "messages": messages,
+            }
+            resp = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Collect text and tool_use blocks
+            tool_uses = [b for b in data["content"] if b["type"] == "tool_use"]
+            text_blocks = [b for b in data["content"] if b["type"] == "text"]
+
+            if not tool_uses:
+                return text_blocks[0]["text"].strip() if text_blocks else "לא הצלחתי לענות."
+
+            # Execute tools and feed results back
+            messages.append({"role": "assistant", "content": data["content"]})
+            tool_results = []
+            for tu in tool_uses:
+                logger.info("🔧 Anthropic tool: %s(%s)", tu["name"], tu["input"])
+                result = _run_tool(db, tu["name"], tu["input"]) if db else {"error": "no db"}
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+            messages.append({"role": "user", "content": tool_results})
+
+    return "לא הצלחתי לענות על השאלה."
