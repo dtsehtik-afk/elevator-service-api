@@ -208,3 +208,25 @@ def save_field_labels(
 ):
     _set_setting(db, f"field_labels_{entity_type}", json.dumps(payload))
     return {"ok": True}
+
+
+# ── Navigation config ─────────────────────────────────────────────────────────
+# Stored as: { "/path": {"label": "שם", "visible": true} }
+
+@router.get("/nav-config", summary="Get nav label/visibility overrides")
+def get_nav_config(
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    raw = _get_setting(db, "nav_config")
+    return json.loads(raw) if raw else {}
+
+
+@router.put("/nav-config", summary="Save nav label/visibility overrides (admin only)")
+def save_nav_config(
+    payload: Dict[str, Any],  # path → {label, visible}
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    _set_setting(db, "nav_config", json.dumps(payload))
+    return {"ok": True}

@@ -1,12 +1,13 @@
-import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
-  AppShell, Burger, Group, NavLink, Text, Avatar, Menu, ActionIcon,
+  AppShell, Burger, Group, NavLink, Text, Avatar, Menu,
   Divider, Box, rem, Button, Collapse,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
+import { useQuery } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { useAuthStore } from '../../stores/authStore'
+import client from '../../api/client'
 
 interface NavItem {
   label: string
@@ -15,7 +16,7 @@ interface NavItem {
   children?: NavItem[]
 }
 
-const NAV_ITEMS: NavItem[] = [
+export const DEFAULT_NAV_ITEMS: NavItem[] = [
   { label: 'דשבורד', path: '/', icon: '📊' },
   {
     label: 'שירות שטח', path: '/elevators', icon: '🔧',
@@ -55,6 +56,23 @@ const NAV_ITEMS: NavItem[] = [
   },
 ]
 
+type NavConfig = Record<string, { label?: string; visible?: boolean }>
+
+function applyConfig(items: NavItem[], config: NavConfig): NavItem[] {
+  return items
+    .map(item => {
+      const override = config[item.path] ?? {}
+      const visible = override.visible !== false
+      if (!visible) return null
+      return {
+        ...item,
+        label: override.label || item.label,
+        children: item.children ? applyConfig(item.children, config) : undefined,
+      }
+    })
+    .filter(Boolean) as NavItem[]
+}
+
 function NavGroup({ item, depth = 0 }: { item: NavItem; depth?: number }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -86,7 +104,6 @@ function NavGroup({ item, depth = 0 }: { item: NavItem; depth?: number }) {
 
   return (
     <NavLink
-      key={item.path}
       label={item.label}
       leftSection={<span style={{ fontSize: rem(depth > 0 ? 14 : 16) }}>{item.icon}</span>}
       active={pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path))}
@@ -102,6 +119,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [opened, { toggle }] = useDisclosure()
   const navigate = useNavigate()
   const { userName, clear } = useAuthStore()
+
+  const { data: navConfig = {} } = useQuery<NavConfig>({
+    queryKey: ['nav-config'],
+    queryFn: () => client.get('/settings/nav-config').then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const navItems = applyConfig(DEFAULT_NAV_ITEMS, navConfig)
 
   function logout() {
     clear()
@@ -141,7 +166,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
       <AppShell.Navbar p="xs">
         <Box mt="xs" style={{ overflowY: 'auto', flex: 1 }}>
-          {NAV_ITEMS.map(item => (
+          {navItems.map(item => (
             <NavGroup key={item.path} item={item} />
           ))}
         </Box>
