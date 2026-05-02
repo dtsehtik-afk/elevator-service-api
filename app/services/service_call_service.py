@@ -15,6 +15,67 @@ from app.schemas.service_call import ServiceCallCreate, ServiceCallUpdate
 from app.services.elevator_service import calculate_risk_score
 
 
+def _upsert_caller_contact(db: Session, elevator, reported_by: str) -> None:
+    """Save caller info as a Contact on the elevator's building (auto_added=True).
+
+    reported_by format can be: "שם | 0501234567", "0501234567", or plain name.
+    Skips if no phone can be extracted or reported_by is a system token.
+    """
+    if not reported_by or reported_by.startswith("system"):
+        return
+    from app.models.contact import Contact
+
+    # Parse name and phone from "name | phone" or "phone" formats
+    phone, name = None, reported_by.strip()
+    if "|" in reported_by:
+        parts = [p.strip() for p in reported_by.split("|", 1)]
+        # figure out which part is the phone
+        for part in parts:
+            cleaned = part.replace("-", "").replace(" ", "").replace("+", "")
+            if cleaned.isdigit() and len(cleaned) >= 7:
+                phone = part.strip()
+            else:
+                name = part.strip()
+    else:
+        cleaned = reported_by.replace("-", "").replace(" ", "").replace("+", "")
+        if cleaned.isdigit() and len(cleaned) >= 7:
+            phone = reported_by.strip()
+            name = reported_by.strip()
+
+    if not phone:
+        return  # no identifiable phone — skip
+
+    # Find the elevator's building_id (can be None)
+    building_id = getattr(elevator, "building_id", None)
+
+    # Check if contact with same phone already exists for this building
+    existing = db.query(Contact).filter(
+        Contact.phone == phone,
+        Contact.building_id == building_id,
+    ).first()
+
+    if existing:
+        # Update name if we have a better one
+        if name and name != phone and existing.name == phone:
+            existing.name = name
+            db.commit()
+        return
+
+    contact = Contact(
+        building_id=building_id,
+        name=name or phone,
+        phone=phone,
+        role="RESIDENT",
+        auto_added=True,
+        notes=f"נוסף אוטומטית מקריאת שירות — מעלית {getattr(elevator, 'address', '')}",
+    )
+    db.add(contact)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def _check_recurring(db: Session, elevator_id: uuid.UUID, fault_type: str) -> bool:
     """Return True if the same fault_type appeared on this elevator in the last 30 days."""
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
@@ -81,6 +142,8 @@ def create_service_call(
     if elevator:
         elevator.risk_score = new_score
         db.commit()
+        # Auto-save caller as Contact on the elevator's building
+        _upsert_caller_contact(db, elevator, data.reported_by)
 
     # If there's a MONITORING call for the same elevator, close it and mark new call recurring
     monitoring_call = (

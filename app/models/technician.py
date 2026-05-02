@@ -4,6 +4,7 @@ import json
 import os
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -94,4 +95,7 @@ class Technician(Base):
     )
     maintenance_schedules: Mapped[list["MaintenanceSchedule"]] = relationship(  # noqa: F821
         "MaintenanceSchedule", back_populates="technician"
+    )
+    hr_record: Mapped[Optional["HRRecord"]] = relationship(  # noqa: F821
+        "HRRecord", back_populates="technician", uselist=False
     )

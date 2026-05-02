@@ -21,6 +21,7 @@ from app.models.part import Part, PartUsage
 from app.models.lead import Lead
 from app.models.saved_view import SavedView
 from app.models.custom_field import CustomField, CustomFieldValue
+from app.models.hr_record import HRRecord
 
 __all__ = [
     "Building",
@@ -49,4 +50,5 @@ __all__ = [
     "SavedView",
     "CustomField",
     "CustomFieldValue",
+    "HRRecord",
 ]

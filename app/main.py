@@ -16,6 +16,7 @@ from app.routers import elevators, service_calls, technicians, assignments, main
 from app.routers import customers, quotes, contracts, invoices, inventory, leads, erp_dashboard
 from app.routers import settings as settings_router, conversations
 from app.routers import reports as reports_router, custom_fields as custom_fields_router
+from app.routers import hr as hr_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -124,6 +125,25 @@ async def lifespan(app: FastAPI):
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_custom_field_values_entity_id ON custom_field_values (entity_id)",
                 "CREATE INDEX IF NOT EXISTS ix_custom_field_values_entity_type ON custom_field_values (entity_type)",
+                # HR module
+                """CREATE TABLE IF NOT EXISTS hr_records (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    technician_id UUID NOT NULL UNIQUE REFERENCES technicians(id) ON DELETE CASCADE,
+                    employment_start DATE,
+                    employment_end DATE,
+                    employment_type VARCHAR(20) NOT NULL DEFAULT 'FULL_TIME',
+                    salary_type VARCHAR(20) NOT NULL DEFAULT 'MONTHLY',
+                    base_salary FLOAT,
+                    hourly_rate FLOAT,
+                    id_number VARCHAR(20),
+                    bank_account VARCHAR(50),
+                    emergency_contact VARCHAR(150),
+                    emergency_phone VARCHAR(30),
+                    notes TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_hr_records_technician_id ON hr_records (technician_id)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -180,7 +200,7 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
-    "/reports", "/custom-fields", "/roles",
+    "/reports", "/custom-fields", "/roles", "/hr",
 )
 
 
@@ -229,6 +249,7 @@ app.include_router(settings_router.router)
 app.include_router(conversations.router)
 app.include_router(reports_router.router)
 app.include_router(custom_fields_router.router)
+app.include_router(hr_router.router)
 
 
 @app.get("/health", tags=["Health"])
