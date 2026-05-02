@@ -93,8 +93,8 @@ _GEMINI_TOOLS = [{
     ]
 }]
 
-_GEMINI_PRIMARY = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-_GEMINI_FALLBACK = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+_GEMINI_PRIMARY = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+_GEMINI_FALLBACK = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 _GEMINI_URL = _GEMINI_PRIMARY
 
 
