@@ -177,7 +177,7 @@ export default function ReportsPage() {
       <Group justify="space-between">
         <Title order={2}>📊 בניית דוחות</Title>
         <Group>
-          <Button variant="light" onClick={runReport} loading={loading}>
+          <Button variant="light" onClick={() => runReport()} loading={loading}>
             הרץ דוח
           </Button>
           <Button variant="outline" onClick={handleExport}>
