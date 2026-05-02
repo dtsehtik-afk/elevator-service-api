@@ -17,6 +17,7 @@ import {
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
 } from '../utils/constants'
 import { formatDateTime } from '../utils/dates'
+import { EditViewDrawer } from '../components/EditViewDrawer'
 import { ServiceCall, CallDetail } from '../types'
 
 const PAGE_SIZE = 20
@@ -285,7 +286,10 @@ export default function CallsPage() {
     <Stack gap="lg">
       <Group justify="space-between">
         <Title order={2}>קריאות שירות ({filtered.length})</Title>
-        <Button onClick={openNew}>+ קריאה חדשה</Button>
+        <Group>
+          <EditViewDrawer entityType="service_calls" entityLabel="קריאות שירות" />
+          <Button onClick={openNew}>+ קריאה חדשה</Button>
+        </Group>
       </Group>
 
       <Group>

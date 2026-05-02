@@ -127,6 +127,20 @@ async def lifespan(app: FastAPI):
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
+    # Backfill: ensure every elevator has a customer_id
+    try:
+        from app.database import SessionLocal
+        from app.services.elevator_service import sync_all_elevator_customers
+        import logging as _logging
+        _db = SessionLocal()
+        try:
+            _synced = sync_all_elevator_customers(_db)
+            if _synced:
+                _logging.getLogger(__name__).info(f"Synced {_synced} elevators → customers")
+        finally:
+            _db.close()
+    except Exception:
+        pass
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield

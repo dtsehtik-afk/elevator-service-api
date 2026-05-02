@@ -8,6 +8,7 @@ import { notifications } from '@mantine/notifications'
 import { invoicesApi } from '../api/invoices'
 import { customersApi } from '../api/customers'
 import type { Invoice, Customer } from '../types'
+import { EditViewDrawer } from '../components/EditViewDrawer'
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'gray', SENT: 'blue', PAID: 'green', PARTIAL: 'orange', OVERDUE: 'red', CANCELLED: 'dark',
@@ -81,7 +82,10 @@ export default function InvoicesPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={2}>💰 חשבוניות</Title>
-        <Button onClick={() => setCreateOpen(true)}>+ חשבונית חדשה</Button>
+        <Group>
+          <EditViewDrawer entityType="invoices" entityLabel="חשבוניות" />
+          <Button onClick={() => setCreateOpen(true)}>+ חשבונית חדשה</Button>
+        </Group>
       </Group>
 
       <Tabs defaultValue="invoices">

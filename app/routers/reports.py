@@ -56,44 +56,36 @@ class SavedViewUpdate(BaseModel):
 
 # ── Schema endpoints ──────────────────────────────────────────────────────────
 
+def _apply_label_overrides(db: Session, entity_type: str, columns: list) -> list:
+    """Merge user-defined label overrides into column definitions."""
+    import json
+    from sqlalchemy import text as _text
+    try:
+        row = db.execute(
+            _text("SELECT value FROM system_settings WHERE key = :k"),
+            {"k": f"field_labels_{entity_type}"},
+        ).fetchone()
+        overrides = json.loads(row[0]) if row else {}
+    except Exception:
+        overrides = {}
+    if not overrides:
+        return columns
+    return [
+        {**col, "label_he": overrides.get(col["key"], col["label_he"])}
+        for col in columns
+    ]
+
+
 @router.get("/schema", summary="All entity types and their available columns")
-def get_all_schemas(current_user: Technician = Depends(get_current_user)):
-    from app.services.report_builder import get_schemas
-    schemas = get_schemas()
-    result = []
-    for etype, schema in schemas.items():
-        result.append({
-            "entity_type": etype,
-            "label_he": schema["label_he"],
-            "default_columns": schema["default_columns"],
-            "columns": [
-                {
-                    "key": k,
-                    "label_he": v["label_he"],
-                    "type": v["type"],
-                    "filterable": v.get("filter_attr") is not None,
-                }
-                for k, v in schema["columns"].items()
-            ],
-        })
-    return result
-
-
-@router.get("/schema/{entity_type}", summary="Columns and filter options for an entity")
-def get_entity_schema(
-    entity_type: str,
+def get_all_schemas(
+    db: Session = Depends(get_db),
     current_user: Technician = Depends(get_current_user),
 ):
     from app.services.report_builder import get_schemas
     schemas = get_schemas()
-    if entity_type not in schemas:
-        raise HTTPException(status_code=404, detail=f"Entity type '{entity_type}' not found")
-    schema = schemas[entity_type]
-    return {
-        "entity_type": entity_type,
-        "label_he": schema["label_he"],
-        "default_columns": schema["default_columns"],
-        "columns": [
+    result = []
+    for etype, schema in schemas.items():
+        cols = [
             {
                 "key": k,
                 "label_he": v["label_he"],
@@ -101,7 +93,41 @@ def get_entity_schema(
                 "filterable": v.get("filter_attr") is not None,
             }
             for k, v in schema["columns"].items()
-        ],
+        ]
+        result.append({
+            "entity_type": etype,
+            "label_he": schema["label_he"],
+            "default_columns": schema["default_columns"],
+            "columns": _apply_label_overrides(db, etype, cols),
+        })
+    return result
+
+
+@router.get("/schema/{entity_type}", summary="Columns and filter options for an entity")
+def get_entity_schema(
+    entity_type: str,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    from app.services.report_builder import get_schemas
+    schemas = get_schemas()
+    if entity_type not in schemas:
+        raise HTTPException(status_code=404, detail=f"Entity type '{entity_type}' not found")
+    schema = schemas[entity_type]
+    cols = [
+        {
+            "key": k,
+            "label_he": v["label_he"],
+            "type": v["type"],
+            "filterable": v.get("filter_attr") is not None,
+        }
+        for k, v in schema["columns"].items()
+    ]
+    return {
+        "entity_type": entity_type,
+        "label_he": schema["label_he"],
+        "default_columns": schema["default_columns"],
+        "columns": _apply_label_overrides(db, entity_type, cols),
     }
 
 

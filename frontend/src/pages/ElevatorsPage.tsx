@@ -9,6 +9,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { listElevators, createElevator, importElevatorsFromPdf, importElevatorsFromExcel } from '../api/elevators'
+import { EditViewDrawer } from '../components/EditViewDrawer'
 import { ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS } from '../utils/constants'
 import { formatDate } from '../utils/dates'
 
@@ -177,6 +178,7 @@ export default function ElevatorsPage() {
         </Group>
         <Group>
           <input ref={xlsxInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleExcelImport} />
+          <EditViewDrawer entityType="elevators" entityLabel="מעליות" />
           <Button variant="filled" color="teal" loading={importingXl} onClick={() => xlsxInputRef.current?.click()}>יבוא מ-Excel</Button>
           <input ref={fileInputRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handlePdfImport} />
           <Button variant="outline" color="teal" loading={importing} onClick={() => fileInputRef.current?.click()}>יבוא מ-PDF</Button>

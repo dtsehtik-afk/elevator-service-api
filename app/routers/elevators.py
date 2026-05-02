@@ -16,6 +16,16 @@ from app.services import elevator_service
 router = APIRouter()
 
 
+@router.post("/admin/sync-customers", summary="Sync all elevators → customers (admin)")
+def sync_elevator_customers(
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    """Backfill customer_id for every elevator that doesn't have one."""
+    synced = elevator_service.sync_all_elevator_customers(db)
+    return {"synced": synced}
+
+
 @router.get(
     "",
     response_model=List[ElevatorResponse],

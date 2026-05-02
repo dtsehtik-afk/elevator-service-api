@@ -111,7 +111,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   return (
     <AppShell
       header={{ height: 60 }}
-      navbar={{ width: 230, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+      navbar={{ width: 240, breakpoint: 'sm', collapsed: { mobile: !opened } }}
       padding="md"
     >
       <AppShell.Header>
@@ -159,7 +159,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <Text size="xs" c="dimmed" ta="center">v2.0.0 ERP</Text>
       </AppShell.Navbar>
 
-      <AppShell.Main>{children}</AppShell.Main>
+      <AppShell.Main style={{ overflowX: 'hidden' }}>{children}</AppShell.Main>
     </AppShell>
   )
 }

@@ -185,3 +185,26 @@ def save_role_permissions(
 @router.get("/roles/defaults", summary="Get built-in role permission defaults")
 def get_role_defaults(current_user: Technician = Depends(get_current_user)):
     return _DEFAULT_ROLE_PERMISSIONS
+
+
+# ── Field label overrides ─────────────────────────────────────────────────────
+
+@router.get("/field-labels/{entity_type}", summary="Get custom label overrides for an entity's built-in fields")
+def get_field_labels(
+    entity_type: str,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    raw = _get_setting(db, f"field_labels_{entity_type}")
+    return json.loads(raw) if raw else {}
+
+
+@router.put("/field-labels/{entity_type}", summary="Save label overrides for built-in fields (admin only)")
+def save_field_labels(
+    entity_type: str,
+    payload: Dict[str, str],  # field_key → custom_label
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    _set_setting(db, f"field_labels_{entity_type}", json.dumps(payload))
+    return {"ok": True}

@@ -7,6 +7,7 @@ import {
 import { notifications } from '@mantine/notifications'
 import { customersApi } from '../api/customers'
 import type { Customer } from '../types'
+import { EditViewDrawer } from '../components/EditViewDrawer'
 
 const TYPE_LABELS: Record<string, string> = {
   OWNER: 'בעל נכס',
@@ -100,7 +101,10 @@ export default function CustomersPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={2}>👤 לקוחות</Title>
-        <Button onClick={() => setCreateOpen(true)}>+ לקוח חדש</Button>
+        <Group>
+          <EditViewDrawer entityType="customers" entityLabel="לקוחות" />
+          <Button onClick={() => setCreateOpen(true)}>+ לקוח חדש</Button>
+        </Group>
       </Group>
 
       <Group mb="md" grow>

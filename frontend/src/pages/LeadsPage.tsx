@@ -6,6 +6,7 @@ import {
 import { notifications } from '@mantine/notifications'
 import { leadsApi } from '../api/leads'
 import type { Lead } from '../types'
+import { EditViewDrawer } from '../components/EditViewDrawer'
 
 const STATUS_COLORS: Record<string, string> = {
   NEW: 'blue', CONTACTED: 'cyan', QUALIFIED: 'violet', PROPOSAL: 'orange', WON: 'green', LOST: 'gray',
@@ -81,6 +82,7 @@ export default function LeadsPage() {
       <Group justify="space-between" mb="md">
         <Title order={2}>🎯 לידים — CRM</Title>
         <Group>
+          <EditViewDrawer entityType="leads" entityLabel="לידים" />
           <Button variant={view === 'kanban' ? 'filled' : 'outline'} onClick={() => setView('kanban')} size="sm">לוח</Button>
           <Button variant={view === 'table' ? 'filled' : 'outline'} onClick={() => setView('table')} size="sm">טבלה</Button>
           <Button onClick={() => setCreateOpen(true)}>+ ליד חדש</Button>

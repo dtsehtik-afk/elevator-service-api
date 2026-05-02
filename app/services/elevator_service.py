@@ -126,6 +126,22 @@ def calculate_risk_score(db: Session, elevator_id: uuid.UUID) -> float:
     return min(score, 100.0)
 
 
+def sync_all_elevator_customers(db: Session) -> int:
+    """Ensure every elevator has a customer. Runs at startup to backfill existing data."""
+    elevators = db.query(Elevator).filter(Elevator.customer_id == None).all()
+    count = 0
+    for elevator in elevators:
+        try:
+            _ensure_elevator_customer(db, elevator)
+            count += 1
+        except Exception:
+            db.rollback()
+            continue
+    if count:
+        db.commit()
+    return count
+
+
 def create_elevator(db: Session, data: ElevatorCreate) -> Elevator:
     """Create and persist a new elevator record.
 
