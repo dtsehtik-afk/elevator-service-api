@@ -153,6 +153,8 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS mobile VARCHAR(30)",
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS landline VARCHAR(30)",
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notification_prefs JSONB",
+                # system_settings — ensure value column exists for key-value store queries
+                "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS value TEXT",
                 # InspectionReport — extended fields from Gemini extraction
                 "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS next_inspection_date DATE",
                 "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_phone VARCHAR(30)",
