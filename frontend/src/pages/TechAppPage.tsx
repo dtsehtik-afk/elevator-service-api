@@ -143,10 +143,10 @@ async function sendLocation(techId: string, lat: number, lng: number) {
   await client.post(`/webhooks/location/${techId}`, { latitude: lat, longitude: lng })
 }
 
-async function fetchMaintenance(techId: string): Promise<MaintenanceItem[]> {
+async function fetchMaintenance(_techId: string): Promise<MaintenanceItem[]> {
   const today = new Date().toISOString().split('T')[0]
   const future = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-  const { data } = await client.get('/maintenance', { params: { technician_id: techId, from: today, to: future, status: 'SCHEDULED', limit: 50 } })
+  const { data } = await client.get('/maintenance', { params: { from: today, to: future, status: 'SCHEDULED', limit: 50 } })
   return data
 }
 
@@ -160,8 +160,8 @@ async function fetchMapPins(techId: string): Promise<MapPin[]> {
   return data.pins ?? []
 }
 
-async function toggleDeficiency(reportId: string, idx: number, done: boolean) {
-  await client.patch(`/inspections/checklist/${reportId}`, [{ index: idx, done }])
+async function toggleDeficiency(reportId: string, idx: number, done: boolean, doneDescription?: string) {
+  await client.patch(`/inspections/checklist/${reportId}`, [{ index: idx, done, done_description: doneDescription ?? '' }])
 }
 
 // ── Voice transcription hook ──────────────────────────────────────────────
@@ -322,11 +322,18 @@ const SEV_COLOR: Record<string, string> = { HIGH: 'red', MEDIUM: 'orange', LOW: 
 function ReportsTab() {
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [pendingCheck, setPendingCheck] = useState<{ reportId: string; idx: number } | null>(null)
+  const [completionDesc, setCompletionDesc] = useState('')
   const { data: reports = [], isLoading } = useQuery({ queryKey: ['tech-reports'], queryFn: fetchMyReports })
 
   const checkMut = useMutation({
-    mutationFn: ({ reportId, idx, done }: { reportId: string; idx: number; done: boolean }) => toggleDeficiency(reportId, idx, done),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tech-reports'] }),
+    mutationFn: ({ reportId, idx, done, desc }: { reportId: string; idx: number; done: boolean; desc?: string }) =>
+      toggleDeficiency(reportId, idx, done, desc),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tech-reports'] })
+      setPendingCheck(null)
+      setCompletionDesc('')
+    },
     onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
   })
 
@@ -336,39 +343,88 @@ function ReportsTab() {
   if (!open.length) return <Card withBorder p="xl" ta="center"><Text c="dimmed">אין דוחות פתוחים לטיפול</Text></Card>
 
   return (
-    <Stack gap="sm">
-      {open.map(r => (
-        <Card key={r.id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #fa5252' }}>
-          <Group justify="space-between" mb={4}>
-            <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
-            <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
+    <>
+      <Modal
+        opened={!!pendingCheck}
+        onClose={() => { setPendingCheck(null); setCompletionDesc('') }}
+        title="✅ תיאור ביצוע הטיפול"
+        centered
+        size="sm"
+      >
+        <Stack gap="sm">
+          <Text size="xs" c="dimmed">
+            {new Date().toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}
+          </Text>
+          <Textarea
+            label="תאר את הטיפול שבוצע"
+            placeholder="פרט את הפעולות שבוצעו לתיקון הליקוי..."
+            value={completionDesc}
+            onChange={e => setCompletionDesc(e.target.value)}
+            rows={4}
+            autosize
+          />
+          <Group justify="space-between" mt="xs">
+            <Button variant="subtle" color="gray" onClick={() => { setPendingCheck(null); setCompletionDesc('') }}>
+              ביטול
+            </Button>
+            <Button
+              loading={checkMut.isPending}
+              onClick={() => pendingCheck && checkMut.mutate({ reportId: pendingCheck.reportId, idx: pendingCheck.idx, done: true, desc: completionDesc })}
+            >
+              שמור טיפול
+            </Button>
           </Group>
-          {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
-          <Button size="xs" variant="subtle" mt={6}
-            onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
-            {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
-          </Button>
-          <Collapse in={expanded === r.id}>
-            <Stack gap={6} mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
-              {(r.deficiencies || []).map((d, i) => (
-                <Checkbox key={i} checked={!!d.done}
-                  onChange={e => checkMut.mutate({ reportId: r.id, idx: i, done: e.target.checked })}
-                  label={
-                    <Group gap="xs">
-                      <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
-                      <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
-                        {d.description}
-                        {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
-                      </Text>
-                    </Group>
-                  }
-                />
-              ))}
-            </Stack>
-          </Collapse>
-        </Card>
-      ))}
-    </Stack>
+        </Stack>
+      </Modal>
+
+      <Stack gap="sm">
+        {open.map(r => (
+          <Card key={r.id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #fa5252' }}>
+            <Group justify="space-between" mb={4}>
+              <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
+              <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
+            </Group>
+            {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
+            <Button size="xs" variant="subtle" mt={6}
+              onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+              {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
+            </Button>
+            <Collapse in={expanded === r.id}>
+              <Stack gap={6} mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
+                {(r.deficiencies || []).map((d: any, i: number) => (
+                  <div key={i}>
+                    <Checkbox
+                      checked={!!d.done}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setPendingCheck({ reportId: r.id, idx: i })
+                        } else {
+                          checkMut.mutate({ reportId: r.id, idx: i, done: false })
+                        }
+                      }}
+                      label={
+                        <Group gap="xs">
+                          <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
+                          <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
+                            {d.description}
+                          </Text>
+                        </Group>
+                      }
+                    />
+                    {d.done && (
+                      <div style={{ paddingRight: 28, marginTop: 2 }}>
+                        {d.done_by && <Text size="xs" c="teal">✅ {d.done_by}{d.done_at ? ` · ${new Date(d.done_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}` : ''}</Text>}
+                        {d.done_description && <Text size="xs" c="dimmed" style={{ fontStyle: 'italic' }}>"{d.done_description}"</Text>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </Stack>
+            </Collapse>
+          </Card>
+        ))}
+      </Stack>
+    </>
   )
 }
 

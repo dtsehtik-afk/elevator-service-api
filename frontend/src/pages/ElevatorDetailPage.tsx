@@ -27,17 +27,35 @@ const SENSITIVE_FIELDS = new Set(['internal_number', 'labor_file_number'])
 interface Contact {
   id: string
   name: string
+  first_name?: string | null
+  last_name?: string | null
+  company?: string | null
   phone: string | null
+  mobile?: string | null
+  landline?: string | null
   email: string | null
   role: string
+  notes?: string | null
   auto_added: boolean
+  notification_prefs?: Record<string, boolean> | null
+  elevator_id?: string | null
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  VAAD: 'ועד בית', RESIDENT: 'דייר', MANAGEMENT: 'ניהול', DIALER: 'חייגן', OTHER: 'אחר',
+  VAAD: 'ועד בית', RESIDENT: 'דייר', MANAGEMENT: 'ניהול', DIALER: 'חייגן',
+  CONSULTANT: 'יועץ', OTHER: 'אחר',
 }
 const ROLE_COLORS: Record<string, string> = {
-  VAAD: 'blue', RESIDENT: 'teal', MANAGEMENT: 'violet', DIALER: 'gray', OTHER: 'gray',
+  VAAD: 'blue', RESIDENT: 'teal', MANAGEMENT: 'violet', DIALER: 'gray',
+  CONSULTANT: 'indigo', OTHER: 'gray',
+}
+
+const NOTIFICATION_PREFS_LABELS: Record<string, string> = {
+  maintenance_completion: 'השלמת תחזוקה',
+  inspection_report: 'דוח בודק',
+  quotes: 'הצעת מחיר',
+  invoices: 'חשבוניות',
+  service_completion: 'סגירת קריאה',
 }
 
 function Field({ label, value, children }: { label: string; value?: React.ReactNode; children?: React.ReactNode }) {
@@ -139,7 +157,11 @@ export default function ElevatorDetailPage() {
   const [form, setForm] = useState<Partial<Elevator>>({})
   const [sensitiveField, setSensitiveField] = useState<string | null>(null)
   const [addContactOpen, setAddContactOpen] = useState(false)
-  const [newContact, setNewContact] = useState({ name: '', phone: '', email: '', role: 'VAAD' })
+  const [newContact, setNewContact] = useState({
+    name: '', first_name: '', last_name: '', company: '',
+    phone: '', mobile: '', landline: '', email: '', role: 'VAAD', notes: '',
+    notification_prefs: {} as Record<string, boolean>,
+  })
   const [residentsExpanded, setResidentsExpanded] = useState(false)
   const [assignBuildingOpen, setAssignBuildingOpen] = useState(false)
   const [assignCompanyOpen, setAssignCompanyOpen] = useState(false)
@@ -153,7 +175,11 @@ export default function ElevatorDetailPage() {
   const dateSet = (key: string, d: Date | null) => set(key, toISODate(d))
 
   function openAddContact(defaultRole: string) {
-    setNewContact({ name: '', phone: '', email: '', role: defaultRole })
+    setNewContact({
+      name: '', first_name: '', last_name: '', company: '',
+      phone: '', mobile: '', landline: '', email: '', role: defaultRole, notes: '',
+      notification_prefs: {},
+    })
     setAddContactOpen(true)
   }
 
@@ -177,7 +203,7 @@ export default function ElevatorDetailPage() {
     enabled: !!id,
   })
 
-  const { data: contacts = [] } = useQuery<Contact[]>({
+  const { data: buildingContacts = [] } = useQuery<Contact[]>({
     queryKey: ['elevator-contacts', elevator?.building_id],
     queryFn: async () => {
       if (!elevator?.building_id) return []
@@ -185,6 +211,12 @@ export default function ElevatorDetailPage() {
     },
     enabled: !!elevator?.building_id,
   })
+  const { data: elevatorContacts = [] } = useQuery<Contact[]>({
+    queryKey: ['elevator-direct-contacts', id],
+    queryFn: async () => (await client.get(`/contacts?elevator_id=${id}`)).data,
+    enabled: !!id,
+  })
+  const contacts = [...elevatorContacts, ...buildingContacts.filter(c => !elevatorContacts.find(ec => ec.id === c.id))]
 
   const { data: buildingDetail } = useQuery({
     queryKey: ['building-detail', elevator?.building_id],
@@ -258,6 +290,9 @@ export default function ElevatorDetailPage() {
 
   const addContactMutation = useMutation({
     mutationFn: async (contactData: any) => {
+      if (contactData.role === 'CONSULTANT') {
+        return client.post('/contacts', { ...contactData, elevator_id: id })
+      }
       let buildingId = elevator!.building_id
       if (!buildingId) {
         const bRes = await client.post('/buildings', { address: elevator!.address, city: elevator!.city })
@@ -269,8 +304,13 @@ export default function ElevatorDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['elevator', id] })
       qc.invalidateQueries({ queryKey: ['elevator-contacts'] })
+      qc.invalidateQueries({ queryKey: ['elevator-direct-contacts', id] })
       setAddContactOpen(false)
-      setNewContact({ name: '', phone: '', email: '', role: 'VAAD' })
+      setNewContact({
+        name: '', first_name: '', last_name: '', company: '',
+        phone: '', mobile: '', landline: '', email: '', role: 'VAAD', notes: '',
+        notification_prefs: {},
+      })
       notifications.show({ message: 'איש קשר נוסף', color: 'green' })
     },
   })
@@ -393,26 +433,63 @@ export default function ElevatorDetailPage() {
       </Modal>
 
       {/* Add contact modal */}
-      <Modal opened={addContactOpen} onClose={() => setAddContactOpen(false)} title="הוסף איש קשר" dir="rtl">
+      <Modal opened={addContactOpen} onClose={() => setAddContactOpen(false)} title="הוסף איש קשר" dir="rtl" size="lg">
         <Stack gap="sm">
-          <TextInput label="שם" required value={newContact.name} onChange={e => setNewContact(s => ({ ...s, name: e.target.value }))} />
-          <TextInput label="טלפון" value={newContact.phone} onChange={e => setNewContact(s => ({ ...s, phone: e.target.value }))} />
-          <TextInput label="מייל" value={newContact.email} onChange={e => setNewContact(s => ({ ...s, email: e.target.value }))} />
           <Select label="תפקיד" value={newContact.role}
             data={Object.entries(ROLE_LABELS).map(([v, l]) => ({ value: v, label: l }))}
             onChange={v => setNewContact(s => ({ ...s, role: v ?? 'OTHER' }))}
           />
+          <Grid>
+            <Grid.Col span={6}>
+              <TextInput label="שם פרטי" value={newContact.first_name}
+                onChange={e => setNewContact(s => ({ ...s, first_name: e.target.value, name: `${e.target.value} ${s.last_name}`.trim() || e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="שם משפחה" value={newContact.last_name}
+                onChange={e => setNewContact(s => ({ ...s, last_name: e.target.value, name: `${s.first_name} ${e.target.value}`.trim() || s.first_name }))} />
+            </Grid.Col>
+          </Grid>
+          <TextInput label="חברה / ארגון" value={newContact.company}
+            onChange={e => setNewContact(s => ({ ...s, company: e.target.value }))} />
+          <Grid>
+            <Grid.Col span={6}>
+              <TextInput label="טלפון נייד" value={newContact.mobile}
+                onChange={e => setNewContact(s => ({ ...s, mobile: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="טלפון קווי" value={newContact.landline}
+                onChange={e => setNewContact(s => ({ ...s, landline: e.target.value }))} />
+            </Grid.Col>
+          </Grid>
+          <TextInput label="דואל" value={newContact.email}
+            onChange={e => setNewContact(s => ({ ...s, email: e.target.value }))} />
+          <Text size="sm" fw={500}>עדכונים אוטומטיים</Text>
+          {Object.entries(NOTIFICATION_PREFS_LABELS).map(([key, label]) => (
+            <Checkbox key={key} label={label}
+              checked={!!newContact.notification_prefs[key]}
+              onChange={e => setNewContact(s => ({ ...s, notification_prefs: { ...s.notification_prefs, [key]: e.target.checked } }))}
+            />
+          ))}
+          <Textarea label="הערות" value={newContact.notes} rows={2}
+            onChange={e => setNewContact(s => ({ ...s, notes: e.target.value }))} />
           <Button
             loading={addContactMutation.isPending}
-            disabled={!newContact.name.trim()}
+            disabled={!newContact.name.trim() && !newContact.first_name.trim()}
             onClick={() => addContactMutation.mutate({
-              ...newContact,
-              building_id: elevator.building_id,
-              phone: newContact.phone || null,
+              name: newContact.name || `${newContact.first_name} ${newContact.last_name}`.trim() || newContact.first_name,
+              first_name: newContact.first_name || null,
+              last_name: newContact.last_name || null,
+              company: newContact.company || null,
+              phone: newContact.mobile || newContact.landline || null,
+              mobile: newContact.mobile || null,
+              landline: newContact.landline || null,
               email: newContact.email || null,
+              role: newContact.role,
+              notes: newContact.notes || null,
+              notification_prefs: Object.keys(newContact.notification_prefs).length > 0 ? newContact.notification_prefs : null,
             })}
           >
-            הוסף
+            הוסף איש קשר
           </Button>
         </Stack>
       </Modal>
@@ -845,6 +922,46 @@ export default function ElevatorDetailPage() {
         {/* ── CONTACTS ── */}
         <Tabs.Panel value="contacts" pt="md">
           <Stack gap="md">
+
+            {/* יועץ */}
+            <Paper withBorder p="md" radius="md" style={{ borderColor: '#4c6ef5' }}>
+              <Group justify="space-between" mb="sm">
+                <Group gap="xs">
+                  <Text fw={700}>👔 יועצים</Text>
+                  <Badge color="indigo" size="xs" variant="light">{contacts.filter(c => c.role === 'CONSULTANT').length}</Badge>
+                </Group>
+                <Button size="xs" variant="light" color="indigo" onClick={() => openAddContact('CONSULTANT')}>+ הוסף יועץ</Button>
+              </Group>
+              {contacts.filter(c => c.role === 'CONSULTANT').length === 0 ? (
+                <Text size="sm" c="dimmed">אין יועצים רשומים למעלית זו</Text>
+              ) : (
+                <Stack gap="xs">
+                  {contacts.filter(c => c.role === 'CONSULTANT').map(c => (
+                    <Group key={c.id} justify="space-between" p="xs" style={{ borderRadius: 8, background: 'var(--mantine-color-indigo-0)' }}>
+                      <Stack gap={2}>
+                        <Group gap="xs">
+                          <Text size="sm" fw={600}>{c.name}</Text>
+                          {c.company && <Text size="xs" c="dimmed">· {c.company}</Text>}
+                        </Group>
+                        <Group gap="sm">
+                          {c.mobile && <Anchor href={`tel:${c.mobile}`} size="xs">📱 {c.mobile}</Anchor>}
+                          {c.landline && <Anchor href={`tel:${c.landline}`} size="xs">☎️ {c.landline}</Anchor>}
+                          {c.email && <Anchor href={`mailto:${c.email}`} size="xs">✉️ {c.email}</Anchor>}
+                        </Group>
+                        {c.notification_prefs && Object.entries(c.notification_prefs).filter(([, v]) => v).length > 0 && (
+                          <Group gap={4} mt={2}>
+                            {Object.entries(c.notification_prefs).filter(([, v]) => v).map(([k]) => (
+                              <Badge key={k} size="xs" color="indigo" variant="dot">{NOTIFICATION_PREFS_LABELS[k] ?? k}</Badge>
+                            ))}
+                          </Group>
+                        )}
+                      </Stack>
+                      <ActionIcon size="xs" color="red" variant="subtle" onClick={() => deleteContactMutation.mutate(c.id)}>✕</ActionIcon>
+                    </Group>
+                  ))}
+                </Stack>
+              )}
+            </Paper>
 
             {/* ועד הבית */}
             <Paper withBorder p="md" radius="md">

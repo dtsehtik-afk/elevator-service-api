@@ -189,6 +189,61 @@ export default function MaintenancePage() {
         </Paper>
       </SimpleGrid>
 
+      {/* Elevators requiring service — combined overdue + red + orange */}
+      {(elevatorServiceStatus.overdue.length + elevatorServiceStatus.red.length + elevatorServiceStatus.orange.length) > 0 && (
+        <Paper withBorder radius="md" p="sm">
+          <Text fw={600} mb="xs">🔧 מעליות הדורשות טיפול מונע ({elevatorServiceStatus.overdue.length + elevatorServiceStatus.red.length + elevatorServiceStatus.orange.length})</Text>
+          <Table highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>מ"ס</Table.Th>
+                <Table.Th>כתובת</Table.Th>
+                <Table.Th>עיר</Table.Th>
+                <Table.Th>תאריך טיפול</Table.Th>
+                <Table.Th>ימים</Table.Th>
+                <Table.Th>סטטוס</Table.Th>
+                <Table.Th></Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {[
+                ...elevatorServiceStatus.overdue.map(e => ({ ...e, bucket: 'overdue' as const })),
+                ...elevatorServiceStatus.red.map(e => ({ ...e, bucket: 'red' as const })),
+                ...elevatorServiceStatus.orange.map(e => ({ ...e, bucket: 'orange' as const })),
+              ].map(e => {
+                const days = Math.round((new Date(e.next_service_date!).getTime() - today.getTime()) / 86400000)
+                const badgeColor = e.bucket === 'overdue' ? 'dark' : e.bucket === 'red' ? 'red' : 'orange'
+                const badgeLabel = e.bucket === 'overdue' ? `⬛ איחור ${-days} ימים` : e.bucket === 'red' ? `🔴 עוד ${days} ימים` : `🟠 עוד ${days} ימים`
+                return (
+                  <Table.Tr key={e.id}>
+                    <Table.Td><Text size="sm" fw={500}>#{e.serial_number}</Text></Table.Td>
+                    <Table.Td><Text size="sm">{e.address}</Text></Table.Td>
+                    <Table.Td><Text size="sm">{e.city}</Text></Table.Td>
+                    <Table.Td><Text size="sm">{new Date(e.next_service_date!).toLocaleDateString('he-IL')}</Text></Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c={e.bucket === 'overdue' ? 'dark' : e.bucket === 'red' ? 'red' : 'orange'} fw={600}>
+                        {days < 0 ? `${-days} ימי איחור` : `${days} ימים`}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge color={badgeColor} size="sm" variant="light">{badgeLabel}</Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Button size="xs" variant="light" onClick={() => {
+                        setNewForm(f => ({ ...f, elevator_id: e.id }))
+                        openAdd()
+                      }}>
+                        + תחזוקה
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                )
+              })}
+            </Table.Tbody>
+          </Table>
+        </Paper>
+      )}
+
       <Group>
         <Select
           placeholder="סטטוס"

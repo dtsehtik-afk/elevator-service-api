@@ -67,7 +67,7 @@ def _priority_weight(priority: str) -> int:
 def build_route(
     db: Session,
     technician: Technician,
-    include_unassigned: bool = True,
+    include_unassigned: bool = False,
 ) -> list[RouteStop]:
     """
     Build an optimized ordered route for a technician from their current position.

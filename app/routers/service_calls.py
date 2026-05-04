@@ -98,6 +98,30 @@ def create_call(
     return call
 
 
+@router.get(
+    "/unassigned",
+    response_model=List[ServiceCallResponse],
+    summary="List OPEN calls with no confirmed/pending technician assignment",
+)
+def list_unassigned_calls(
+    db: Session = Depends(get_db),
+    _: Technician = Depends(get_current_user),
+):
+    """Return OPEN service calls that have no CONFIRMED or PENDING_CONFIRMATION assignment."""
+    from app.models.service_call import ServiceCall
+    from app.models.assignment import Assignment
+    assigned_ids = {
+        a.service_call_id
+        for a in db.query(Assignment)
+        .filter(Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]))
+        .all()
+    }
+    q = db.query(ServiceCall).filter(ServiceCall.status == "OPEN")
+    if assigned_ids:
+        q = q.filter(ServiceCall.id.notin_(assigned_ids))
+    return q.order_by(ServiceCall.created_at.desc()).all()
+
+
 @router.delete(
     "",
     status_code=status.HTTP_200_OK,

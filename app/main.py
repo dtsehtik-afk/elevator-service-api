@@ -144,6 +144,15 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_hr_records_technician_id ON hr_records (technician_id)",
+                # Contacts — new fields for enhanced contact management
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS elevator_id UUID REFERENCES elevators(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_contacts_elevator_id ON contacts (elevator_id)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS company VARCHAR(200)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS mobile VARCHAR(30)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS landline VARCHAR(30)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notification_prefs JSONB",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

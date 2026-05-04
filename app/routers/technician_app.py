@@ -275,17 +275,22 @@ def tech_map_data(tech_id: str, db: Session = Depends(get_db)):
                  "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית"}
     _PRI_HE   = {"CRITICAL": "קריטי 🔴", "HIGH": "גבוה 🟠", "MEDIUM": "בינוני 🟡", "LOW": "נמוך 🟢"}
 
-    # ── 1. Open service calls ─────────────────────────────────────────────────
-    open_calls = (
-        db.query(ServiceCall)
-        .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]))
+    # ── 1. Service calls confirmed by this technician ─────────────────────────
+    confirmed_call_ids = {
+        a.service_call_id
+        for a in db.query(Assignment)
+        .filter(Assignment.technician_id == tid, Assignment.status == "CONFIRMED")
         .all()
-    )
-    for call in open_calls:
+    }
+    my_calls = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.id.in_(confirmed_call_ids), ServiceCall.status.in_(["ASSIGNED", "IN_PROGRESS", "OPEN"]))
+        .all()
+    ) if confirmed_call_ids else []
+    for call in my_calls:
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
         if not elev or not elev.latitude or not elev.longitude:
             continue
-        pri_color = {"CRITICAL": "#dc2626", "HIGH": "#ea580c"}.get(call.priority, "#eab308")
         pins.append({
             "type": "call",
             "lat": elev.latitude,
@@ -294,7 +299,7 @@ def tech_map_data(tech_id: str, db: Session = Depends(get_db)):
             "title": _FAULT_HE.get(call.fault_type, call.fault_type),
             "detail": _PRI_HE.get(call.priority, call.priority),
             "status": call.status,
-            "color": pri_color,
+            "color": "#1c7ed6",
             "call_id": str(call.id),
         })
 
