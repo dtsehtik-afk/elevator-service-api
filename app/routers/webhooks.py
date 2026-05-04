@@ -1478,6 +1478,18 @@ def list_pending_unmatched(db: Session = Depends(get_db)):
     return result
 
 
+@router.delete("/pending-unmatched/{log_id}", summary="Dismiss an unmatched call log without action")
+def dismiss_pending_unmatched(log_id: str, db: Session = Depends(get_db)):
+    """Mark an unmatched incoming call as DISMISSED so it no longer appears in the queue."""
+    import uuid as _uuid
+    log = db.query(IncomingCallLog).filter(IncomingCallLog.id == _uuid.UUID(log_id)).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+    log.match_status = "DISMISSED"
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/pending-unmatched/{log_id}/add-elevator", summary="Create a new elevator from an unmatched call and open a service call")
 def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
     """Create a new elevator from the call data, open a service call, and trigger AI assignment."""

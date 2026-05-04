@@ -45,24 +45,30 @@ def _upsert_caller_contact(db: Session, elevator, reported_by: str) -> None:
     if not phone:
         return  # no identifiable phone — skip
 
-    # Find the elevator's building_id (can be None)
     building_id = getattr(elevator, "building_id", None)
+    elevator_id = getattr(elevator, "id", None)
 
-    # Check if contact with same phone already exists for this building
-    existing = db.query(Contact).filter(
-        Contact.phone == phone,
-        Contact.building_id == building_id,
-    ).first()
+    # Dedup: by building when available, otherwise by elevator
+    if building_id:
+        existing = db.query(Contact).filter(
+            Contact.phone == phone,
+            Contact.building_id == building_id,
+        ).first()
+    else:
+        existing = db.query(Contact).filter(
+            Contact.phone == phone,
+            Contact.elevator_id == elevator_id,
+        ).first()
 
     if existing:
-        # Update name if we have a better one
         if name and name != phone and existing.name == phone:
             existing.name = name
             db.commit()
         return
 
     contact = Contact(
-        building_id=building_id,
+        building_id=building_id if building_id else None,
+        elevator_id=None if building_id else elevator_id,
         name=name or phone,
         phone=phone,
         role="RESIDENT",

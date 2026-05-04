@@ -93,6 +93,10 @@ async function matchElevator(logId: string, elevatorId: string) {
   return data
 }
 
+async function dismissPending(logId: string) {
+  await client.delete(`/webhooks/pending-unmatched/${logId}`)
+}
+
 async function searchElevators(q: string): Promise<ElevatorOption[]> {
   const { data } = await client.get('/elevators/', { params: { search: q, limit: 10 } })
   return data
@@ -276,6 +280,15 @@ export default function PendingCallsPage() {
     onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה', color: 'red' }),
   })
 
+  const dismissMutation = useMutation({
+    mutationFn: (logId: string) => dismissPending(logId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending-unmatched'] })
+      notifications.show({ message: '🗑️ קריאה הוסרה מהתור', color: 'gray' })
+    },
+    onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה במחיקה', color: 'red' }),
+  })
+
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
     if (q.length < 2) { setElevResults([]); return }
@@ -386,6 +399,16 @@ export default function PendingCallsPage() {
                         ✅ שייך לקרובה
                       </Button>
                     )}
+                    <Button
+                      size="sm" color="red" variant="subtle"
+                      loading={dismissMutation.isPending && dismissMutation.variables === call.id}
+                      onClick={() => {
+                        if (confirm('למחוק קריאה זו מהתור? לא תיפתח קריאת שירות.'))
+                          dismissMutation.mutate(call.id)
+                      }}
+                    >
+                      🗑️ מחק
+                    </Button>
                   </Group>
                 </Card>
               ))

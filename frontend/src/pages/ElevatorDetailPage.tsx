@@ -91,6 +91,138 @@ async function openReportFile(fileUrl: string) {
   window.open(blobUrl, '_blank')
 }
 
+const FAULT_TYPE_HE: Record<string, string> = {
+  STUCK: 'מעלית תקועה', DOOR: 'תקלת דלת', ELECTRICAL: 'תקלה חשמלית',
+  MECHANICAL: 'תקלה מכנית', SOFTWARE: 'תקלת תוכנה', RESCUE: 'חילוץ',
+  MAINTENANCE: 'טיפול מונע', OTHER: 'כללית',
+}
+
+function ElevatorLogbook({ elevatorId, elevator, calls }: { elevatorId: string; elevator: any; calls: any[] }) {
+  const today = new Date()
+  const dateStr = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`
+
+  // Sort calls by created_at ascending for logbook order
+  const sorted = [...calls].sort((a, b) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  )
+
+  const handlePrint = () => window.print()
+
+  return (
+    <Stack gap="sm">
+      <Group justify="space-between">
+        <Text fw={700} size="lg">📋 ספר מעלית</Text>
+        <Button size="sm" variant="light" onClick={handlePrint}>🖨️ הדפסה</Button>
+      </Group>
+
+      <Paper withBorder radius="md" p="lg" id="elevator-logbook-print" style={{ fontFamily: 'Arial, sans-serif' }}>
+        {/* Header */}
+        <Stack gap={4} mb="lg" ta="center">
+          <Text fw={700} size="xl">ספר מעלית - חדש</Text>
+          <Text fw={600} size="md">
+            נכון לתקופה: {sorted.length > 0
+              ? `${dateStr}-${sorted[0].created_at ? `${String(new Date(sorted[0].created_at).getDate()).padStart(2,'0')}/${String(new Date(sorted[0].created_at).getMonth()+1).padStart(2,'0')}/${new Date(sorted[0].created_at).getFullYear()}` : ''}`
+              : dateStr}
+          </Text>
+          <Text size="sm" c="dimmed">
+            {elevator.building_name ? `${elevator.building_name} — ` : ''}{elevator.address}, {elevator.city}
+            {elevator.internal_number ? ` | מס"ד: ${elevator.internal_number}` : ''}
+            {elevator.labor_file_number ? ` | מס' משרד עבודה: ${elevator.labor_file_number}` : ''}
+          </Text>
+        </Stack>
+
+        {sorted.length === 0 && (
+          <Center h={120}><Text c="dimmed">אין קריאות שירות רשומות למעלית זו</Text></Center>
+        )}
+
+        {sorted.map((call: any, idx: number) => {
+          const openedAt = call.created_at ? new Date(call.created_at) : null
+          const resolvedAt = call.resolved_at ? new Date(call.resolved_at) : null
+          const faultHe = FAULT_TYPE_HE[call.fault_type] || call.fault_type
+          const isMaintenance = call.fault_type === 'MAINTENANCE'
+
+          // Collect technician completion notes from assignments
+          const assignments = call.assignments || []
+          const acceptedAssignment = assignments.find((a: any) => a.status === 'CONFIRMED' || a.status === 'ACCEPTED')
+          const techName = acceptedAssignment?.technician_name || call.technician_name || null
+
+          return (
+            <Paper key={call.id} withBorder radius="sm" p="md" mb="sm"
+              style={{ borderRight: `4px solid ${isMaintenance ? '#339af0' : PRIORITY_COLORS[call.priority] === 'red' ? '#e03131' : PRIORITY_COLORS[call.priority] === 'orange' ? '#f76707' : '#228be6'}` }}>
+              {/* Section title */}
+              {isMaintenance && (
+                <Text size="xs" fw={700} c="blue" td="underline" mb={4}>
+                  טיפול מונע ע"פ הנחיות היצרן/חברה
+                </Text>
+              )}
+
+              {/* Call header */}
+              <Group gap="md" mb={4} wrap="nowrap">
+                {call.call_number && <Text size="xs" c="dimmed">מספר קריאה {call.call_number}S</Text>}
+                <Text size="xs" c="dimmed">
+                  {openedAt
+                    ? `תאריך פתיחה ${String(openedAt.getDate()).padStart(2,'0')}/${String(openedAt.getMonth()+1).padStart(2,'0')}/${openedAt.getFullYear()} ${String(openedAt.getHours()).padStart(2,'0')}:${String(openedAt.getMinutes()).padStart(2,'0')}`
+                    : ''}
+                  {call.reported_by ? `, מוסר ${call.reported_by}` : ''}
+                  {techName ? `, טכנאי ${techName}` : ''}
+                </Text>
+                <Badge
+                  color={CALL_STATUS_COLORS[call.status] || 'gray'}
+                  size="xs"
+                  variant="light"
+                >
+                  {CALL_STATUS_LABELS[call.status] || call.status}
+                </Badge>
+              </Group>
+
+              {resolvedAt && (
+                <Text size="xs" c="dimmed" mb={4}>
+                  תאריך דו"ח {String(resolvedAt.getDate()).padStart(2,'0')}/{String(resolvedAt.getMonth()+1).padStart(2,'0')}/{resolvedAt.getFullYear()} {String(resolvedAt.getHours()).padStart(2,'0')}:{String(resolvedAt.getMinutes()).padStart(2,'0')}
+                  {` | יום בשבוע ${['א','ב','ג','ד','ה','ו','ש'][resolvedAt.getDay()]}`}
+                </Text>
+              )}
+
+              {/* Problem */}
+              {call.description && (
+                <Stack gap={2} mt={4}>
+                  <Text size="sm" fw={600}>תאור התקלה:</Text>
+                  <Text size="sm">{call.description}</Text>
+                </Stack>
+              )}
+              {!call.description && (
+                <Stack gap={2} mt={4}>
+                  <Text size="sm" fw={600}>תאור התקלה:</Text>
+                  <Text size="sm">{faultHe}</Text>
+                </Stack>
+              )}
+
+              {/* Resolution */}
+              {call.resolution_notes && (
+                <Stack gap={2} mt={6}>
+                  <Text size="sm" fw={600}>תאור התיקון:</Text>
+                  <Text size="sm">{call.resolution_notes}</Text>
+                </Stack>
+              )}
+
+              {/* Tech signature line */}
+              <Group mt={6} gap="md">
+                {techName && <Text size="xs" c="dimmed">( {techName} )</Text>}
+              </Group>
+            </Paper>
+          )
+        })}
+      </Paper>
+
+      <style>{`
+        @media print {
+          body > *:not(#elevator-logbook-print) { display: none !important; }
+          #elevator-logbook-print { display: block !important; }
+        }
+      `}</style>
+    </Stack>
+  )
+}
+
 function InspectionHistory({ elevatorId }: { elevatorId: string }) {
   const { data: reports = [], isLoading } = useQuery({
     queryKey: ['inspections', elevatorId],
@@ -662,6 +794,7 @@ export default function ElevatorDetailPage() {
           <Tabs.Tab value="contract">חוזה</Tabs.Tab>
           <Tabs.Tab value="inspection">דוחות בודק</Tabs.Tab>
           <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>
+          <Tabs.Tab value="logbook">📋 ספר מעלית</Tabs.Tab>
           {elevator.building_id && (
             <Tabs.Tab value="group">קבוצה {siblings.length > 0 && `(${siblings.length + 1})`}</Tabs.Tab>
           )}
@@ -1206,7 +1339,7 @@ export default function ElevatorDetailPage() {
             {(calls as any[]).length === 0 ? (
               <Center h={200}><Text c="dimmed">אין קריאות שירות למעלית זו</Text></Center>
             ) : (
-              <Table>
+              <Table highlightOnHover>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>עדיפות</Table.Th>
@@ -1214,16 +1347,20 @@ export default function ElevatorDetailPage() {
                     <Table.Th>סוג תקלה</Table.Th>
                     <Table.Th>סטטוס</Table.Th>
                     <Table.Th>תאריך</Table.Th>
+                    <Table.Th></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {(calls as any[]).map((call: any) => (
-                    <Table.Tr key={call.id}>
+                    <Table.Tr key={call.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/calls')}>
                       <Table.Td><Badge color={PRIORITY_COLORS[call.priority]} size="sm">{PRIORITY_LABELS[call.priority]}</Badge></Table.Td>
                       <Table.Td><Text size="sm" lineClamp={2}>{call.description}</Text></Table.Td>
                       <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[call.fault_type]}</Text></Table.Td>
                       <Table.Td><Badge color={CALL_STATUS_COLORS[call.status]} variant="light" size="sm">{CALL_STATUS_LABELS[call.status]}</Badge></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{formatDateTime(call.created_at)}</Text></Table.Td>
+                      <Table.Td onClick={e => e.stopPropagation()}>
+                        <ActionIcon size="xs" variant="subtle" color="blue" component="a" href="/calls">↗</ActionIcon>
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -1364,6 +1501,11 @@ export default function ElevatorDetailPage() {
               הסר מחברת הניהול
             </Button>
           </Stack>
+        </Tabs.Panel>
+
+        {/* ── LOGBOOK (ספר מעלית) ── */}
+        <Tabs.Panel value="logbook" pt="md">
+          <ElevatorLogbook elevatorId={id!} elevator={elevator} calls={calls as any[]} />
         </Tabs.Panel>
       </Tabs>
 

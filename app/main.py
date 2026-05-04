@@ -153,6 +153,15 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS mobile VARCHAR(30)",
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS landline VARCHAR(30)",
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notification_prefs JSONB",
+                # InspectionReport — extended fields from Gemini extraction
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS next_inspection_date DATE",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_phone VARCHAR(30)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_mobile VARCHAR(30)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_email VARCHAR(100)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_license VARCHAR(50)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(100)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS model VARCHAR(100)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS floor_count INTEGER",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

@@ -91,6 +91,15 @@ def update_maintenance(
         setattr(maintenance, field, value)
     if data.status == "COMPLETED" and not maintenance.completed_at:
         maintenance.completed_at = datetime.now(timezone.utc)
+        # Update elevator last_service_date and recalculate next_service_date
+        from app.models.elevator import Elevator
+        from app.services.elevator_service import _recalculate_next_service
+        elevator = db.query(Elevator).filter(Elevator.id == maintenance.elevator_id).first()
+        if elevator:
+            completed_date = maintenance.scheduled_date
+            if not elevator.last_service_date or completed_date > elevator.last_service_date:
+                elevator.last_service_date = completed_date
+                _recalculate_next_service(elevator)
     db.commit()
     db.refresh(maintenance)
     return maintenance
