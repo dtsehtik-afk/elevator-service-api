@@ -72,7 +72,7 @@ async function fetchPending(): Promise<PendingCall[]> {
 }
 
 async function fetchUnassigned(): Promise<UnassignedCall[]> {
-  const { data } = await client.get('/service-calls/unassigned')
+  const { data } = await client.get('/calls/unassigned')
   return data
 }
 
