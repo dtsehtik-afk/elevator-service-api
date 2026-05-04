@@ -92,7 +92,8 @@ def _check_recurring(db: Session, elevator_id: uuid.UUID, fault_type: str) -> bo
 
 
 def create_service_call(
-    db: Session, data: ServiceCallCreate, current_user_email: str
+    db: Session, data: ServiceCallCreate, current_user_email: str,
+    original_created_at: Optional[datetime] = None,
 ) -> ServiceCall:
     """Open a new service call.
 
@@ -105,6 +106,7 @@ def create_service_call(
         db: Database session.
         data: Validated service call creation data.
         current_user_email: Email of the user opening the call (for audit log).
+        original_created_at: If provided, use as created_at instead of now().
 
     Returns:
         The newly created ServiceCall ORM object.
@@ -118,6 +120,7 @@ def create_service_call(
         priority=data.priority,
         fault_type=data.fault_type,
         is_recurring=is_recurring,
+        **({"created_at": original_created_at} if original_created_at else {}),
     )
     db.add(call)
     db.flush()  # Get the ID before commit

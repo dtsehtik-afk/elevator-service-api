@@ -681,7 +681,7 @@ def poll_emails(db) -> int:
                 if already:
                     continue
 
-                # Extract email send time — use as created_at for the service call
+                # Extract email send time as fallback timestamp
                 email_date: datetime | None = None
                 try:
                     date_str = msg.get("Date", "")
@@ -775,6 +775,10 @@ def poll_emails(db) -> int:
                     db.commit()
                     continue
 
+                # Prefer the call body's "מועד התקשרות" timestamp over the email Date header
+                from app.routers.webhooks import _parse_call_time as _pct
+                call_body_ts = _pct(fields.get("call_time", ""))
+                call_ts = call_body_ts or email_date  # body timestamp is the actual call time
                 call = ServiceCall(
                     elevator_id=elevator.id,
                     reported_by=reported_by,
@@ -782,7 +786,7 @@ def poll_emails(db) -> int:
                     fault_type=fault_type,
                     priority="CRITICAL" if is_rescue else "MEDIUM",
                     status="OPEN",
-                    **({"created_at": email_date} if email_date else {}),
+                    **({"created_at": call_ts} if call_ts else {}),
                 )
                 db.add(call)
                 db.add(ServiceCallEmailScan(message_id=message_id))

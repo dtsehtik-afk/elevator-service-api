@@ -6,6 +6,7 @@ import html as html_lib
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -24,6 +25,27 @@ from app.services import whatsapp_service
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+
+def _parse_call_time(call_time_str: str) -> Optional[datetime]:
+    """Parse the original call time from the email body field 'מועד התקשרות'.
+    Tries common Israeli formats: DD/MM/YYYY HH:MM or DD/MM/YYYY HH:MM:SS.
+    Returns a timezone-aware UTC datetime, or None on failure.
+    """
+    if not call_time_str:
+        return None
+    s = call_time_str.strip()
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+        try:
+            dt = datetime.strptime(s, fmt)
+            # Assume Israel time (UTC+2 / UTC+3) — store as UTC+2 (non-DST safe approximation)
+            # Using Israel Standard Time offset +02:00 as conservative default
+            from datetime import timezone as _tz, timedelta as _td
+            israel_tz = _tz(_td(hours=3))  # IDT (summer) is UTC+3; IST (winter) is UTC+2
+            return dt.replace(tzinfo=israel_tz)
+        except ValueError:
+            continue
+    return None
 
 
 def _clean_html(text: str) -> str:
@@ -183,6 +205,7 @@ async def receive_call(
     # 4. Create service call (only on confident match) — otherwise alert dispatcher
     service_call = None
     if match.match_status == "MATCHED" and match.elevator:
+        original_ts = _parse_call_time(getattr(parsed, "call_time", ""))
         call_data = ServiceCallCreate(
             elevator_id=match.elevator.id,
             reported_by=parsed.name or parsed.phone or "מוקד טלפוני",
@@ -191,7 +214,7 @@ async def receive_call(
             fault_type=parsed.fault_type,
         )
         service_call = service_call_service.create_service_call(
-            db, call_data, "webhook@system"
+            db, call_data, "webhook@system", original_created_at=original_ts
         )
     elif match.match_status in ("PARTIAL", "UNMATCHED"):
         # Elevator not found with enough confidence — notify dispatcher to handle manually
@@ -1486,7 +1509,8 @@ def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
     db.add(elevator)
     db.flush()
 
-    # Create service call
+    # Create service call — preserve original call time
+    original_ts = _parse_call_time(log.call_time_raw or "") or log.created_at
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
         reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
@@ -1494,7 +1518,7 @@ def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
         priority=log.priority or "MEDIUM",
         fault_type=log.fault_type or "OTHER",
     )
-    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+    service_call = service_call_service.create_service_call(db, call_data, "webhook@system", original_created_at=original_ts)
 
     # Update log
     log.elevator_id = elevator.id
@@ -1544,7 +1568,8 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
             phones.append(log.caller_phone)
             elevator.caller_phones = phones
 
-    # Create service call
+    # Create service call — preserve original call time
+    original_ts = _parse_call_time(log.call_time_raw or "") or log.created_at
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
         reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
@@ -1552,7 +1577,7 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
         priority=log.priority or "MEDIUM",
         fault_type=log.fault_type or "OTHER",
     )
-    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+    service_call = service_call_service.create_service_call(db, call_data, "webhook@system", original_created_at=original_ts)
 
     # Update log
     log.elevator_id = elevator.id
