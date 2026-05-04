@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Grid, TextInput,
   NumberInput, Select, Tabs, Table, Loader, Center, ActionIcon, Alert,
   Checkbox, Textarea, Anchor, Modal, Divider,
 } from '@mantine/core'
-import { useAuthStore } from '../stores/authStore'
 import { DateInput } from '@mantine/dates'
+import { useAuthStore } from '../stores/authStore'
 import { FileInput } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -97,128 +97,198 @@ const FAULT_TYPE_HE: Record<string, string> = {
   MAINTENANCE: 'טיפול מונע', OTHER: 'כללית',
 }
 
+const BORDER_COLOR: Record<string, string> = {
+  CRITICAL: '#e03131', HIGH: '#f76707', MEDIUM: '#f59f00',
+  LOW: '#2f9e44', MAINTENANCE: '#339af0',
+}
+
+function fmtDt(d: Date) {
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+}
+function fmtD(d: Date) {
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+}
+const HE_DAYS = ['א','ב','ג','ד','ה','ו','ש']
+
 function ElevatorLogbook({ elevatorId, elevator, calls }: { elevatorId: string; elevator: any; calls: any[] }) {
   const today = new Date()
-  const dateStr = `${String(today.getDate()).padStart(2,'0')}/${String(today.getMonth()+1).padStart(2,'0')}/${today.getFullYear()}`
+  const yearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate())
+  const [fromDate, setFromDate] = useState<Date | null>(yearAgo)
+  const [toDate, setToDate] = useState<Date | null>(today)
+  const [types, setTypes] = useState<string[]>(['regular', 'special', 'maintenance', 'deficiency'])
 
-  // Sort calls by created_at ascending for logbook order
-  const sorted = [...calls].sort((a, b) =>
-    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  )
+  const { data: inspections = [] } = useQuery({
+    queryKey: ['inspections-logbook', elevatorId],
+    queryFn: async () => {
+      const { data } = await client.get(`/inspections?elevator_id=${elevatorId}&limit=200`)
+      return data
+    },
+    enabled: types.includes('deficiency'),
+  })
 
-  const handlePrint = () => window.print()
+  const filtered = useMemo(() => {
+    const from = fromDate ? fromDate.getTime() : 0
+    const to = toDate ? (toDate.getTime() + 86400000) : Infinity
+
+    const entries: any[] = []
+
+    calls.forEach(call => {
+      const ts = call.created_at ? new Date(call.created_at).getTime() : 0
+      if (ts < from || ts > to) return
+      const isMaint = call.fault_type === 'MAINTENANCE'
+      const isSpecial = call.fault_type === 'RESCUE' || call.priority === 'CRITICAL'
+      if (isMaint && !types.includes('maintenance')) return
+      if (isSpecial && !types.includes('special')) return
+      if (!isMaint && !isSpecial && !types.includes('regular')) return
+      entries.push({ _type: 'call', _ts: ts, ...call })
+    })
+
+    if (types.includes('deficiency')) {
+      inspections.forEach((rep: any) => {
+        (rep.deficiencies || []).forEach((d: any, i: number) => {
+          if (!d.done) return
+          const ts = d.done_at ? new Date(d.done_at).getTime() : (rep.inspection_date ? new Date(rep.inspection_date).getTime() : 0)
+          if (ts < from || ts > to) return
+          entries.push({ _type: 'deficiency', _ts: ts, _rep: rep, _def: d, _idx: i })
+        })
+      })
+    }
+
+    entries.sort((a, b) => a._ts - b._ts)
+    return entries
+  }, [calls, inspections, fromDate, toDate, types])
+
+  const periodStr = [fromDate && fmtD(fromDate), toDate && fmtD(toDate)].filter(Boolean).join(' — ')
 
   return (
-    <Stack gap="sm">
-      <Group justify="space-between">
-        <Text fw={700} size="lg">📋 ספר מעלית</Text>
-        <Button size="sm" variant="light" onClick={handlePrint}>🖨️ הדפסה</Button>
-      </Group>
+    <Stack gap="sm" dir="rtl">
+      {/* Controls */}
+      <Paper withBorder p="sm" radius="md">
+        <Group gap="md" wrap="wrap" align="flex-end">
+          <DateInput label="מתאריך" value={fromDate} onChange={setFromDate} clearable size="sm" w={150} />
+          <DateInput label="עד תאריך" value={toDate} onChange={setToDate} clearable size="sm" w={150} />
+          <Stack gap={4}>
+            <Text size="xs" c="dimmed" fw={500}>סוגי רשומות</Text>
+            <Group gap="sm">
+              <Checkbox size="sm" label="קריאות שירות רגילות" checked={types.includes('regular')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'regular'] : prev.filter(t=>t!=='regular'))} />
+              <Checkbox size="sm" label="קריאות מיוחדות (חילוץ/קריטי)" checked={types.includes('special')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'special'] : prev.filter(t=>t!=='special'))} />
+              <Checkbox size="sm" label="טיפול מונע" checked={types.includes('maintenance')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'maintenance'] : prev.filter(t=>t!=='maintenance'))} />
+              <Checkbox size="sm" label="סילוק ליקויים" checked={types.includes('deficiency')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'deficiency'] : prev.filter(t=>t!=='deficiency'))} />
+            </Group>
+          </Stack>
+          <Button size="sm" variant="light" onClick={() => typeof window !== 'undefined' && window.print()}>🖨️ הדפסה</Button>
+        </Group>
+      </Paper>
 
-      <Paper withBorder radius="md" p="lg" id="elevator-logbook-print" style={{ fontFamily: 'Arial, sans-serif' }}>
-        {/* Header */}
+      {/* Logbook content */}
+      <Paper withBorder radius="md" p="lg" style={{ fontFamily: 'Arial, sans-serif' }}>
         <Stack gap={4} mb="lg" ta="center">
-          <Text fw={700} size="xl">ספר מעלית - חדש</Text>
-          <Text fw={600} size="md">
-            נכון לתקופה: {sorted.length > 0
-              ? `${dateStr}-${sorted[0].created_at ? `${String(new Date(sorted[0].created_at).getDate()).padStart(2,'0')}/${String(new Date(sorted[0].created_at).getMonth()+1).padStart(2,'0')}/${new Date(sorted[0].created_at).getFullYear()}` : ''}`
-              : dateStr}
-          </Text>
+          <Text fw={700} size="xl">ספר מעלית</Text>
+          {periodStr && <Text fw={600} size="sm">נכון לתקופה: {periodStr}</Text>}
           <Text size="sm" c="dimmed">
-            {elevator.building_name ? `${elevator.building_name} — ` : ''}{elevator.address}, {elevator.city}
-            {elevator.internal_number ? ` | מס"ד: ${elevator.internal_number}` : ''}
-            {elevator.labor_file_number ? ` | מס' משרד עבודה: ${elevator.labor_file_number}` : ''}
+            {elevator?.building_name ? `${elevator.building_name} — ` : ''}{elevator?.address}, {elevator?.city}
+            {elevator?.internal_number ? ` | מס"ד: ${elevator.internal_number}` : ''}
+            {elevator?.labor_file_number ? ` | מס' משרד עבודה: ${elevator.labor_file_number}` : ''}
           </Text>
         </Stack>
 
-        {sorted.length === 0 && (
-          <Center h={120}><Text c="dimmed">אין קריאות שירות רשומות למעלית זו</Text></Center>
+        {filtered.length === 0 && (
+          <Center h={100}><Text c="dimmed">אין רשומות בתקופה ובסינון שנבחרו</Text></Center>
         )}
 
-        {sorted.map((call: any, idx: number) => {
-          const openedAt = call.created_at ? new Date(call.created_at) : null
-          const resolvedAt = call.resolved_at ? new Date(call.resolved_at) : null
-          const faultHe = FAULT_TYPE_HE[call.fault_type] || call.fault_type
-          const isMaintenance = call.fault_type === 'MAINTENANCE'
+        {filtered.map((entry: any, idx: number) => {
+          if (entry._type === 'call') {
+            const call = entry
+            const openedAt = call.created_at ? new Date(call.created_at) : null
+            const resolvedAt = call.resolved_at ? new Date(call.resolved_at) : null
+            const isMaint = call.fault_type === 'MAINTENANCE'
+            const isSpecial = call.fault_type === 'RESCUE' || call.priority === 'CRITICAL'
+            const borderColor = isMaint ? '#339af0' : isSpecial ? '#e03131' : (BORDER_COLOR[call.priority] || '#228be6')
+            const assignments = call.assignments || []
+            const accepted = assignments.find((a: any) => ['CONFIRMED','ACCEPTED'].includes(a.status))
+            const techName = accepted?.technician_name || call.technician_name || null
 
-          // Collect technician completion notes from assignments
-          const assignments = call.assignments || []
-          const acceptedAssignment = assignments.find((a: any) => a.status === 'CONFIRMED' || a.status === 'ACCEPTED')
-          const techName = acceptedAssignment?.technician_name || call.technician_name || null
-
-          return (
-            <Paper key={call.id} withBorder radius="sm" p="md" mb="sm"
-              style={{ borderRight: `4px solid ${isMaintenance ? '#339af0' : PRIORITY_COLORS[call.priority] === 'red' ? '#e03131' : PRIORITY_COLORS[call.priority] === 'orange' ? '#f76707' : '#228be6'}` }}>
-              {/* Section title */}
-              {isMaintenance && (
-                <Text size="xs" fw={700} c="blue" td="underline" mb={4}>
-                  טיפול מונע ע"פ הנחיות היצרן/חברה
-                </Text>
-              )}
-
-              {/* Call header */}
-              <Group gap="md" mb={4} wrap="nowrap">
-                {call.call_number && <Text size="xs" c="dimmed">מספר קריאה {call.call_number}S</Text>}
-                <Text size="xs" c="dimmed">
-                  {openedAt
-                    ? `תאריך פתיחה ${String(openedAt.getDate()).padStart(2,'0')}/${String(openedAt.getMonth()+1).padStart(2,'0')}/${openedAt.getFullYear()} ${String(openedAt.getHours()).padStart(2,'0')}:${String(openedAt.getMinutes()).padStart(2,'0')}`
-                    : ''}
-                  {call.reported_by ? `, מוסר ${call.reported_by}` : ''}
-                  {techName ? `, טכנאי ${techName}` : ''}
-                </Text>
-                <Badge
-                  color={CALL_STATUS_COLORS[call.status] || 'gray'}
-                  size="xs"
-                  variant="light"
-                >
-                  {CALL_STATUS_LABELS[call.status] || call.status}
-                </Badge>
-              </Group>
-
-              {resolvedAt && (
-                <Text size="xs" c="dimmed" mb={4}>
-                  תאריך דו"ח {String(resolvedAt.getDate()).padStart(2,'0')}/{String(resolvedAt.getMonth()+1).padStart(2,'0')}/{resolvedAt.getFullYear()} {String(resolvedAt.getHours()).padStart(2,'0')}:{String(resolvedAt.getMinutes()).padStart(2,'0')}
-                  {` | יום בשבוע ${['א','ב','ג','ד','ה','ו','ש'][resolvedAt.getDay()]}`}
-                </Text>
-              )}
-
-              {/* Problem */}
-              {call.description && (
+            return (
+              <Paper key={`call-${call.id}`} withBorder radius="sm" p="md" mb="sm"
+                style={{ borderRight: `4px solid ${borderColor}` }}>
+                {isMaint && (
+                  <Text size="xs" fw={700} c="blue" td="underline" mb={4}>
+                    טיפול מונע ע"פ הנחיות היצרן/חברה
+                  </Text>
+                )}
+                {isSpecial && (
+                  <Text size="xs" fw={700} c="red" td="underline" mb={4}>
+                    קריאת שירות מיוחדת — {call.fault_type === 'RESCUE' ? 'חילוץ' : 'עדיפות קריטית'}
+                  </Text>
+                )}
+                <Group gap="sm" mb={4} wrap="wrap">
+                  {call.call_number && <Text size="xs" c="dimmed">מספר קריאה {call.call_number}</Text>}
+                  {openedAt && <Text size="xs" c="dimmed">תאריך פתיחה {fmtDt(openedAt)}, יום {HE_DAYS[openedAt.getDay()]}</Text>}
+                  {call.reported_by && <Text size="xs" c="dimmed">מוסר {call.reported_by}</Text>}
+                  {techName && <Text size="xs" c="dimmed">טכנאי {techName}</Text>}
+                  <Badge color={CALL_STATUS_COLORS[call.status] || 'gray'} size="xs" variant="light">
+                    {CALL_STATUS_LABELS[call.status] || call.status}
+                  </Badge>
+                </Group>
+                {resolvedAt && (
+                  <Text size="xs" c="dimmed" mb={4}>
+                    תאריך סגירה {fmtDt(resolvedAt)}, יום {HE_DAYS[resolvedAt.getDay()]}
+                  </Text>
+                )}
                 <Stack gap={2} mt={4}>
                   <Text size="sm" fw={600}>תאור התקלה:</Text>
-                  <Text size="sm">{call.description}</Text>
+                  <Text size="sm">{call.description || FAULT_TYPE_HE[call.fault_type] || call.fault_type}</Text>
                 </Stack>
-              )}
-              {!call.description && (
-                <Stack gap={2} mt={4}>
-                  <Text size="sm" fw={600}>תאור התקלה:</Text>
-                  <Text size="sm">{faultHe}</Text>
-                </Stack>
-              )}
+                {call.resolution_notes && (
+                  <Stack gap={2} mt={6}>
+                    <Text size="sm" fw={600}>תאור התיקון:</Text>
+                    <Text size="sm">{call.resolution_notes}</Text>
+                  </Stack>
+                )}
+                {techName && (
+                  <Text size="xs" c="dimmed" mt={6} ta="left">( {techName} )</Text>
+                )}
+              </Paper>
+            )
+          }
 
-              {/* Resolution */}
-              {call.resolution_notes && (
-                <Stack gap={2} mt={6}>
-                  <Text size="sm" fw={600}>תאור התיקון:</Text>
-                  <Text size="sm">{call.resolution_notes}</Text>
+          if (entry._type === 'deficiency') {
+            const { _rep: rep, _def: def } = entry
+            const doneAt = def.done_at ? new Date(def.done_at) : null
+            return (
+              <Paper key={`def-${rep.id}-${entry._idx}`} withBorder radius="sm" p="md" mb="sm"
+                style={{ borderRight: '4px solid #9775fa' }}>
+                <Text size="xs" fw={700} c="violet" td="underline" mb={4}>
+                  סילוק ליקוי — דוח בודק {rep.inspection_date ? fmtD(new Date(rep.inspection_date)) : ''}
+                </Text>
+                <Stack gap={2}>
+                  <Text size="sm" fw={600}>הליקוי:</Text>
+                  <Text size="sm">{def.description}</Text>
                 </Stack>
-              )}
-
-              {/* Tech signature line */}
-              <Group mt={6} gap="md">
-                {techName && <Text size="xs" c="dimmed">( {techName} )</Text>}
-              </Group>
-            </Paper>
-          )
+                {def.done_description && (
+                  <Stack gap={2} mt={6}>
+                    <Text size="sm" fw={600}>תאור הטיפול:</Text>
+                    <Text size="sm">{def.done_description}</Text>
+                  </Stack>
+                )}
+                {doneAt && (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    בוצע ב-{fmtDt(doneAt)}, יום {HE_DAYS[doneAt.getDay()]}
+                  </Text>
+                )}
+                {def.done_by && (
+                  <Text size="xs" c="dimmed" ta="left">( {def.done_by} )</Text>
+                )}
+              </Paper>
+            )
+          }
+          return null
         })}
       </Paper>
-
-      <style>{`
-        @media print {
-          body > *:not(#elevator-logbook-print) { display: none !important; }
-          #elevator-logbook-print { display: block !important; }
-        }
-      `}</style>
     </Stack>
   )
 }
@@ -1011,9 +1081,13 @@ export default function ElevatorDetailPage() {
                 )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="טיפול אחרון">
-                  <Text fw={500}>{formatDate(elevator.last_service_date) ?? '—'}</Text>
-                </Field>
+                {editing ? (
+                  <DateInput label="טיפול אחרון" value={parseDate(form.last_service_date)} onChange={d => dateSet('last_service_date', d)} clearable />
+                ) : (
+                  <Field label="טיפול אחרון">
+                    <Text fw={500}>{formatDate(elevator.last_service_date) ?? '—'}</Text>
+                  </Field>
+                )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 <Field label="טיפול הבא">

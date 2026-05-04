@@ -255,10 +255,9 @@ def update_elevator(
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(elevator, field, value)
-    # Always recalculate next_service_date unless it was explicitly overridden in this call
-    if "next_service_date" not in updates:
-        _recalculate_next_service(elevator)
-    elif "last_service_date" in updates and "next_service_date" not in updates:
+    # Recalculate next_service_date whenever any of its inputs change
+    service_inputs = {"last_service_date", "maintenance_interval_days", "service_contract", "service_type"}
+    if service_inputs & set(updates.keys()) or "next_service_date" not in updates:
         _recalculate_next_service(elevator)
     # Auto-calculate contract_renewal when contract_start is set but renewal is not
     if "contract_start" in updates and "contract_renewal" not in updates:

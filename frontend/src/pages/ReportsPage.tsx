@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Stack, Title, Paper, Group, Select, Button, Text, Table, Badge,
-  ActionIcon, Checkbox, Modal, TextInput, ScrollArea, Divider,
+  ActionIcon, Checkbox, Modal, TextInput, ScrollArea, Divider, Alert,
   Loader, Center, Pagination, Tabs, Tooltip, NumberInput, CloseButton,
   Box, rem,
 } from '@mantine/core'
@@ -52,9 +52,10 @@ export default function ReportsPage() {
   const [viewName, setViewName] = useState('')
   const [activeView, setActiveView] = useState<string | null>(null)
 
-  const { data: schemas } = useQuery({
+  const { data: schemas, isError: schemasError } = useQuery({
     queryKey: ['report-schemas'],
     queryFn: reportsApi.getAllSchemas,
+    retry: 2,
   })
 
   const { data: views, refetch: refetchViews } = useQuery({
@@ -65,8 +66,10 @@ export default function ReportsPage() {
   const currentSchema: EntitySchema | undefined = schemas?.find(s => s.entity_type === entityType)
 
   useEffect(() => {
-    if (currentSchema && selectedCols.length === 0) {
-      setSelectedCols(currentSchema.default_columns)
+    if (currentSchema) {
+      if (selectedCols.length === 0) setSelectedCols(currentSchema.default_columns)
+      // Auto-run on schema load so the table shows data immediately
+      runReport(1)
     }
   }, [currentSchema?.entity_type])
 
@@ -171,6 +174,14 @@ export default function ReportsPage() {
 
   const totalPages = result ? Math.ceil(result.total / PAGE_SIZE) : 0
   const filterable = currentSchema?.columns.filter(c => c.filterable) ?? []
+
+  if (schemasError) return (
+    <Alert color="red" title="שגיאה בטעינת הדוחות">
+      לא ניתן לטעון את הסכמה מהשרת. בדוק שהשרת פועל ונסה לרענן את הדף.
+    </Alert>
+  )
+
+  if (!schemas) return <Center h={200}><Loader /></Center>
 
   return (
     <Stack gap="md" dir="rtl">
