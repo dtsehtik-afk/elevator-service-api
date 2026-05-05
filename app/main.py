@@ -251,6 +251,9 @@ _API_ONLY_PREFIXES = (
 )
 
 
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+_IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+
 @app.middleware("http")
 async def spa_browser_fallback(request: Request, call_next):
     accept = request.headers.get("accept", "")
@@ -264,7 +267,7 @@ async def spa_browser_fallback(request: Request, call_next):
         file = _FRONTEND_DIST / path.lstrip("/")
         if file.is_file():
             return FileResponse(str(file))
-        return FileResponse(str(_FRONTEND_DIST / "index.html"))
+        return FileResponse(str(_FRONTEND_DIST / "index.html"), headers=_NO_CACHE)
     return await call_next(request)
 
 
@@ -319,5 +322,6 @@ if _FRONTEND_DIST.exists():
         """Serve React app for all non-API routes."""
         file = _FRONTEND_DIST / full_path
         if file.exists() and file.is_file():
-            return FileResponse(str(file))
-        return FileResponse(str(_FRONTEND_DIST / "index.html"))
+            headers = _IMMUTABLE if full_path.startswith("assets/") else _NO_CACHE
+            return FileResponse(str(file), headers=headers)
+        return FileResponse(str(_FRONTEND_DIST / "index.html"), headers=_NO_CACHE)
