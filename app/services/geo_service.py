@@ -110,7 +110,7 @@ def get_cities(prefix: str = "") -> List[str]:
     _ensure_cities_loaded()
     prefix = prefix.strip()
     if not prefix:
-        return _cities_cache[:100]
+        return _cities_cache  # full list — frontend does client-side filtering
     pl = prefix.lower()
     return [c for c in _cities_cache if c.lower().startswith(pl)][:50]
 
