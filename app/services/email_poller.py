@@ -356,7 +356,7 @@ def _gemini_fuzzy_match(candidates, email_address: str, api_key: str):
     return None
 
 
-def _find_elevator(db, city: str, address: str, fields: dict):
+def _find_elevator(db, city: str, address: str, fields: dict, skip_notify: bool = False):
     """
     Multi-signal elevator lookup. NEVER creates a new elevator.
 
@@ -424,22 +424,25 @@ def _find_elevator(db, city: str, address: str, fields: dict):
             "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
             addr_norm, ambiguous.address,
         )
-        _notify_no_match(
-            city_norm, addr_norm, fields,
-            extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{ambiguous.address}, {ambiguous.city}*\n"
-        )
+        if not skip_notify:
+            _notify_no_match(
+                city_norm, addr_norm, fields,
+                extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{ambiguous.address}, {ambiguous.city}*\n"
+            )
         return None
 
     # 6. Nothing found
-    logger.info("📍 No elevator found for %s %s — notifying dispatcher", city_norm, addr_norm)
-    _notify_no_match(city_norm, addr_norm, fields)
+    logger.info("📍 No elevator found for %s %s", city_norm, addr_norm)
+    if not skip_notify:
+        _notify_no_match(city_norm, addr_norm, fields)
     return None
 
 
-def _notify_no_match(city: str, address: str, fields: dict, extra: str = "") -> None:
+def _notify_no_match(city: str, address: str, fields: dict, extra: str = "", log_id: str = "") -> None:
     """Send dispatcher a detailed WhatsApp with all parsed call data when no elevator matched."""
     try:
         from app.services.whatsapp_service import notify_dispatcher
+        from app.config import get_settings
         name    = fields.get("name", "")
         phone   = fields.get("phone", "")
         floors  = fields.get("floor_count", "")
@@ -468,6 +471,9 @@ def _notify_no_match(city: str, address: str, fields: dict, extra: str = "") -> 
         if intnum:
             lines.append(f"#️⃣ מ.ע: {intnum}")
         lines.append("\nנא לפתוח קריאה ידנית ולשייך למעלית הנכונה.")
+        if log_id:
+            base = get_settings().app_base_url.rstrip("/")
+            lines.append(f"🔗 {base}/pending-calls")
         notify_dispatcher("\n".join(lines))
     except Exception as exc:
         logger.error("Failed to notify dispatcher about unmatched address: %s", exc)
@@ -764,15 +770,39 @@ def poll_emails(db) -> int:
                 # Lead detection — create CRM lead if body contains inquiry keywords
                 _try_create_email_lead(db, body, fields)
 
-                elevator = _find_elevator(db, fields["city"], fields["address"], fields)
+                elevator = _find_elevator(db, fields["city"], fields["address"], fields, skip_notify=True)
 
                 if elevator is None:
-                    # No match or ambiguous address — dispatcher already notified inside _find_elevator
+                    # No match — save an IncomingCallLog so it appears in PendingCallsPage
                     logger.info(
-                        "📍 Skipping call creation — no elevator match for (%s %s), awaiting dispatcher review",
+                        "📍 No elevator match for (%s %s) — saving to pending queue",
                         fields.get("city"), fields.get("address"),
                     )
-                    _record_as_scanned(db, message_id)
+                    log_id = ""
+                    try:
+                        from app.models.incoming_call import IncomingCallLog
+                        pending_log = IncomingCallLog(
+                            raw_text=body[:10000],
+                            caller_name=fields.get("name") or None,
+                            caller_phone=fields.get("phone") or None,
+                            call_city=fields.get("city") or None,
+                            call_street=fields.get("address") or None,
+                            call_type=fields.get("call_type") or None,
+                            fault_type=fields.get("fault_type") or "OTHER",
+                            priority="MEDIUM",
+                            match_status="UNMATCHED",
+                        )
+                        db.add(pending_log)
+                        db.add(ServiceCallEmailScan(message_id=message_id))
+                        db.commit()
+                        log_id = str(pending_log.id)
+                        logger.info("📋 Saved unmatched call to pending queue: %s", log_id)
+                    except Exception as log_exc:
+                        db.rollback()
+                        logger.error("Failed to save unmatched call log: %s", log_exc)
+                        _record_as_scanned(db, message_id)
+                    # Re-notify dispatcher with link to pending-calls page
+                    _notify_no_match(fields.get("city", ""), fields.get("address", ""), fields, log_id=log_id)
                     continue
 
                 # Enrich the matched elevator with any new data from this email
