@@ -198,9 +198,10 @@ async def receive_call(
     if match.elevator:
         enriched = enrich_elevator(db, match.elevator, parsed)
 
-    # 3b. Save caller phone to elevator for future matching (if not already saved)
+    # 3b. Save caller phone to elevator + auto-create resident contact for new callers
     if match.match_status == "MATCHED" and match.elevator and parsed.phone:
         _save_caller_phone(match.elevator, parsed.phone, db)
+        _ensure_resident_contact(db, match.elevator, parsed)
 
     # 4. Create service call (only on confident match) — otherwise alert dispatcher
     service_call = None
@@ -234,8 +235,11 @@ async def receive_call(
             )
         except Exception as exc:
             logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
-        # Auto-create a CRM lead for the unknown caller so dispatchers can follow up
-        if parsed.phone:
+        # Fault-related unmatched call → already in IncomingCallLog (pending queue)
+        # Non-fault call → open a CRM lead and notify sales managers
+        _FAULT_TYPES = {"STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "RESCUE"}
+        is_fault_call = parsed.fault_type in _FAULT_TYPES
+        if not is_fault_call and parsed.phone:
             try:
                 from app.models.lead import Lead
                 existing_lead = db.query(Lead).filter(Lead.phone == parsed.phone).first()
@@ -247,13 +251,13 @@ async def receive_call(
                         status="NEW",
                         notes=(
                             f"נוסף אוטומטית מקריאה נכנסת — "
-                            f"{parsed.street or ''} {parsed.city or ''} | "
-                            f"תקלה: {parsed.fault_type}"
+                            f"{parsed.street or ''} {parsed.city or ''}"
                         ),
                     )
                     db.add(lead)
                     db.commit()
                     logger.info("Auto-created lead for unknown caller %s", parsed.phone)
+                    _notify_sales_managers(db, lead, parsed.name or "", parsed.phone)
             except Exception as exc:
                 db.rollback()
                 logger.error("Failed to auto-create lead for caller %s: %s", parsed.phone, exc)
@@ -722,6 +726,75 @@ def _save_caller_phone(elevator, phone: str, db) -> None:
         logger.warning("📞 Saved caller phone %s to elevator %s", normalized, elevator.id)
     except Exception as exc:
         logger.error("Failed to save caller phone: %s", exc)
+
+
+def _ensure_resident_contact(db, elevator, parsed) -> None:
+    """Auto-create a RESIDENT contact when an unknown caller is matched to an elevator."""
+    try:
+        phone = (parsed.phone or "").strip()
+        if not phone:
+            return
+        digits = "".join(c for c in phone if c.isdigit())
+        if len(digits) < 9:
+            return
+        from app.models.contact import Contact
+        tail = digits[-9:]
+        existing = (
+            db.query(Contact)
+            .filter(
+                Contact.elevator_id == elevator.id,
+                Contact.mobile.isnot(None),
+            )
+            .all()
+        )
+        for c in existing:
+            if "".join(d for d in (c.mobile or "") if d.isdigit())[-9:] == tail:
+                return  # already a contact
+        name = (parsed.name or "").strip()
+        contact = Contact(
+            elevator_id=elevator.id,
+            first_name=name or None,
+            mobile=phone,
+            role="RESIDENT",
+        )
+        db.add(contact)
+        db.commit()
+        logger.info("👤 Auto-created RESIDENT contact %s for elevator %s", phone, elevator.id)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Failed to auto-create resident contact: %s", exc)
+
+
+def _notify_sales_managers(db, lead, parsed_name: str, parsed_phone: str) -> None:
+    """Send WhatsApp notification to all SALES_MANAGER users when a lead is auto-created."""
+    try:
+        from app.models.technician import Technician
+        from app.services.whatsapp_service import send_whatsapp_message
+        from app.config import get_settings
+        managers = (
+            db.query(Technician)
+            .filter(Technician.role == "SALES_MANAGER", Technician.is_active == True)  # noqa: E712
+            .all()
+        )
+        if not managers:
+            return
+        base_url = get_settings().app_base_url.rstrip("/")
+        msg = (
+            f"📊 *ליד חדש נוצר אוטומטית*\n"
+            f"👤 {parsed_name or 'לא ידוע'}\n"
+            f"📞 {parsed_phone or ''}\n"
+            f"🔗 {base_url}/leads"
+        )
+        for mgr in managers:
+            dest = mgr.whatsapp_number or mgr.phone
+            if dest:
+                try:
+                    send_whatsapp_message(dest, msg)
+                except Exception:
+                    pass
+        logger.info("📊 Notified %d sales manager(s) about new lead", len(managers))
+    except Exception as exc:
+        logger.warning("Failed to notify sales managers: %s", exc)
 
 
 def _find_tech_by_phone_local(db, phone: str):

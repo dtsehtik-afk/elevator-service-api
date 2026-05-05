@@ -11,8 +11,8 @@ import client from '../api/client'
 import { Technician } from '../types'
 import { useAuthStore } from '../stores/authStore'
 
-const ROLE_LABELS: Record<string, string> = { ADMIN: 'מנהל', TECHNICIAN: 'טכנאי', DISPATCHER: 'מוקד' }
-const ROLE_COLORS: Record<string, string> = { ADMIN: 'purple', TECHNICIAN: 'blue', DISPATCHER: 'teal' }
+const ROLE_LABELS: Record<string, string> = { ADMIN: 'מנהל', TECHNICIAN: 'טכנאי', DISPATCHER: 'מוקד', SALES_MANAGER: 'מנהל מכירות' }
+const ROLE_COLORS: Record<string, string> = { ADMIN: 'purple', TECHNICIAN: 'blue', DISPATCHER: 'teal', SALES_MANAGER: 'orange' }
 
 const EMPTY_NEW = {
   name: '', email: '', phone: '', whatsapp_number: '', password: '',
@@ -253,6 +253,7 @@ export default function TechniciansPage() {
                 { value: 'TECHNICIAN', label: 'טכנאי' },
                 { value: 'DISPATCHER', label: 'מוקד' },
                 { value: 'ADMIN', label: 'מנהל' },
+                { value: 'SALES_MANAGER', label: 'מנהל מכירות' },
               ]}
               value={newForm.role}
               onChange={v => setNewForm(s => ({ ...s, role: v ?? 'TECHNICIAN' }))} />
@@ -295,6 +296,7 @@ export default function TechniciansPage() {
                 { value: 'TECHNICIAN', label: 'טכנאי' },
                 { value: 'DISPATCHER', label: 'מוקד' },
                 { value: 'ADMIN', label: 'מנהל' },
+                { value: 'SALES_MANAGER', label: 'מנהל מכירות' },
               ]}
               value={editForm.role}
               onChange={v => setEditForm(s => ({ ...s, role: v ?? 'TECHNICIAN' }))} />
