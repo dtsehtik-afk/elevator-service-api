@@ -42,6 +42,7 @@ interface PendingCall {
 
 interface UnassignedCall {
   id: string
+  call_number: number | null
   elevator_id: string
   fault_type: string
   priority: string
