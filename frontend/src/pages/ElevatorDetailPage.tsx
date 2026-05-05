@@ -1091,8 +1091,8 @@ export default function ElevatorDetailPage() {
                     value={form.service_type ?? null}
                     onChange={v => {
                       set('service_type', v)
-                      if (v === 'COMPREHENSIVE') { set('service_contract', 'ANNUAL_12'); set('maintenance_interval_days', 30) }
-                      else if (v === 'REGULAR') { set('service_contract', 'ANNUAL_6'); set('maintenance_interval_days', 60) }
+                      if (v === 'COMPREHENSIVE') set('service_contract', 'ANNUAL_12')
+                      else if (v === 'REGULAR') set('service_contract', 'ANNUAL_6')
                     }}
                     clearable
                   />
@@ -1108,9 +1108,36 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
-                  <NumberInput label="אינטרוול טיפול (ימים)" min={1} value={form.maintenance_interval_days ?? ''} onChange={v => set('maintenance_interval_days', v || null)} />
+                  <Select
+                    label="תדירות טיפול מונע"
+                    placeholder="בחר תדירות..."
+                    value={
+                      form.maintenance_interval_days == null ? null
+                      : form.maintenance_interval_days <= 31  ? '12'
+                      : form.maintenance_interval_days <= 65  ? '6'
+                      : form.maintenance_interval_days <= 100 ? '4'
+                      : '2'
+                    }
+                    onChange={v => {
+                      const map: Record<string, number> = { '12': 30, '6': 61, '4': 91, '2': 182 }
+                      set('maintenance_interval_days', v ? map[v] : null)
+                    }}
+                    data={[
+                      { value: '12', label: '12 פעמים בשנה (כל ~30 יום)' },
+                      { value: '6',  label: '6 פעמים בשנה (כל ~60 יום)' },
+                      { value: '4',  label: '4 פעמים בשנה (כל ~90 יום)' },
+                      { value: '2',  label: '2 פעמים בשנה (כל ~6 חודשים)' },
+                    ]}
+                    clearable
+                  />
                 ) : (
-                  <Field label="אינטרוול טיפול" value={elevator.maintenance_interval_days ? `${elevator.maintenance_interval_days} יום` : null} />
+                  <Field label="תדירות טיפול מונע" value={
+                    elevator.maintenance_interval_days == null ? null
+                    : elevator.maintenance_interval_days <= 31  ? '12 פעמים בשנה'
+                    : elevator.maintenance_interval_days <= 65  ? '6 פעמים בשנה'
+                    : elevator.maintenance_interval_days <= 100 ? '4 פעמים בשנה'
+                    : '2 פעמים בשנה'
+                  } />
                 )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>

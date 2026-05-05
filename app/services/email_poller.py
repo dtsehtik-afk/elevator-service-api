@@ -637,18 +637,23 @@ def poll_emails(db) -> int:
 
         senders_lower = [s.lower() for s in senders]
 
+        # Only fetch emails from TODAY — prevents reprocessing historical messages
+        # on server restart. Dedup by Message-ID handles same-day reruns safely.
+        from datetime import date as _date
+        _today_str = _date.today().strftime("%d-%b-%Y")  # e.g. "05-May-2026"
+
         # Scan both the configured folder AND Spam (beepertalk emails can end up in spam)
-        # Only fetch UNSEEN emails — processed emails are marked as read so they won't reappear
+        # Open in readonly — we rely on Message-ID dedup, not SEEN flag
         folders_to_scan = [imap_folder, "[Gmail]/Spam"]
         msg_ids = []
         for folder in folders_to_scan:
-            status, resp = mail.select(f'"{folder}"', readonly=False)
+            status, resp = mail.select(f'"{folder}"', readonly=True)
             if status != "OK":
                 logger.debug("📧 Folder '%s' not accessible — skipping", folder)
                 continue
-            _, all_ids = mail.search(None, "UNSEEN")
+            _, all_ids = mail.search(None, f'SINCE {_today_str}')
             folder_ids = all_ids[0].split() if all_ids[0] else []
-            logger.info("📧 [%s] unseen: %d emails", folder, len(folder_ids))
+            logger.info("📧 [%s] since %s: %d emails", folder, _today_str, len(folder_ids))
             msg_ids.extend([(mid, folder) for mid in folder_ids])
 
         if not msg_ids:
@@ -663,7 +668,7 @@ def poll_emails(db) -> int:
         for mid, folder in msg_ids:
             try:
                 # Re-select folder in case last iteration was a different one
-                mail.select(f'"{folder}"', readonly=False)
+                mail.select(f'"{folder}"', readonly=True)
                 _, data = mail.fetch(mid, "(RFC822)")
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
@@ -700,7 +705,6 @@ def poll_emails(db) -> int:
                 if any(p in body for p in _SKIP_PATTERNS):
                     logger.info("📧 Skipping closure/summary email (not a new call)")
                     _record_as_scanned(db, message_id)
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 import time as _time
@@ -709,12 +713,10 @@ def poll_emails(db) -> int:
 
                 if fields is None:
                     logger.warning("Email parsing returned no data — skipping (see above for reason)")
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 if not fields.get("city") and not fields.get("address"):
                     logger.warning("Could not extract address — body preview: %s", body[:600])
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 elevator = _find_elevator(db, fields["city"], fields["address"], fields)
@@ -726,7 +728,6 @@ def poll_emails(db) -> int:
                         fields.get("city"), fields.get("address"),
                     )
                     _record_as_scanned(db, message_id)
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 # Enrich the matched elevator with any new data from this email
@@ -850,13 +851,6 @@ def poll_emails(db) -> int:
                 if "OVERQUOTA" in str(exc):
                     logger.warning("📧 OVERQUOTA on email %s — stopping this poll cycle to avoid rate limiting", mid)
                     break
-
-            finally:
-                # Mark as read regardless of success/failure to avoid re-processing
-                try:
-                    mail.store(mid, "+FLAGS", "\\Seen")
-                except Exception:
-                    pass
 
         mail.close()
         mail.logout()

@@ -191,6 +191,19 @@ async def lifespan(app: FastAPI):
             _db.close()
     except Exception:
         pass
+    # Backfill: set next_service_date for elevators that are missing it
+    try:
+        from app.database import SessionLocal as _SL2
+        from app.services.elevator_service import backfill_next_service_dates
+        _db2 = _SL2()
+        try:
+            _filled = backfill_next_service_dates(_db2)
+            if _filled:
+                _logging.getLogger(__name__).info(f"Backfilled next_service_date for {_filled} elevators")
+        finally:
+            _db2.close()
+    except Exception:
+        pass
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield

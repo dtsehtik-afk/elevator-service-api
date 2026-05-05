@@ -515,6 +515,38 @@ def receive_whatsapp(
         _handle_tech_reply(db, phone, text, pending, settings)
         return {"status": "processed"}
 
+    # Auto-create lead when message contains inquiry keywords from an unknown number
+    _LEAD_KEYWORDS = {
+        "מתעניין", "מתעניינת", "הצעת מחיר", "הצעה", "לקוח חדש", "לקוחה חדשה",
+        "חוזה", "חוזה חדש", "מחיר", "כמה עולה", "כמה זה עולה", "שאלה", "יצירת קשר",
+        "לקוח פוטנציאלי", "רוצה לדעת", "אשמח לשמוע", "תחשיב", "עסקה",
+    }
+    _text_lower = text.lower()
+    if any(kw in _text_lower for kw in _LEAD_KEYWORDS):
+        try:
+            # Only create lead if phone doesn't belong to a known technician or contact
+            from app.models.technician import Technician as _Tech
+            _is_tech = db.query(_Tech).filter(
+                (_Tech.phone == phone) | (_Tech.whatsapp_number == phone)
+            ).first()
+            if not _is_tech:
+                from app.models.lead import Lead as _Lead
+                _existing = db.query(_Lead).filter(_Lead.phone == phone).first()
+                if not _existing:
+                    _lead = _Lead(
+                        name=phone,
+                        phone=phone,
+                        source="PHONE",
+                        status="NEW",
+                        notes=f"נוסף אוטומטית מהודעת WhatsApp: {text[:200]}",
+                    )
+                    db.add(_lead)
+                    db.commit()
+                    logger.info("Auto-created lead from WhatsApp inquiry from %s", phone)
+        except Exception as _exc:
+            db.rollback()
+            logger.error("Failed to auto-create lead from WhatsApp: %s", _exc)
+
     # Free-text: report / question / self-assign
     # Pass is_reply=True for quoted messages so the chat agent loads conversation history
     from app.services.scheduler import _handle_free_text
