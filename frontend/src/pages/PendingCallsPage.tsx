@@ -4,9 +4,10 @@
  * 2. Open service calls with no technician assigned
  */
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Text, Card, Badge, Group, Button, Divider,
-  Loader, Center, Modal, TextInput, Alert, Select, Tabs,
+  Loader, Center, Modal, TextInput, Alert, Select, Tabs, Anchor,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -121,6 +122,7 @@ function formatDate(iso: string | null) {
 // ── Section 2: Unassigned service calls ───────────────────────────────────
 function UnassignedCallsSection() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [assignModal, setAssignModal] = useState<UnassignedCall | null>(null)
   const [selectedTech, setSelectedTech] = useState<string | null>(null)
 
@@ -183,7 +185,12 @@ function UnassignedCallsSection() {
             <Text size="xs" c="dimmed">{formatDate(call.created_at)}</Text>
           </Group>
 
-          <Text fw={700} size="md">📍 {call.address || 'כתובת לא ידועה'}{call.city ? `, ${call.city}` : ''}</Text>
+          <Group justify="space-between" align="flex-start">
+            <Text fw={700} size="md">📍 {call.address || 'כתובת לא ידועה'}{call.city ? `, ${call.city}` : ''}</Text>
+            <Anchor size="xs" onClick={() => navigate(`/calls?id=${call.id}`)} style={{ cursor: 'pointer' }}>
+              {call.call_number ? `#${call.call_number}` : 'פתח קריאה →'}
+            </Anchor>
+          </Group>
           {call.description && <Text size="sm" c="dimmed" mt={2}>{call.description}</Text>}
           {call.reported_by && <Text size="sm" c="dimmed">📞 {call.reported_by}</Text>}
 
@@ -292,8 +299,12 @@ export default function PendingCallsPage() {
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
     if (q.length < 2) { setElevResults([]); return }
-    const results = await searchElevators(q)
-    setElevResults(results)
+    try {
+      const results = await searchElevators(q)
+      setElevResults(results)
+    } catch {
+      setElevResults([])
+    }
   }
 
   return (

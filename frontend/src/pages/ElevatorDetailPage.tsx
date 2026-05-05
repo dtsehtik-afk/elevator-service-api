@@ -470,7 +470,7 @@ export default function ElevatorDetailPage() {
 
   const { data: techniciansList = [] } = useQuery<any[]>({
     queryKey: ['technicians-list'],
-    queryFn: async () => (await client.get('/technicians?limit=200')).data,
+    queryFn: async () => (await client.get('/technicians?limit=100')).data,
     staleTime: 5 * 60 * 1000,
   })
 
