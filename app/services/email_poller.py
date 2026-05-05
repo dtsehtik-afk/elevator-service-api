@@ -18,6 +18,13 @@ IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
 SENDER_FILTER = "TELESERVICE@beepertalk.co.il"  # legacy constant — overridden by settings
 
+# Keywords that indicate a sales lead / inquiry in an email body
+_LEAD_KEYWORDS = {
+    "מתעניין", "מתעניינת", "הצעת מחיר", "הצעה", "לקוח חדש", "לקוחה חדשה",
+    "חוזה שירות", "חוזה חדש", "מחיר שירות", "כמה עולה", "כמה זה עולה",
+    "לקוח פוטנציאלי", "רוצה לדעת", "אשמח לשמוע", "תחשיב", "עסקה",
+}
+
 # Maps Hebrew call-type strings to our fault_type enum values
 _FAULT_TYPE_MAP = {
     "תקיעה":  "STUCK",
@@ -602,6 +609,41 @@ def _send_rescue_blast(db, fields: dict, caller_name: str, caller_phone: str, de
     logger.info("🚨 Rescue blast sent to %d technicians", len(technicians))
 
 
+def _try_create_email_lead(db, body: str, fields: dict) -> bool:
+    """Create a CRM lead if the email body contains lead-intent keywords."""
+    body_lower = body.lower()
+    if not any(kw in body_lower for kw in _LEAD_KEYWORDS):
+        return False
+    try:
+        from app.models.lead import Lead
+        phone = (fields.get("phone") or "").strip()
+        name = (fields.get("name") or "").strip()
+        if not name or name == "לא ידוע":
+            name = phone or "ליד ממייל"
+        if phone:
+            existing = db.query(Lead).filter(
+                Lead.phone == phone,
+                Lead.status.in_(["NEW", "CONTACTED", "QUALIFIED"]),
+            ).first()
+            if existing:
+                return False
+        lead = Lead(
+            name=name,
+            phone=phone or None,
+            source="EMAIL",
+            status="NEW",
+            notes=f"זוהה אוטומטית ממייל\n{body[:500]}",
+        )
+        db.add(lead)
+        db.commit()
+        logger.info("📊 Lead created from email: name=%s phone=%s", name, phone)
+        return True
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Failed to create email lead: %s", exc)
+        return False
+
+
 def _record_as_scanned(db, message_id: str):
     from app.models.service_call_email_scan import ServiceCallEmailScan
     try:
@@ -718,6 +760,9 @@ def poll_emails(db) -> int:
                 if not fields.get("city") and not fields.get("address"):
                     logger.warning("Could not extract address — body preview: %s", body[:600])
                     continue
+
+                # Lead detection — create CRM lead if body contains inquiry keywords
+                _try_create_email_lead(db, body, fields)
 
                 elevator = _find_elevator(db, fields["city"], fields["address"], fields)
 

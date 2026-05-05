@@ -14,6 +14,7 @@ import { getElevator, updateElevator, getElevatorCalls } from '../api/elevators'
 import client from '../api/client'
 import { Elevator } from '../types'
 import LocationPickerModal from '../components/LocationPickerModal'
+import { CitySelect, StreetInput } from '../components/GeoInputs'
 import RelatedPanel from '../components/RelatedPanel'
 import {
   ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS,
@@ -903,14 +904,14 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
-                  <TextInput label="כתובת" value={form.address ?? ''} onChange={e => set('address', e.target.value)} />
+                  <StreetInput label="כתובת (רחוב + מספר)" value={form.address ?? ''} onChange={v => set('address', v)} city={form.city ?? elevator.city} />
                 ) : (
                   <Field label="כתובת" value={elevator.address} />
                 )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
-                  <TextInput label="עיר" value={form.city ?? ''} onChange={e => set('city', e.target.value)} />
+                  <CitySelect label="עיר" required value={form.city ?? null} onChange={v => set('city', v)} />
                 ) : (
                   <Field label="עיר" value={elevator.city} />
                 )}

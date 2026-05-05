@@ -9,6 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { CitySelect, StreetInput } from '../components/GeoInputs'
 
 interface Deficiency {
   description: string
@@ -551,10 +552,10 @@ export default function InspectionsPage() {
               <Paper withBorder p="sm" radius="sm">
                 <Stack gap="sm">
                   <Text size="xs" c="dimmed">פרטי המעלית החדשה (מולאו מהדוח — ניתן לעדכן):</Text>
-                  <TextInput label="כתובת *" size="xs" value={createElev.address}
-                    onChange={e => setCreateElev(f => ({ ...f, address: e.target.value }))} />
-                  <TextInput label="עיר *" size="xs" value={createElev.city}
-                    onChange={e => setCreateElev(f => ({ ...f, city: e.target.value }))} />
+                  <StreetInput label="כתובת *" size="xs" value={createElev.address}
+                    onChange={v => setCreateElev(f => ({ ...f, address: v }))} city={createElev.city} />
+                  <CitySelect label="עיר *" size="xs" required value={createElev.city}
+                    onChange={v => setCreateElev(f => ({ ...f, city: v }))} />
                   <TextInput label="שם בניין (אופציונלי)" size="xs" value={createElev.building_name}
                     onChange={e => setCreateElev(f => ({ ...f, building_name: e.target.value }))} />
                   <Button color="green" size="sm"

@@ -10,6 +10,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { listElevators, createElevator, importElevatorsFromPdf, importElevatorsFromExcel } from '../api/elevators'
 import { EditViewDrawer } from '../components/EditViewDrawer'
+import { CitySelect, StreetInput } from '../components/GeoInputs'
 import { ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS } from '../utils/constants'
 import { formatDate } from '../utils/dates'
 
@@ -372,9 +373,9 @@ export default function ElevatorsPage() {
       {/* ── Add elevator modal ── */}
       <Modal opened={opened} onClose={close} title="הוסף מעלית חדשה" size="lg">
         <Stack gap="sm">
-          <TextInput label="כתובת" required value={newElev.address} onChange={e => setNewElev(s => ({ ...s, address: e.target.value }))} />
+          <StreetInput label="כתובת (רחוב + מספר)" required value={newElev.address} onChange={v => setNewElev(s => ({ ...s, address: v }))} city={newElev.city} />
           <Group grow>
-            <TextInput label="עיר" required value={newElev.city} onChange={e => setNewElev(s => ({ ...s, city: e.target.value }))} />
+            <CitySelect label="עיר" required value={newElev.city} onChange={v => setNewElev(s => ({ ...s, city: v }))} />
             <TextInput label="שם בניין" value={newElev.building_name} onChange={e => setNewElev(s => ({ ...s, building_name: e.target.value }))} />
           </Group>
           <Group grow>

@@ -131,3 +131,52 @@ def get_modules(db: Session = Depends(get_db)):
     """Return current module flags."""
     row = _get_or_create_settings(db)
     return ModulesResponse(modules=row.modules)
+
+
+# ── Address normalization ────────────────────────────────────────────────────
+
+@router.post("/normalize-addresses", dependencies=[Depends(_require_control_plane_key)])
+def normalize_elevator_addresses(
+    dry_run: bool = True,
+    db: Session = Depends(get_db),
+):
+    """
+    Detect and optionally fix elevators where part of the city name leaked
+    into the street field (e.g. street='שמואלזון קרית', city='אתא'
+    → street='שמואלזון', city='קרית אתא').
+
+    Set dry_run=false to apply fixes.
+    """
+    from app.services.geo_service import normalize_city_street, get_all_cities
+
+    cities_set = set(get_all_cities())
+    elevators = db.query(Elevator).all()
+
+    fixes = []
+    for elevator in elevators:
+        street = (elevator.address or "").strip()
+        city = (elevator.city or "").strip()
+        if city in cities_set:
+            continue  # already valid
+        result = normalize_city_street(street, city)
+        if result:
+            new_street, new_city = result
+            fixes.append({
+                "elevator_id": str(elevator.id),
+                "original_address": street,
+                "original_city": city,
+                "new_address": new_street,
+                "new_city": new_city,
+            })
+            if not dry_run:
+                elevator.address = new_street
+                elevator.city = new_city
+
+    if not dry_run and fixes:
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"fixes": fixes, "count": len(fixes), "dry_run": dry_run}

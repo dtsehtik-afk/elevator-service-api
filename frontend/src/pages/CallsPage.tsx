@@ -13,6 +13,7 @@ import client from '../api/client'
 import LocationPickerModal from '../components/LocationPickerModal'
 import { listTechnicians } from '../api/technicians'
 import { useNavigate } from 'react-router-dom'
+import { CitySelect, StreetInput } from '../components/GeoInputs'
 import { useAuthStore } from '../stores/authStore'
 import {
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -846,12 +847,13 @@ export default function CallsPage() {
         <Stack gap="sm">
           <Text size="sm" c="dimmed">הפרטים נמשכו מהקריאה — השלם ועדכן לפני שמירה</Text>
           <Group grow>
-            <TextInput label="רחוב ומספר בית" required
+            <StreetInput label="רחוב ומספר בית" required
               value={addElevForm.address}
-              onChange={e => setAddElevForm(s => ({ ...s, address: e.target.value }))} />
-            <TextInput label="עיר" required
+              onChange={v => setAddElevForm(s => ({ ...s, address: v }))}
+              city={addElevForm.city} />
+            <CitySelect label="עיר" required
               value={addElevForm.city}
-              onChange={e => setAddElevForm(s => ({ ...s, city: e.target.value }))} />
+              onChange={v => setAddElevForm(s => ({ ...s, city: v }))} />
           </Group>
           <Group grow>
             <TextInput label="שם בניין"

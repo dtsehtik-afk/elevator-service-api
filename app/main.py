@@ -17,6 +17,7 @@ from app.routers import customers, quotes, contracts, invoices, inventory, leads
 from app.routers import settings as settings_router, conversations
 from app.routers import reports as reports_router, custom_fields as custom_fields_router
 from app.routers import hr as hr_router
+from app.routers import geo as geo_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -204,6 +205,9 @@ async def lifespan(app: FastAPI):
             _db2.close()
     except Exception:
         pass
+    # Pre-load Israeli cities list in background so first /geo/cities call is instant
+    from app.services.geo_service import load_cities_background
+    load_cities_background()
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield
@@ -243,7 +247,7 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
-    "/reports", "/custom-fields", "/roles", "/hr",
+    "/reports", "/custom-fields", "/roles", "/hr", "/geo",
 )
 
 
@@ -293,6 +297,7 @@ app.include_router(conversations.router)
 app.include_router(reports_router.router)
 app.include_router(custom_fields_router.router)
 app.include_router(hr_router.router)
+app.include_router(geo_router.router)
 
 
 @app.get("/health", tags=["Health"])
