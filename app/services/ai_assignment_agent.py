@@ -305,6 +305,8 @@ def assign_with_confirmation(
                 caller_phone=caller_phone,
                 travel_minutes=best.travel_minutes,
                 description=desc,
+                original_call_time=service_call.created_at,
+                call_number=getattr(service_call, "call_number", None),
             )
         return assignment
 
@@ -364,6 +366,8 @@ def assign_with_confirmation(
                 recommended_tech_name=recommended_name,
                 lat=elevator.latitude,
                 lng=elevator.longitude,
+                original_call_time=service_call.created_at,
+                call_number=getattr(service_call, "call_number", None),
             )
 
     service_call.status = "ASSIGNED"

@@ -131,6 +131,15 @@ def create_service_call(
     db.add(call)
     db.flush()  # Get the ID before commit
 
+    # Assign sequential call number
+    from sqlalchemy import func as _func
+    import random as _random
+    max_num = db.query(_func.max(ServiceCall.call_number)).scalar()
+    if max_num is None:
+        call.call_number = _random.randint(10000, 99999)
+    else:
+        call.call_number = max_num + 1
+
     # Write initial audit log
     audit = AuditLog(
         service_call_id=call.id,

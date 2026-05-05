@@ -76,6 +76,9 @@ class ElevatorUpdate(BaseModel):
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
     # Grouping
     management_company_id: Optional[uuid.UUID] = None
+    # Acquisition
+    lead_source: Optional[str] = None
+    responsible_technician_id: Optional[uuid.UUID] = None
 
     @field_validator(
         'address', 'city', 'building_name', 'notes', 'internal_number',
@@ -83,7 +86,7 @@ class ElevatorUpdate(BaseModel):
         'warranty_end', 'entry_code', 'contact_phone', 'intercom_phone',
         'service_type', 'service_contract', 'drive_link', 'inspector_name',
         'inspector_phone', 'inspector_mobile', 'inspector_email',
-        'last_inspection_report_url',
+        'last_inspection_report_url', 'lead_source',
         mode='before',
     )
     @classmethod
@@ -149,6 +152,10 @@ class ElevatorResponse(BaseModel):
     # Grouping
     management_company_id: Optional[uuid.UUID] = None
     management_company_name: Optional[str] = None
+    # Acquisition
+    lead_source: Optional[str] = None
+    responsible_technician_id: Optional[uuid.UUID] = None
+    responsible_technician_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

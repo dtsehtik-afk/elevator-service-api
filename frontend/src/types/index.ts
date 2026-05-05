@@ -54,12 +54,17 @@ export interface Elevator {
   management_company_id: string | null
   management_company_name: string | null
   customer_id: string | null
+  // Acquisition
+  lead_source: string | null
+  responsible_technician_id: string | null
+  responsible_technician_name: string | null
   created_at: string
   updated_at: string
 }
 
 export interface ServiceCall {
   id: string
+  call_number: number | null
   elevator_id: string
   reported_by: string
   description: string

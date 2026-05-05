@@ -234,6 +234,29 @@ async def receive_call(
             )
         except Exception as exc:
             logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
+        # Auto-create a CRM lead for the unknown caller so dispatchers can follow up
+        if parsed.phone:
+            try:
+                from app.models.lead import Lead
+                existing_lead = db.query(Lead).filter(Lead.phone == parsed.phone).first()
+                if not existing_lead:
+                    lead = Lead(
+                        name=parsed.name or parsed.phone,
+                        phone=parsed.phone,
+                        source="PHONE",
+                        status="NEW",
+                        notes=(
+                            f"נוסף אוטומטית מקריאה נכנסת — "
+                            f"{parsed.street or ''} {parsed.city or ''} | "
+                            f"תקלה: {parsed.fault_type}"
+                        ),
+                    )
+                    db.add(lead)
+                    db.commit()
+                    logger.info("Auto-created lead for unknown caller %s", parsed.phone)
+            except Exception as exc:
+                db.rollback()
+                logger.error("Failed to auto-create lead for caller %s: %s", parsed.phone, exc)
 
     # 5. AI assignment — with after-hours caller confirmation for non-RESCUE calls
     assignment = None
@@ -275,26 +298,37 @@ async def receive_call(
                 parsed.fault_type,
             )
 
-    # 6. Log
+    # 6. Log — always save regardless of earlier failures; rollback any pending error first
+    try:
+        db.rollback()
+    except Exception:
+        pass
     log = IncomingCallLog(
-        raw_text=email_body,
-        caller_name=parsed.name or None,
-        caller_phone=parsed.phone or None,
-        call_city=parsed.city or None,
-        call_street=parsed.street or None,
-        call_type=parsed.call_type or None,
-        call_time_raw=parsed.call_time or None,
+        raw_text=email_body[:10000],  # cap to avoid oversized text
+        caller_name=(parsed.name or None),
+        caller_phone=(parsed.phone or None),
+        call_city=(parsed.city or None),
+        call_street=(parsed.street or None),
+        call_type=(getattr(parsed, "call_type", None) or None),
+        call_time_raw=(getattr(parsed, "call_time", None) or None),
         fault_type=parsed.fault_type,
         priority=parsed.priority,
         match_status=match.match_status,
         match_score=match.score,
         match_notes=match.match_notes,
-        elevator_id=match.elevator.id if match.elevator else None,
-        service_call_id=service_call.id if service_call else None,
+        elevator_id=(match.elevator.id if match.elevator else None),
+        service_call_id=(service_call.id if service_call else None),
     )
     db.add(log)
-    db.commit()
-    db.refresh(log)
+    try:
+        db.commit()
+        db.refresh(log)
+    except Exception as log_exc:
+        logger.error("Failed to save IncomingCallLog: %s", log_exc)
+        db.rollback()
+        # Create a minimal in-memory log object so the response can still be built
+        import uuid as _uuid
+        log.id = _uuid.uuid4()
 
     # Resolve assigned technician name for the response
     assigned_name = None

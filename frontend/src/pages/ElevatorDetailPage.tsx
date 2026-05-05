@@ -467,6 +467,12 @@ export default function ElevatorDetailPage() {
     enabled: addToGroupOpen,
   })
 
+  const { data: techniciansList = [] } = useQuery<any[]>({
+    queryKey: ['technicians-list'],
+    queryFn: async () => (await client.get('/technicians?limit=200')).data,
+    staleTime: 5 * 60 * 1000,
+  })
+
   const updateMutation = useMutation({
     mutationFn: (payload: any) => updateElevator(id!, payload),
     onSuccess: () => {
@@ -991,6 +997,33 @@ export default function ElevatorDetailPage() {
                 ) : null}
               </Grid.Col>
 
+              {/* Acquisition */}
+              <Grid.Col span={12}>
+                <Divider label="רכישה ואחריות" labelPosition="right" mt="sm" mb="xs" />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="מאיפה הגיעה המעלית" placeholder="פה מוקד / שיווק / הפניה..." value={form.lead_source ?? ''} onChange={e => set('lead_source', e.target.value || null)} />
+                ) : (
+                  <Field label="מאיפה הגיעה המעלית" value={elevator.lead_source} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <Select
+                    label="טכנאי אחראי"
+                    placeholder="בחר טכנאי..."
+                    value={form.responsible_technician_id ?? null}
+                    onChange={v => set('responsible_technician_id', v)}
+                    data={techniciansList.map((t: any) => ({ value: t.id, label: t.name }))}
+                    clearable
+                    searchable
+                  />
+                ) : (
+                  <Field label="טכנאי אחראי" value={elevator.responsible_technician_name} />
+                )}
+              </Grid.Col>
+
               {/* Location */}
               <Grid.Col span={12}>
                 <Divider label="מיקום גיאוגרפי" labelPosition="right" mt="sm" mb="xs" />
@@ -1330,7 +1363,11 @@ export default function ElevatorDetailPage() {
           <Paper withBorder p="lg" radius="md">
             <Grid>
               <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="ביקורת אחרונה" value={formatDate(elevator.last_inspection_date)} />
+                {editing ? (
+                  <DateInput label="ביקורת אחרונה" value={parseDate(form.last_inspection_date)} onChange={d => dateSet('last_inspection_date', d)} clearable />
+                ) : (
+                  <Field label="ביקורת אחרונה" value={formatDate(elevator.last_inspection_date)} />
+                )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (

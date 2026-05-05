@@ -128,12 +128,20 @@ def notify_technician_new_call(
     recommended_tech_name: str = "",
     lat: float = None,
     lng: float = None,
+    original_call_time=None,
+    call_number: int = None,
 ) -> bool:
     """Send a new-call notification to a technician (broadcast model — first to take wins)."""
     from app.config import get_settings
     fault  = _FAULT_LABEL.get(fault_type, fault_type)
     pri    = _PRIORITY_LABEL.get(priority, priority)
-    ts     = _now_il()
+    if original_call_time is not None:
+        try:
+            ts = original_call_time.astimezone(_IL_TZ).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            ts = _now_il()
+    else:
+        ts = _now_il()
 
     desc_line        = f"📝 *פירוט:* {description}\n" if description else ""
     caller_line      = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
@@ -150,9 +158,12 @@ def notify_technician_new_call(
     portal_url = f"{base_url}/tech/{tech_id}" if tech_id else ""
     portal_line = f"📱 *פורטל טכנאי:*\n{portal_url}\n" if portal_url else ""
 
+    call_num_line = f"📋 *קריאה מס׳ S{call_number}*\n" if call_number else ""
+
     message = (
         f"🔔 *קריאת שירות חדשה*\n"
         f"🗓 {ts}\n"
+        f"{call_num_line}"
         f"════════════════════\n"
         f"{recommended_line}"
         f"📍 *כתובת:* {address}, {city}\n"
@@ -183,6 +194,8 @@ def notify_technician_auto_assigned(
     caller_phone: str,
     travel_minutes: int,
     description: str = "",
+    original_call_time=None,
+    call_number: int = None,
 ) -> bool:
     """
     Send a call-assignment notification WITHOUT asking for 1/2 confirmation.
@@ -190,15 +203,24 @@ def notify_technician_auto_assigned(
     """
     fault  = _FAULT_LABEL.get(fault_type, fault_type)
     pri    = _PRIORITY_LABEL.get(priority, priority)
-    ts     = _now_il()
+    if original_call_time is not None:
+        try:
+            ts = original_call_time.astimezone(_IL_TZ).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            ts = _now_il()
+    else:
+        ts = _now_il()
 
     desc_line    = f"📝 *פירוט:* {description}\n" if description else ""
     caller_line  = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""
     phone_line   = f"📞 *טל׳:* {caller_phone}\n" if caller_phone else ""
 
+    call_num_line = f"📋 *קריאה מס׳ S{call_number}*\n" if call_number else ""
+
     message = (
         f"📋 *שובצת לקריאת שירות*\n"
         f"🗓 {ts}\n"
+        f"{call_num_line}"
         f"────────────────────\n"
         f"📍 *כתובת:* {address}, {city}\n"
         f"⚡ *תקלה:* {fault}\n"

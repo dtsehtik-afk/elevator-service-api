@@ -164,6 +164,16 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(100)",
                 "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS model VARCHAR(100)",
                 "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS floor_count INTEGER",
+                # ServiceCall — sequential human-readable call number
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS call_number INTEGER",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_calls_call_number ON service_calls (call_number) WHERE call_number IS NOT NULL",
+                # IncomingCallLog — ensure all parsed fields exist
+                "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_type VARCHAR(200)",
+                "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_time_raw VARCHAR(50)",
+                # Elevator — lead source and responsible technician
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS lead_source VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS responsible_technician_id UUID REFERENCES technicians(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_responsible_technician_id ON elevators (responsible_technician_id)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
