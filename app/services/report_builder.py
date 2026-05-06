@@ -476,15 +476,47 @@ def export_to_excel(result: dict, entity_label: str) -> io.BytesIO:
 # PDF export
 # ---------------------------------------------------------------------------
 
+def _rtl(text: str) -> str:
+    """Apply BiDi algorithm so Hebrew renders correctly in reportlab."""
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        reshaped = arabic_reshaper.reshape(str(text))
+        return get_display(reshaped)
+    except Exception:
+        return str(text)
+
+
+_PDF_FONT_REGISTERED = False
+
+def _register_pdf_font():
+    global _PDF_FONT_REGISTERED
+    if _PDF_FONT_REGISTERED:
+        return
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import os
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    if all(os.path.exists(p) for p in candidates):
+        pdfmetrics.registerFont(TTFont("DejaVu", candidates[0]))
+        pdfmetrics.registerFont(TTFont("DejaVu-Bold", candidates[1]))
+        _PDF_FONT_REGISTERED = True
+
+
 def export_to_pdf(result: dict, entity_label: str) -> io.BytesIO:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
     from reportlab.lib.units import cm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.lib.enums import TA_RIGHT, TA_CENTER
+    from reportlab.lib.enums import TA_RIGHT
+
+    _register_pdf_font()
+    font_name = "DejaVu" if _PDF_FONT_REGISTERED else "Helvetica"
+    font_bold = "DejaVu-Bold" if _PDF_FONT_REGISTERED else "Helvetica-Bold"
 
     headers = [m["label_he"] for m in result["columns_meta"]]
     keys = [m["key"] for m in result["columns_meta"]]
@@ -497,24 +529,35 @@ def export_to_pdf(result: dict, entity_label: str) -> io.BytesIO:
                             topMargin=1.5*cm, bottomMargin=1.5*cm)
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("title", parent=styles["Title"],
-                                 fontSize=14, alignment=TA_RIGHT)
+    title_style = ParagraphStyle(
+        "he_title", parent=styles["Normal"],
+        fontName=font_bold, fontSize=14, alignment=TA_RIGHT,
+    )
+    normal_style = ParagraphStyle(
+        "he_normal", parent=styles["Normal"],
+        fontName=font_name, fontSize=9, alignment=TA_RIGHT,
+    )
 
     from datetime import date
-    title_text = f"{entity_label} — {date.today().strftime('%d/%m/%Y')}"
+    title_text = _rtl(f"{entity_label} — {date.today().strftime('%d/%m/%Y')}")
+    total_text = _rtl(f"סה\"כ: {result['total']} רשומות")
 
     col_count = len(headers)
-    avail_w = (page[0] - 2*cm)
+    avail_w = page[0] - 2 * cm
     col_w = avail_w / max(col_count, 1)
 
-    table_data = [headers[::-1]]  # RTL: reverse headers
+    # RTL: reverse columns so rightmost column is first in visual order
+    rtl_headers = [_rtl(h) for h in headers[::-1]]
+    table_data = [rtl_headers]
     for row in rows:
-        table_data.append([str(row.get(k, "") or "") for k in keys][::-1])
+        table_data.append([_rtl(str(row.get(k, "") or "")) for k in keys[::-1]])
 
     tbl = Table(table_data, colWidths=[col_w] * col_count, repeatRows=1)
     tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a2744")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), font_bold),
+        ("FONTNAME", (0, 1), (-1, -1), font_name),
         ("FONTSIZE", (0, 0), (-1, 0), 9),
         ("FONTSIZE", (0, 1), (-1, -1), 8),
         ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
@@ -526,9 +569,9 @@ def export_to_pdf(result: dict, entity_label: str) -> io.BytesIO:
 
     story = [
         Paragraph(title_text, title_style),
-        Spacer(1, 0.3*cm),
-        Paragraph(f"סה\"כ: {result['total']} רשומות", styles["Normal"]),
-        Spacer(1, 0.4*cm),
+        Spacer(1, 0.3 * cm),
+        Paragraph(total_text, normal_style),
+        Spacer(1, 0.4 * cm),
         tbl,
     ]
     doc.build(story)
