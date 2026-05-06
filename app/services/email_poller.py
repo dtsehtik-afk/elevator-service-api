@@ -680,6 +680,8 @@ def poll_emails(db) -> int:
 
     created = 0
     try:
+        import socket as _socket
+        _socket.setdefaulttimeout(30)  # global socket timeout — prevents IMAP hangs
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(user, password)
 
