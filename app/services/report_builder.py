@@ -329,7 +329,8 @@ def run_report(
     model = schema["model"]
 
     # Ensure "id" is always fetched (needed for custom field lookup)
-    fetch_cols = list(dict.fromkeys(["id"] + [c for c in columns if c in col_defs]))
+    cols_input = columns or schema["default_columns"]
+    fetch_cols = list(dict.fromkeys(["id"] + [c for c in cols_input if c in col_defs]))
 
     # Base query with eager loads
     query = db.query(model)
