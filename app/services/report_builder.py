@@ -429,7 +429,7 @@ def run_report(
     ]
 
     # Remove "id" from output if not requested by user (but keep it for CF lookup)
-    if "id" not in columns:
+    if "id" not in cols_input:
         for row in rows:
             row.pop("id", None)
         columns_meta = [m for m in columns_meta if m["key"] != "id"]

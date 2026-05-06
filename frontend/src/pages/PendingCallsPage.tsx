@@ -101,7 +101,7 @@ async function dismissPending(logId: string) {
 
 async function searchElevators(q: string): Promise<ElevatorOption[]> {
   const { data } = await client.get('/elevators/', { params: { search: q, limit: 10 } })
-  return data
+  return Array.isArray(data) ? data : []
 }
 
 async function assignTechnician(callId: string, technicianId: string) {
