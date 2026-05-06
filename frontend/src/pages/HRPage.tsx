@@ -2,12 +2,13 @@ import { useState } from 'react'
 import {
   Stack, Title, Paper, Table, Badge, Button, Group, Text, Modal,
   TextInput, Select, NumberInput, Textarea, Grid, SimpleGrid,
-  Loader, Center, Tabs, Card, RingProgress,
+  Loader, Center, Card, PasswordInput,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { hrApi, type HRProfile } from '../api/hr'
+import client from '../api/client'
 
 const EMPLOYMENT_TYPES = [
   { value: 'FULL_TIME', label: 'משרה מלאה' },
@@ -22,11 +23,30 @@ const SALARY_TYPES = [
   { value: 'PROJECT', label: 'לפי פרויקט' },
 ]
 
-const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'מנהל מערכת', TECHNICIAN: 'טכנאי', DISPATCHER: 'מוקדן',
-  CEO: 'מנכ"ל', VP: 'סמנכ"ל', SERVICE_MANAGER: 'מנהל שירות',
-  ACCOUNTANT: 'רואה חשבון', SECRETARY: 'מזכירה',
-  SALES: 'מכירות', INVENTORY_MANAGER: 'מנהל מלאי',
+const ROLE_OPTIONS = [
+  { value: 'TECHNICIAN', label: 'טכנאי' },
+  { value: 'DISPATCHER', label: 'מוקדן' },
+  { value: 'SERVICE_MANAGER', label: 'מנהל שירות' },
+  { value: 'ADMIN', label: 'מנהל מערכת' },
+  { value: 'CEO', label: 'מנכ"ל' },
+  { value: 'VP', label: 'סמנכ"ל' },
+  { value: 'ACCOUNTANT', label: 'רואה חשבון' },
+  { value: 'SECRETARY', label: 'מזכירה' },
+  { value: 'SALES', label: 'מכירות' },
+  { value: 'SALES_MANAGER', label: 'מנהל מכירות' },
+  { value: 'INVENTORY_MANAGER', label: 'מנהל מלאי' },
+]
+
+const ROLE_LABELS: Record<string, string> = Object.fromEntries(ROLE_OPTIONS.map(r => [r.value, r.label]))
+
+interface NewEmpForm {
+  name: string; email: string; phone: string; password: string; role: string
+  employment_type: string; employment_start: string; base_salary: string; notes: string
+}
+
+const NEW_EMP_DEFAULTS: NewEmpForm = {
+  name: '', email: '', phone: '', password: '', role: 'TECHNICIAN',
+  employment_type: 'FULL_TIME', employment_start: '', base_salary: '', notes: '',
 }
 
 export default function HRPage() {
@@ -34,6 +54,8 @@ export default function HRPage() {
   const [selected, setSelected] = useState<HRProfile | null>(null)
   const [modalOpen, { open, close }] = useDisclosure(false)
   const [form, setForm] = useState<Partial<HRProfile>>({})
+  const [addOpen, { open: openAdd, close: closeAdd }] = useDisclosure(false)
+  const [newEmp, setNewEmp] = useState<NewEmpForm>(NEW_EMP_DEFAULTS)
 
   const { data: stats } = useQuery({ queryKey: ['hr-stats'], queryFn: hrApi.stats })
   const { data: employees, isLoading } = useQuery({ queryKey: ['hr-list'], queryFn: hrApi.list })
@@ -47,6 +69,36 @@ export default function HRPage() {
       notifications.show({ message: 'פרטי HR עודכנו', color: 'green' })
     },
     onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
+  })
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const { data: tech } = await client.post('/technicians', {
+        name: newEmp.name,
+        email: newEmp.email,
+        phone: newEmp.phone || undefined,
+        password: newEmp.password,
+        role: newEmp.role,
+      })
+      if (newEmp.employment_type || newEmp.employment_start || newEmp.base_salary) {
+        await hrApi.upsert(tech.id, {
+          employment_type: newEmp.employment_type || undefined,
+          employment_start: newEmp.employment_start || undefined,
+          base_salary: newEmp.base_salary ? Number(newEmp.base_salary) : undefined,
+          notes: newEmp.notes || undefined,
+        })
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hr-list'] })
+      qc.invalidateQueries({ queryKey: ['hr-stats'] })
+      closeAdd()
+      setNewEmp(NEW_EMP_DEFAULTS)
+      notifications.show({ message: '✅ עובד חדש נוסף בהצלחה', color: 'green' })
+    },
+    onError: (e: any) => notifications.show({
+      message: e?.response?.data?.detail ?? 'שגיאה בהוספת עובד', color: 'red',
+    }),
   })
 
   function openEdit(emp: HRProfile) {
@@ -69,7 +121,10 @@ export default function HRPage() {
 
   return (
     <Stack gap="md" dir="rtl">
-      <Title order={2}>👥 משאבי אנוש (HR)</Title>
+      <Group justify="space-between">
+        <Title order={2}>👥 משאבי אנוש (HR)</Title>
+        <Button onClick={openAdd}>+ הוסף עובד חדש</Button>
+      </Group>
 
       {/* Stats */}
       {stats && (
@@ -160,6 +215,57 @@ export default function HRPage() {
           </Table>
         )}
       </Paper>
+
+      {/* Add employee modal */}
+      <Modal opened={addOpen} onClose={closeAdd} title="➕ הוסף עובד חדש" size="md" centered dir="rtl">
+        <Stack gap="sm">
+          <Grid>
+            <Grid.Col span={6}>
+              <TextInput label="שם מלא *" value={newEmp.name}
+                onChange={e => setNewEmp(p => ({ ...p, name: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <Select label="תפקיד *" data={ROLE_OPTIONS} value={newEmp.role}
+                onChange={v => setNewEmp(p => ({ ...p, role: v ?? 'TECHNICIAN' }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="אימייל *" type="email" value={newEmp.email}
+                onChange={e => setNewEmp(p => ({ ...p, email: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="טלפון" value={newEmp.phone}
+                onChange={e => setNewEmp(p => ({ ...p, phone: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={12}>
+              <PasswordInput label="סיסמה ראשונית *" value={newEmp.password}
+                onChange={e => setNewEmp(p => ({ ...p, password: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <Select label="סוג העסקה" data={EMPLOYMENT_TYPES} value={newEmp.employment_type}
+                onChange={v => setNewEmp(p => ({ ...p, employment_type: v ?? 'FULL_TIME' }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="תאריך תחילת העסקה" type="date" value={newEmp.employment_start}
+                onChange={e => setNewEmp(p => ({ ...p, employment_start: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="שכר בסיס (₪)" value={newEmp.base_salary}
+                onChange={e => setNewEmp(p => ({ ...p, base_salary: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={12}>
+              <Textarea label="הערות" rows={2} value={newEmp.notes}
+                onChange={e => setNewEmp(p => ({ ...p, notes: e.target.value }))} />
+            </Grid.Col>
+          </Grid>
+          <Button
+            onClick={() => addMutation.mutate()}
+            loading={addMutation.isPending}
+            disabled={!newEmp.name || !newEmp.email || newEmp.password.length < 8}
+          >
+            הוסף עובד
+          </Button>
+        </Stack>
+      </Modal>
 
       {/* Edit modal */}
       <Modal
