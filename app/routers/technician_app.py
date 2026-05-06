@@ -510,7 +510,8 @@ def submit_report(tech_id: str, data: ReportSubmit, db: Session = Depends(get_db
     call.status = "RESOLVED" if data.resolved else "IN_PROGRESS"
     if data.resolved:
         call.resolved_at = datetime.now(timezone.utc)
-    call.resolution_notes = data.notes
+    from app.services.text_cleaner import clean_tech_text
+    call.resolution_notes = clean_tech_text(data.notes) if data.notes else data.notes
     call.quote_needed = data.quote_needed
 
     if data.resolved and assignment:

@@ -2,8 +2,9 @@
  * TechAppPage — Mobile technician app
  * Accessible at /tech — no admin shell, optimized for phone
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select } from '@mantine/core'
+import TranscribeButton from '../components/TranscribeButton'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -165,21 +166,6 @@ async function toggleDeficiency(reportId: string, idx: number, done: boolean, do
 }
 
 // ── Voice transcription hook ──────────────────────────────────────────────
-function useVoice(onResult: (t: string) => void) {
-  const [active, setActive] = useState(false)
-  const start = useCallback(() => {
-    const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
-    if (!SR) { notifications.show({ message: 'הדפדפן לא תומך בתמלול קולי', color: 'orange' }); return }
-    const r = new SR()
-    r.lang = 'he-IL'; r.continuous = false; r.interimResults = false
-    r.onstart = () => setActive(true)
-    r.onend = () => setActive(false)
-    r.onresult = (e: any) => onResult(e.results[0][0].transcript)
-    r.onerror = () => setActive(false)
-    r.start()
-  }, [onResult])
-  return { start, active }
-}
 
 // ── Login Screen ───────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
@@ -355,8 +341,11 @@ function ReportsTab() {
           <Text size="xs" c="dimmed">
             {new Date().toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}
           </Text>
+          <Group justify="space-between" mb={4}>
+            <Text size="sm" fw={500}>תאר את הטיפול שבוצע</Text>
+            <TranscribeButton onResult={t => setCompletionDesc(d => d ? d + ' ' + t : t)} />
+          </Group>
           <Textarea
-            label="תאר את הטיפול שבוצע"
             placeholder="פרט את הפעולות שבוצעו לתיקון הליקוי..."
             value={completionDesc}
             onChange={e => setCompletionDesc(e.target.value)}
@@ -483,7 +472,6 @@ function TechMain() {
   const [resolveOpen, setResolveOpen] = useState(false)
   const [resolveCallId, setResolveCallId] = useState<string | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
-  const voice = useVoice(t => setResolveNotes(n => n ? n + ' ' + t : t))
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
@@ -643,9 +631,7 @@ function TechMain() {
               <Stack gap="sm">
                 <Group justify="space-between">
                   <Text size="sm" c="dimmed">תאר את הפעולות שבוצעו (אופציונלי)</Text>
-                  <Button size="xs" variant={voice.active ? 'filled' : 'subtle'} color={voice.active ? 'red' : 'blue'} onClick={voice.start}>
-                    {voice.active ? '🎤 מאזין...' : '🎤 תמלול'}
-                  </Button>
+                  <TranscribeButton onResult={t => setResolveNotes(n => n ? n + ' ' + t : t)} />
                 </Group>
                 <Textarea
                   placeholder="לדוגמה: הוחלף חיישן הדלת, נבדקה תקינות המנוע..."

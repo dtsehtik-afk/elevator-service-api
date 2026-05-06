@@ -213,9 +213,11 @@ def update_checklist(
             done = bool(upd.get("done", False))
             entry = {**checklist[idx], "done": done}
             if done:
+                from app.services.text_cleaner import clean_tech_text
+                raw_desc = upd.get("done_description", "")
                 entry["done_by"] = current_user.name
                 entry["done_at"] = datetime.utcnow().isoformat()
-                entry["done_description"] = upd.get("done_description", "")
+                entry["done_description"] = clean_tech_text(raw_desc) if raw_desc else raw_desc
             else:
                 entry.pop("done_by", None)
                 entry.pop("done_at", None)
