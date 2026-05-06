@@ -299,7 +299,7 @@ export default function PendingCallsPage() {
 
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
-    if (q.length < 2) { setElevResults([]); return }
+    if (q.length < 1) { setElevResults([]); return }
     try {
       const results = await searchElevators(q)
       setElevResults(results)

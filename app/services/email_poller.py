@@ -867,6 +867,11 @@ def poll_emails(db) -> int:
                     **({"created_at": call_ts} if call_ts else {}),
                 )
                 db.add(call)
+                db.flush()
+                from sqlalchemy import func as _func
+                import random as _rnd
+                max_num = db.query(_func.max(ServiceCall.call_number)).scalar()
+                call.call_number = _rnd.randint(10000, 99999) if max_num is None else max_num + 1
                 db.add(ServiceCallEmailScan(message_id=message_id))
                 db.commit()
                 created += 1

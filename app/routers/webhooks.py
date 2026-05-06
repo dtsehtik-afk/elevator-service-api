@@ -753,6 +753,7 @@ def _ensure_resident_contact(db, elevator, parsed) -> None:
         name = (parsed.name or "").strip()
         contact = Contact(
             elevator_id=elevator.id,
+            name=name or phone,
             first_name=name or None,
             mobile=phone,
             role="RESIDENT",

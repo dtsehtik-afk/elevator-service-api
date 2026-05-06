@@ -146,6 +146,11 @@ def _run_nightly_maintenance():
                 status="OPEN",
             )
             db.add(sc)
+            db.flush()
+            from sqlalchemy import func as _func_sc
+            import random as _rnd_sc
+            max_n = db.query(_func_sc.max(ServiceCall.call_number)).scalar()
+            sc.call_number = _rnd_sc.randint(10000, 99999) if max_n is None else max_n + 1
             db.commit()
             opened += 1
 

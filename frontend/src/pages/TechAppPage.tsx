@@ -145,10 +145,16 @@ async function sendLocation(techId: string, lat: number, lng: number) {
 }
 
 async function fetchMaintenance(_techId: string): Promise<MaintenanceItem[]> {
-  const today = new Date().toISOString().split('T')[0]
-  const future = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-  const { data } = await client.get('/maintenance', { params: { from: today, to: future, status: 'SCHEDULED', limit: 50 } })
-  return data
+  const past = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
+  const future = new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]
+  // Fetch SCHEDULED (upcoming) and OVERDUE separately then merge
+  const [scheduled, overdue] = await Promise.all([
+    client.get('/maintenance', { params: { from: new Date().toISOString().split('T')[0], to: future, status: 'SCHEDULED', limit: 50 } }),
+    client.get('/maintenance', { params: { from: past, to: new Date().toISOString().split('T')[0], status: 'OVERDUE', limit: 50 } }),
+  ])
+  const scheduledData = Array.isArray(scheduled.data) ? scheduled.data : []
+  const overdueData = Array.isArray(overdue.data) ? overdue.data : []
+  return [...overdueData, ...scheduledData]
 }
 
 async function fetchMyReports(): Promise<InspReport[]> {
@@ -504,7 +510,7 @@ function TechMain() {
 
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
-    if (q.length < 2 || !techId) { setElevResults([]); return }
+    if (q.length < 1 || !techId) { setElevResults([]); return }
     try {
       const results = await searchElevators(techId, q)
       setElevResults(Array.isArray(results) ? results : [])
@@ -672,7 +678,7 @@ function TechMain() {
                     <Text size="sm" c="dimmed">{e.city} {e.building_name && `— ${e.building_name}`}</Text>
                   </Card>
                 ))}
-                {elevSearch.length >= 2 && elevResults.length === 0 && (
+                {elevSearch.length >= 1 && elevResults.length === 0 && (
                   <Text c="dimmed" ta="center" size="sm">לא נמצאו תוצאות</Text>
                 )}
               </Stack>
