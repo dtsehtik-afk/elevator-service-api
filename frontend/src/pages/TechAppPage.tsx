@@ -516,9 +516,13 @@ function TechMain() {
 
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
-    if (q.length < 2) { setElevResults([]); return }
-    const results = await searchElevators(techId!, q)
-    setElevResults(results)
+    if (q.length < 2 || !techId) { setElevResults([]); return }
+    try {
+      const results = await searchElevators(techId, q)
+      setElevResults(Array.isArray(results) ? results : [])
+    } catch {
+      setElevResults([])
+    }
   }
 
   const claimMutation = useMutation({
