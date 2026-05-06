@@ -470,3 +470,67 @@ def export_to_excel(result: dict, entity_label: str) -> io.BytesIO:
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+# ---------------------------------------------------------------------------
+# PDF export
+# ---------------------------------------------------------------------------
+
+def export_to_pdf(result: dict, entity_label: str) -> io.BytesIO:
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER
+
+    headers = [m["label_he"] for m in result["columns_meta"]]
+    keys = [m["key"] for m in result["columns_meta"]]
+    rows = result["rows"]
+
+    buf = io.BytesIO()
+    page = landscape(A4) if len(headers) > 6 else A4
+    doc = SimpleDocTemplate(buf, pagesize=page,
+                            rightMargin=1*cm, leftMargin=1*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("title", parent=styles["Title"],
+                                 fontSize=14, alignment=TA_RIGHT)
+
+    from datetime import date
+    title_text = f"{entity_label} — {date.today().strftime('%d/%m/%Y')}"
+
+    col_count = len(headers)
+    avail_w = (page[0] - 2*cm)
+    col_w = avail_w / max(col_count, 1)
+
+    table_data = [headers[::-1]]  # RTL: reverse headers
+    for row in rows:
+        table_data.append([str(row.get(k, "") or "") for k in keys][::-1])
+
+    tbl = Table(table_data, colWidths=[col_w] * col_count, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a2744")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6fa")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cccccc")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    story = [
+        Paragraph(title_text, title_style),
+        Spacer(1, 0.3*cm),
+        Paragraph(f"סה\"כ: {result['total']} רשומות", styles["Normal"]),
+        Spacer(1, 0.4*cm),
+        tbl,
+    ]
+    doc.build(story)
+    buf.seek(0)
+    return buf

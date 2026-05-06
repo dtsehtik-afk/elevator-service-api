@@ -116,25 +116,27 @@ export default function ReportsPage() {
     }
   }
 
-  async function handleExport() {
+  async function handleExport(format: 'xlsx' | 'pdf' = 'xlsx') {
     try {
-      const cols = selectedCols.length > 0 ? selectedCols.join(',') : undefined
-      const filtersJson = filters.length > 0 ? JSON.stringify(filters) : undefined
-      const url = reportsApi.exportUrl({
+      const params: Record<string, string> = {
         entity_type: entityType,
-        columns: cols,
-        filters: filtersJson,
-        sort_by: sortBy,
         sort_dir: sortDir,
-      })
-      const resp = await client.get(url.replace(client.defaults.baseURL || '', ''), {
+      }
+      if (selectedCols.length > 0) params.columns = selectedCols.join(',')
+      if (filters.length > 0) params.filters = JSON.stringify(filters)
+      if (sortBy) params.sort_by = sortBy
+      if (format === 'pdf') params.format = 'pdf'
+
+      const resp = await client.get('/reports/export', {
         responseType: 'blob',
-        params: { entity_type: entityType, columns: cols, filters: filtersJson, sort_by: sortBy, sort_dir: sortDir },
+        params,
       })
-      const blob = new Blob([resp.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const mime = format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const ext = format === 'pdf' ? 'pdf' : 'xlsx'
+      const blob = new Blob([resp.data], { type: mime })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = `${entityType}_report.xlsx`
+      a.download = `${entityType}_report.${ext}`
       a.click()
     } catch {
       notifications.show({ message: 'שגיאה בייצוא', color: 'red' })
@@ -191,8 +193,11 @@ export default function ReportsPage() {
           <Button variant="light" onClick={() => runReport()} loading={loading}>
             הרץ דוח
           </Button>
-          <Button variant="outline" onClick={handleExport}>
-            ייצא Excel
+          <Button variant="outline" color="green" onClick={() => handleExport('xlsx')}>
+            📊 Excel
+          </Button>
+          <Button variant="outline" color="red" onClick={() => handleExport('pdf')}>
+            📄 PDF
           </Button>
         </Group>
       </Group>
