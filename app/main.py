@@ -201,6 +201,8 @@ _API_ONLY_PREFIXES = (
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
     "/reports", "/custom-fields", "/roles", "/hr",
+    "/elevators", "/calls", "/technicians", "/assignments", "/maintenance",
+    "/inspections", "/management-companies", "/import", "/conversations",
 )
 
 
