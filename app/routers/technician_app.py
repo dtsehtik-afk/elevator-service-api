@@ -275,12 +275,23 @@ def tech_map_data(tech_id: str, db: Session = Depends(get_db)):
                  "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית"}
     _PRI_HE   = {"CRITICAL": "קריטי 🔴", "HIGH": "גבוה 🟠", "MEDIUM": "בינוני 🟡", "LOW": "נמוך 🟢"}
 
-    # ── 1. Open service calls ─────────────────────────────────────────────────
+    # ── 1. Service calls assigned to this technician (accepted or in-progress)
+    from app.models.assignment import Assignment
+    accepted_call_ids = {
+        a.service_call_id
+        for a in db.query(Assignment).filter(
+            Assignment.technician_id == tid,
+            Assignment.status.in_(["ACCEPTED", "IN_PROGRESS"]),
+        ).all()
+    }
     open_calls = (
         db.query(ServiceCall)
-        .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]))
+        .filter(
+            ServiceCall.id.in_(accepted_call_ids),
+            ServiceCall.status.in_(["ASSIGNED", "IN_PROGRESS"]),
+        )
         .all()
-    )
+    ) if accepted_call_ids else []
     for call in open_calls:
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
         if not elev or not elev.latitude or not elev.longitude:
