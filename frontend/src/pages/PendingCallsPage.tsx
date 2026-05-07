@@ -62,7 +62,7 @@ async function matchElevator(logId: string, elevatorId: string) {
 }
 
 async function searchElevators(q: string): Promise<ElevatorOption[]> {
-  const { data } = await client.get('/elevators/', { params: { search: q, limit: 10 } })
+  const { data } = await client.get('/elevators', { params: { search: q, limit: 10 } })
   return data
 }
 

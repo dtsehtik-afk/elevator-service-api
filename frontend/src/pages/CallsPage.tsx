@@ -203,7 +203,7 @@ export default function CallsPage() {
 
   const addElevMutation = useMutation({
     mutationFn: async ({ callId, form }: { callId: string; form: typeof addElevForm }) => {
-      const { data: elev } = await client.post('/elevators/', {
+      const { data: elev } = await client.post('/elevators', {
         address: form.address, city: form.city,
         contact_phone: form.contact_phone || null,
         building_name: form.building_name || null,
