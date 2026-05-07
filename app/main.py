@@ -268,9 +268,23 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 if _FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
 
+    _SPA_API_PREFIXES = (
+        "auth", "elevators", "calls", "technicians", "assignments",
+        "maintenance", "analytics", "schedule", "webhooks", "app",
+        "inspections", "management-companies", "buildings", "contacts",
+        "import", "conversations", "settings", "admin", "customers",
+        "quotes", "contracts", "invoices", "inventory", "leads", "erp",
+        "reports", "custom-fields", "roles", "hr", "openapi", "docs",
+        "redoc", "health", "uploads",
+    )
+
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_frontend(full_path: str):
         """Serve React app for all non-API routes."""
+        # Don't serve SPA for API paths — return 404 so the error is visible
+        top = full_path.split("/")[0]
+        if top in _SPA_API_PREFIXES:
+            raise HTTPException(status_code=404, detail="API route not found")
         file = _FRONTEND_DIST / full_path
         if file.exists() and file.is_file():
             return FileResponse(str(file))
