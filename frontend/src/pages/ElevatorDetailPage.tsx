@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Grid, TextInput,
   NumberInput, Select, Tabs, Table, Loader, Center, ActionIcon, Alert,
   Checkbox, Textarea, Anchor, Modal, Divider,
 } from '@mantine/core'
-import { useAuthStore } from '../stores/authStore'
 import { DateInput } from '@mantine/dates'
+import { useAuthStore } from '../stores/authStore'
 import { FileInput } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -14,6 +14,7 @@ import { getElevator, updateElevator, getElevatorCalls } from '../api/elevators'
 import client from '../api/client'
 import { Elevator } from '../types'
 import LocationPickerModal from '../components/LocationPickerModal'
+import { CitySelect, StreetInput } from '../components/GeoInputs'
 import RelatedPanel from '../components/RelatedPanel'
 import {
   ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS,
@@ -27,17 +28,35 @@ const SENSITIVE_FIELDS = new Set(['internal_number', 'labor_file_number'])
 interface Contact {
   id: string
   name: string
+  first_name?: string | null
+  last_name?: string | null
+  company?: string | null
   phone: string | null
+  mobile?: string | null
+  landline?: string | null
   email: string | null
   role: string
+  notes?: string | null
   auto_added: boolean
+  notification_prefs?: Record<string, boolean> | null
+  elevator_id?: string | null
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  VAAD: 'ועד בית', RESIDENT: 'דייר', MANAGEMENT: 'ניהול', DIALER: 'חייגן', OTHER: 'אחר',
+  VAAD: 'ועד בית', RESIDENT: 'דייר', MANAGEMENT: 'ניהול', DIALER: 'חייגן',
+  CONSULTANT: 'יועץ', OTHER: 'אחר',
 }
 const ROLE_COLORS: Record<string, string> = {
-  VAAD: 'blue', RESIDENT: 'teal', MANAGEMENT: 'violet', DIALER: 'gray', OTHER: 'gray',
+  VAAD: 'blue', RESIDENT: 'teal', MANAGEMENT: 'violet', DIALER: 'gray',
+  CONSULTANT: 'indigo', OTHER: 'gray',
+}
+
+const NOTIFICATION_PREFS_LABELS: Record<string, string> = {
+  maintenance_completion: 'השלמת תחזוקה',
+  inspection_report: 'דוח בודק',
+  quotes: 'הצעת מחיר',
+  invoices: 'חשבוניות',
+  service_completion: 'סגירת קריאה',
 }
 
 function Field({ label, value, children }: { label: string; value?: React.ReactNode; children?: React.ReactNode }) {
@@ -71,6 +90,208 @@ async function openReportFile(fileUrl: string) {
   const { data } = await client.get(fileUrl, { responseType: 'blob' })
   const blobUrl = URL.createObjectURL(data)
   window.open(blobUrl, '_blank')
+}
+
+const FAULT_TYPE_HE: Record<string, string> = {
+  STUCK: 'מעלית תקועה', DOOR: 'תקלת דלת', ELECTRICAL: 'תקלה חשמלית',
+  MECHANICAL: 'תקלה מכנית', SOFTWARE: 'תקלת תוכנה', RESCUE: 'חילוץ',
+  MAINTENANCE: 'טיפול מונע', OTHER: 'כללית',
+}
+
+const BORDER_COLOR: Record<string, string> = {
+  CRITICAL: '#e03131', HIGH: '#f76707', MEDIUM: '#f59f00',
+  LOW: '#2f9e44', MAINTENANCE: '#339af0',
+}
+
+function fmtDt(d: Date) {
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+}
+function fmtD(d: Date) {
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+}
+const HE_DAYS = ['א','ב','ג','ד','ה','ו','ש']
+
+function ElevatorLogbook({ elevatorId, elevator, calls }: { elevatorId: string; elevator: any; calls: any[] }) {
+  const today = new Date()
+  const yearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate())
+  const [fromDate, setFromDate] = useState<Date | null>(yearAgo)
+  const [toDate, setToDate] = useState<Date | null>(today)
+  const [types, setTypes] = useState<string[]>(['regular', 'special', 'maintenance', 'deficiency'])
+
+  const { data: inspections = [] } = useQuery({
+    queryKey: ['inspections-logbook', elevatorId],
+    queryFn: async () => {
+      const { data } = await client.get(`/inspections?elevator_id=${elevatorId}&limit=200`)
+      return data
+    },
+    enabled: types.includes('deficiency'),
+  })
+
+  const filtered = useMemo(() => {
+    const from = fromDate ? fromDate.getTime() : 0
+    const to = toDate ? (toDate.getTime() + 86400000) : Infinity
+
+    const entries: any[] = []
+
+    calls.forEach(call => {
+      const ts = call.created_at ? new Date(call.created_at).getTime() : 0
+      if (ts < from || ts > to) return
+      const isMaint = call.fault_type === 'MAINTENANCE'
+      const isSpecial = call.fault_type === 'RESCUE' || call.priority === 'CRITICAL'
+      if (isMaint && !types.includes('maintenance')) return
+      if (isSpecial && !types.includes('special')) return
+      if (!isMaint && !isSpecial && !types.includes('regular')) return
+      entries.push({ _type: 'call', _ts: ts, ...call })
+    })
+
+    if (types.includes('deficiency')) {
+      inspections.forEach((rep: any) => {
+        (rep.deficiencies || []).forEach((d: any, i: number) => {
+          if (!d.done) return
+          const ts = d.done_at ? new Date(d.done_at).getTime() : (rep.inspection_date ? new Date(rep.inspection_date).getTime() : 0)
+          if (ts < from || ts > to) return
+          entries.push({ _type: 'deficiency', _ts: ts, _rep: rep, _def: d, _idx: i })
+        })
+      })
+    }
+
+    entries.sort((a, b) => a._ts - b._ts)
+    return entries
+  }, [calls, inspections, fromDate, toDate, types])
+
+  const periodStr = [fromDate && fmtD(fromDate), toDate && fmtD(toDate)].filter(Boolean).join(' — ')
+
+  return (
+    <Stack gap="sm" dir="rtl">
+      {/* Controls */}
+      <Paper withBorder p="sm" radius="md">
+        <Group gap="md" wrap="wrap" align="flex-end">
+          <DateInput label="מתאריך" value={fromDate} onChange={setFromDate} clearable size="sm" w={150} />
+          <DateInput label="עד תאריך" value={toDate} onChange={setToDate} clearable size="sm" w={150} />
+          <Stack gap={4}>
+            <Text size="xs" c="dimmed" fw={500}>סוגי רשומות</Text>
+            <Group gap="sm">
+              <Checkbox size="sm" label="קריאות שירות רגילות" checked={types.includes('regular')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'regular'] : prev.filter(t=>t!=='regular'))} />
+              <Checkbox size="sm" label="קריאות מיוחדות (חילוץ/קריטי)" checked={types.includes('special')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'special'] : prev.filter(t=>t!=='special'))} />
+              <Checkbox size="sm" label="טיפול מונע" checked={types.includes('maintenance')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'maintenance'] : prev.filter(t=>t!=='maintenance'))} />
+              <Checkbox size="sm" label="סילוק ליקויים" checked={types.includes('deficiency')}
+                onChange={e => setTypes(prev => e.target.checked ? [...prev,'deficiency'] : prev.filter(t=>t!=='deficiency'))} />
+            </Group>
+          </Stack>
+          <Button size="sm" variant="light" onClick={() => typeof window !== 'undefined' && window.print()}>🖨️ הדפסה</Button>
+        </Group>
+      </Paper>
+
+      {/* Logbook content */}
+      <Paper withBorder radius="md" p="lg" style={{ fontFamily: 'Arial, sans-serif' }}>
+        <Stack gap={4} mb="lg" ta="center">
+          <Text fw={700} size="xl">ספר מעלית</Text>
+          {periodStr && <Text fw={600} size="sm">נכון לתקופה: {periodStr}</Text>}
+          <Text size="sm" c="dimmed">
+            {elevator?.building_name ? `${elevator.building_name} — ` : ''}{elevator?.address}, {elevator?.city}
+            {elevator?.internal_number ? ` | מס"ד: ${elevator.internal_number}` : ''}
+            {elevator?.labor_file_number ? ` | מס' משרד עבודה: ${elevator.labor_file_number}` : ''}
+          </Text>
+        </Stack>
+
+        {filtered.length === 0 && (
+          <Center h={100}><Text c="dimmed">אין רשומות בתקופה ובסינון שנבחרו</Text></Center>
+        )}
+
+        {filtered.map((entry: any, idx: number) => {
+          if (entry._type === 'call') {
+            const call = entry
+            const openedAt = call.created_at ? new Date(call.created_at) : null
+            const resolvedAt = call.resolved_at ? new Date(call.resolved_at) : null
+            const isMaint = call.fault_type === 'MAINTENANCE'
+            const isSpecial = call.fault_type === 'RESCUE' || call.priority === 'CRITICAL'
+            const borderColor = isMaint ? '#339af0' : isSpecial ? '#e03131' : (BORDER_COLOR[call.priority] || '#228be6')
+            const assignments = call.assignments || []
+            const accepted = assignments.find((a: any) => ['CONFIRMED','ACCEPTED'].includes(a.status))
+            const techName = accepted?.technician_name || call.technician_name || null
+
+            return (
+              <Paper key={`call-${call.id}`} withBorder radius="sm" p="md" mb="sm"
+                style={{ borderRight: `4px solid ${borderColor}` }}>
+                {isMaint && (
+                  <Text size="xs" fw={700} c="blue" td="underline" mb={4}>
+                    טיפול מונע ע"פ הנחיות היצרן/חברה
+                  </Text>
+                )}
+                {isSpecial && (
+                  <Text size="xs" fw={700} c="red" td="underline" mb={4}>
+                    קריאת שירות מיוחדת — {call.fault_type === 'RESCUE' ? 'חילוץ' : 'עדיפות קריטית'}
+                  </Text>
+                )}
+                <Group gap="sm" mb={4} wrap="wrap">
+                  {call.call_number && <Text size="xs" c="dimmed">מספר קריאה {call.call_number}</Text>}
+                  {openedAt && <Text size="xs" c="dimmed">תאריך פתיחה {fmtDt(openedAt)}, יום {HE_DAYS[openedAt.getDay()]}</Text>}
+                  {call.reported_by && <Text size="xs" c="dimmed">מוסר {call.reported_by}</Text>}
+                  {techName && <Text size="xs" c="dimmed">טכנאי {techName}</Text>}
+                  <Badge color={CALL_STATUS_COLORS[call.status] || 'gray'} size="xs" variant="light">
+                    {CALL_STATUS_LABELS[call.status] || call.status}
+                  </Badge>
+                </Group>
+                {resolvedAt && (
+                  <Text size="xs" c="dimmed" mb={4}>
+                    תאריך סגירה {fmtDt(resolvedAt)}, יום {HE_DAYS[resolvedAt.getDay()]}
+                  </Text>
+                )}
+                <Stack gap={2} mt={4}>
+                  <Text size="sm" fw={600}>תאור התקלה:</Text>
+                  <Text size="sm">{call.description || FAULT_TYPE_HE[call.fault_type] || call.fault_type}</Text>
+                </Stack>
+                {call.resolution_notes && (
+                  <Stack gap={2} mt={6}>
+                    <Text size="sm" fw={600}>תאור התיקון:</Text>
+                    <Text size="sm">{call.resolution_notes}</Text>
+                  </Stack>
+                )}
+                {techName && (
+                  <Text size="xs" c="dimmed" mt={6} ta="left">( {techName} )</Text>
+                )}
+              </Paper>
+            )
+          }
+
+          if (entry._type === 'deficiency') {
+            const { _rep: rep, _def: def } = entry
+            const doneAt = def.done_at ? new Date(def.done_at) : null
+            return (
+              <Paper key={`def-${rep.id}-${entry._idx}`} withBorder radius="sm" p="md" mb="sm"
+                style={{ borderRight: '4px solid #9775fa' }}>
+                <Text size="xs" fw={700} c="violet" td="underline" mb={4}>
+                  סילוק ליקוי — דוח בודק {rep.inspection_date ? fmtD(new Date(rep.inspection_date)) : ''}
+                </Text>
+                <Stack gap={2}>
+                  <Text size="sm" fw={600}>הליקוי:</Text>
+                  <Text size="sm">{def.description}</Text>
+                </Stack>
+                {def.done_description && (
+                  <Stack gap={2} mt={6}>
+                    <Text size="sm" fw={600}>תאור הטיפול:</Text>
+                    <Text size="sm">{def.done_description}</Text>
+                  </Stack>
+                )}
+                {doneAt && (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    בוצע ב-{fmtDt(doneAt)}, יום {HE_DAYS[doneAt.getDay()]}
+                  </Text>
+                )}
+                {def.done_by && (
+                  <Text size="xs" c="dimmed" ta="left">( {def.done_by} )</Text>
+                )}
+              </Paper>
+            )
+          }
+          return null
+        })}
+      </Paper>
+    </Stack>
+  )
 }
 
 function InspectionHistory({ elevatorId }: { elevatorId: string }) {
@@ -139,7 +360,11 @@ export default function ElevatorDetailPage() {
   const [form, setForm] = useState<Partial<Elevator>>({})
   const [sensitiveField, setSensitiveField] = useState<string | null>(null)
   const [addContactOpen, setAddContactOpen] = useState(false)
-  const [newContact, setNewContact] = useState({ name: '', phone: '', email: '', role: 'VAAD' })
+  const [newContact, setNewContact] = useState({
+    name: '', first_name: '', last_name: '', company: '',
+    phone: '', mobile: '', landline: '', email: '', role: 'VAAD', notes: '',
+    notification_prefs: {} as Record<string, boolean>,
+  })
   const [residentsExpanded, setResidentsExpanded] = useState(false)
   const [assignBuildingOpen, setAssignBuildingOpen] = useState(false)
   const [assignCompanyOpen, setAssignCompanyOpen] = useState(false)
@@ -153,7 +378,11 @@ export default function ElevatorDetailPage() {
   const dateSet = (key: string, d: Date | null) => set(key, toISODate(d))
 
   function openAddContact(defaultRole: string) {
-    setNewContact({ name: '', phone: '', email: '', role: defaultRole })
+    setNewContact({
+      name: '', first_name: '', last_name: '', company: '',
+      phone: '', mobile: '', landline: '', email: '', role: defaultRole, notes: '',
+      notification_prefs: {},
+    })
     setAddContactOpen(true)
   }
 
@@ -177,7 +406,7 @@ export default function ElevatorDetailPage() {
     enabled: !!id,
   })
 
-  const { data: contacts = [] } = useQuery<Contact[]>({
+  const { data: buildingContacts = [] } = useQuery<Contact[]>({
     queryKey: ['elevator-contacts', elevator?.building_id],
     queryFn: async () => {
       if (!elevator?.building_id) return []
@@ -185,6 +414,12 @@ export default function ElevatorDetailPage() {
     },
     enabled: !!elevator?.building_id,
   })
+  const { data: elevatorContacts = [] } = useQuery<Contact[]>({
+    queryKey: ['elevator-direct-contacts', id],
+    queryFn: async () => (await client.get(`/contacts?elevator_id=${id}`)).data,
+    enabled: !!id,
+  })
+  const contacts = [...elevatorContacts, ...buildingContacts.filter(c => !elevatorContacts.find(ec => ec.id === c.id))]
 
   const { data: buildingDetail } = useQuery({
     queryKey: ['building-detail', elevator?.building_id],
@@ -233,6 +468,12 @@ export default function ElevatorDetailPage() {
     enabled: addToGroupOpen,
   })
 
+  const { data: techniciansList = [] } = useQuery<any[]>({
+    queryKey: ['technicians-list'],
+    queryFn: async () => (await client.get('/technicians?limit=100')).data,
+    staleTime: 5 * 60 * 1000,
+  })
+
   const updateMutation = useMutation({
     mutationFn: (payload: any) => updateElevator(id!, payload),
     onSuccess: () => {
@@ -258,6 +499,9 @@ export default function ElevatorDetailPage() {
 
   const addContactMutation = useMutation({
     mutationFn: async (contactData: any) => {
+      if (contactData.role === 'CONSULTANT') {
+        return client.post('/contacts', { ...contactData, elevator_id: id })
+      }
       let buildingId = elevator!.building_id
       if (!buildingId) {
         const bRes = await client.post('/buildings', { address: elevator!.address, city: elevator!.city })
@@ -269,8 +513,13 @@ export default function ElevatorDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['elevator', id] })
       qc.invalidateQueries({ queryKey: ['elevator-contacts'] })
+      qc.invalidateQueries({ queryKey: ['elevator-direct-contacts', id] })
       setAddContactOpen(false)
-      setNewContact({ name: '', phone: '', email: '', role: 'VAAD' })
+      setNewContact({
+        name: '', first_name: '', last_name: '', company: '',
+        phone: '', mobile: '', landline: '', email: '', role: 'VAAD', notes: '',
+        notification_prefs: {},
+      })
       notifications.show({ message: 'איש קשר נוסף', color: 'green' })
     },
   })
@@ -393,26 +642,63 @@ export default function ElevatorDetailPage() {
       </Modal>
 
       {/* Add contact modal */}
-      <Modal opened={addContactOpen} onClose={() => setAddContactOpen(false)} title="הוסף איש קשר" dir="rtl">
+      <Modal opened={addContactOpen} onClose={() => setAddContactOpen(false)} title="הוסף איש קשר" dir="rtl" size="lg">
         <Stack gap="sm">
-          <TextInput label="שם" required value={newContact.name} onChange={e => setNewContact(s => ({ ...s, name: e.target.value }))} />
-          <TextInput label="טלפון" value={newContact.phone} onChange={e => setNewContact(s => ({ ...s, phone: e.target.value }))} />
-          <TextInput label="מייל" value={newContact.email} onChange={e => setNewContact(s => ({ ...s, email: e.target.value }))} />
           <Select label="תפקיד" value={newContact.role}
             data={Object.entries(ROLE_LABELS).map(([v, l]) => ({ value: v, label: l }))}
             onChange={v => setNewContact(s => ({ ...s, role: v ?? 'OTHER' }))}
           />
+          <Grid>
+            <Grid.Col span={6}>
+              <TextInput label="שם פרטי" value={newContact.first_name}
+                onChange={e => setNewContact(s => ({ ...s, first_name: e.target.value, name: `${e.target.value} ${s.last_name}`.trim() || e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="שם משפחה" value={newContact.last_name}
+                onChange={e => setNewContact(s => ({ ...s, last_name: e.target.value, name: `${s.first_name} ${e.target.value}`.trim() || s.first_name }))} />
+            </Grid.Col>
+          </Grid>
+          <TextInput label="חברה / ארגון" value={newContact.company}
+            onChange={e => setNewContact(s => ({ ...s, company: e.target.value }))} />
+          <Grid>
+            <Grid.Col span={6}>
+              <TextInput label="טלפון נייד" value={newContact.mobile}
+                onChange={e => setNewContact(s => ({ ...s, mobile: e.target.value }))} />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput label="טלפון קווי" value={newContact.landline}
+                onChange={e => setNewContact(s => ({ ...s, landline: e.target.value }))} />
+            </Grid.Col>
+          </Grid>
+          <TextInput label="דואל" value={newContact.email}
+            onChange={e => setNewContact(s => ({ ...s, email: e.target.value }))} />
+          <Text size="sm" fw={500}>עדכונים אוטומטיים</Text>
+          {Object.entries(NOTIFICATION_PREFS_LABELS).map(([key, label]) => (
+            <Checkbox key={key} label={label}
+              checked={!!newContact.notification_prefs[key]}
+              onChange={e => setNewContact(s => ({ ...s, notification_prefs: { ...s.notification_prefs, [key]: e.target.checked } }))}
+            />
+          ))}
+          <Textarea label="הערות" value={newContact.notes} rows={2}
+            onChange={e => setNewContact(s => ({ ...s, notes: e.target.value }))} />
           <Button
             loading={addContactMutation.isPending}
-            disabled={!newContact.name.trim()}
+            disabled={!newContact.name.trim() && !newContact.first_name.trim()}
             onClick={() => addContactMutation.mutate({
-              ...newContact,
-              building_id: elevator.building_id,
-              phone: newContact.phone || null,
+              name: newContact.name || `${newContact.first_name} ${newContact.last_name}`.trim() || newContact.first_name,
+              first_name: newContact.first_name || null,
+              last_name: newContact.last_name || null,
+              company: newContact.company || null,
+              phone: newContact.mobile || newContact.landline || null,
+              mobile: newContact.mobile || null,
+              landline: newContact.landline || null,
               email: newContact.email || null,
+              role: newContact.role,
+              notes: newContact.notes || null,
+              notification_prefs: Object.keys(newContact.notification_prefs).length > 0 ? newContact.notification_prefs : null,
             })}
           >
-            הוסף
+            הוסף איש קשר
           </Button>
         </Stack>
       </Modal>
@@ -585,6 +871,7 @@ export default function ElevatorDetailPage() {
           <Tabs.Tab value="contract">חוזה</Tabs.Tab>
           <Tabs.Tab value="inspection">דוחות בודק</Tabs.Tab>
           <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>
+          <Tabs.Tab value="logbook">📋 ספר מעלית</Tabs.Tab>
           {elevator.building_id && (
             <Tabs.Tab value="group">קבוצה {siblings.length > 0 && `(${siblings.length + 1})`}</Tabs.Tab>
           )}
@@ -617,14 +904,14 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
-                  <TextInput label="כתובת" value={form.address ?? ''} onChange={e => set('address', e.target.value)} />
+                  <StreetInput label="כתובת (רחוב + מספר)" value={form.address ?? ''} onChange={v => set('address', v)} city={form.city ?? elevator.city} />
                 ) : (
                   <Field label="כתובת" value={elevator.address} />
                 )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
-                  <TextInput label="עיר" value={form.city ?? ''} onChange={e => set('city', e.target.value)} />
+                  <CitySelect label="עיר" required value={form.city ?? null} onChange={v => set('city', v)} />
                 ) : (
                   <Field label="עיר" value={elevator.city} />
                 )}
@@ -711,6 +998,33 @@ export default function ElevatorDetailPage() {
                 ) : null}
               </Grid.Col>
 
+              {/* Acquisition */}
+              <Grid.Col span={12}>
+                <Divider label="רכישה ואחריות" labelPosition="right" mt="sm" mb="xs" />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="מאיפה הגיעה המעלית" placeholder="פה מוקד / שיווק / הפניה..." value={form.lead_source ?? ''} onChange={e => set('lead_source', e.target.value || null)} />
+                ) : (
+                  <Field label="מאיפה הגיעה המעלית" value={elevator.lead_source} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <Select
+                    label="טכנאי אחראי"
+                    placeholder="בחר טכנאי..."
+                    value={form.responsible_technician_id ?? null}
+                    onChange={v => set('responsible_technician_id', v)}
+                    data={techniciansList.map((t: any) => ({ value: t.id, label: t.name }))}
+                    clearable
+                    searchable
+                  />
+                ) : (
+                  <Field label="טכנאי אחראי" value={elevator.responsible_technician_name} />
+                )}
+              </Grid.Col>
+
               {/* Location */}
               <Grid.Col span={12}>
                 <Divider label="מיקום גיאוגרפי" labelPosition="right" mt="sm" mb="xs" />
@@ -778,8 +1092,8 @@ export default function ElevatorDetailPage() {
                     value={form.service_type ?? null}
                     onChange={v => {
                       set('service_type', v)
-                      if (v === 'COMPREHENSIVE') { set('service_contract', 'ANNUAL_12'); set('maintenance_interval_days', 30) }
-                      else if (v === 'REGULAR') { set('service_contract', 'ANNUAL_6'); set('maintenance_interval_days', 60) }
+                      if (v === 'COMPREHENSIVE') set('service_contract', 'ANNUAL_12')
+                      else if (v === 'REGULAR') set('service_contract', 'ANNUAL_6')
                     }}
                     clearable
                   />
@@ -795,15 +1109,46 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
-                  <NumberInput label="אינטרוול טיפול (ימים)" min={1} value={form.maintenance_interval_days ?? ''} onChange={v => set('maintenance_interval_days', v || null)} />
+                  <Select
+                    label="תדירות טיפול מונע"
+                    placeholder="בחר תדירות..."
+                    value={
+                      form.maintenance_interval_days == null ? null
+                      : form.maintenance_interval_days <= 31  ? '12'
+                      : form.maintenance_interval_days <= 65  ? '6'
+                      : form.maintenance_interval_days <= 100 ? '4'
+                      : '2'
+                    }
+                    onChange={v => {
+                      const map: Record<string, number> = { '12': 30, '6': 61, '4': 91, '2': 182 }
+                      set('maintenance_interval_days', v ? map[v] : null)
+                    }}
+                    data={[
+                      { value: '12', label: '12 פעמים בשנה (כל ~30 יום)' },
+                      { value: '6',  label: '6 פעמים בשנה (כל ~60 יום)' },
+                      { value: '4',  label: '4 פעמים בשנה (כל ~90 יום)' },
+                      { value: '2',  label: '2 פעמים בשנה (כל ~6 חודשים)' },
+                    ]}
+                    clearable
+                  />
                 ) : (
-                  <Field label="אינטרוול טיפול" value={elevator.maintenance_interval_days ? `${elevator.maintenance_interval_days} יום` : null} />
+                  <Field label="תדירות טיפול מונע" value={
+                    elevator.maintenance_interval_days == null ? null
+                    : elevator.maintenance_interval_days <= 31  ? '12 פעמים בשנה'
+                    : elevator.maintenance_interval_days <= 65  ? '6 פעמים בשנה'
+                    : elevator.maintenance_interval_days <= 100 ? '4 פעמים בשנה'
+                    : '2 פעמים בשנה'
+                  } />
                 )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="טיפול אחרון">
-                  <Text fw={500}>{formatDate(elevator.last_service_date) ?? '—'}</Text>
-                </Field>
+                {editing ? (
+                  <DateInput label="טיפול אחרון" value={parseDate(form.last_service_date)} onChange={d => dateSet('last_service_date', d)} clearable />
+                ) : (
+                  <Field label="טיפול אחרון">
+                    <Text fw={500}>{formatDate(elevator.last_service_date) ?? '—'}</Text>
+                  </Field>
+                )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 <Field label="טיפול הבא">
@@ -845,6 +1190,46 @@ export default function ElevatorDetailPage() {
         {/* ── CONTACTS ── */}
         <Tabs.Panel value="contacts" pt="md">
           <Stack gap="md">
+
+            {/* יועץ */}
+            <Paper withBorder p="md" radius="md" style={{ borderColor: '#4c6ef5' }}>
+              <Group justify="space-between" mb="sm">
+                <Group gap="xs">
+                  <Text fw={700}>👔 יועצים</Text>
+                  <Badge color="indigo" size="xs" variant="light">{contacts.filter(c => c.role === 'CONSULTANT').length}</Badge>
+                </Group>
+                <Button size="xs" variant="light" color="indigo" onClick={() => openAddContact('CONSULTANT')}>+ הוסף יועץ</Button>
+              </Group>
+              {contacts.filter(c => c.role === 'CONSULTANT').length === 0 ? (
+                <Text size="sm" c="dimmed">אין יועצים רשומים למעלית זו</Text>
+              ) : (
+                <Stack gap="xs">
+                  {contacts.filter(c => c.role === 'CONSULTANT').map(c => (
+                    <Group key={c.id} justify="space-between" p="xs" style={{ borderRadius: 8, background: 'var(--mantine-color-indigo-0)' }}>
+                      <Stack gap={2}>
+                        <Group gap="xs">
+                          <Text size="sm" fw={600}>{c.name}</Text>
+                          {c.company && <Text size="xs" c="dimmed">· {c.company}</Text>}
+                        </Group>
+                        <Group gap="sm">
+                          {c.mobile && <Anchor href={`tel:${c.mobile}`} size="xs">📱 {c.mobile}</Anchor>}
+                          {c.landline && <Anchor href={`tel:${c.landline}`} size="xs">☎️ {c.landline}</Anchor>}
+                          {c.email && <Anchor href={`mailto:${c.email}`} size="xs">✉️ {c.email}</Anchor>}
+                        </Group>
+                        {c.notification_prefs && Object.entries(c.notification_prefs).filter(([, v]) => v).length > 0 && (
+                          <Group gap={4} mt={2}>
+                            {Object.entries(c.notification_prefs).filter(([, v]) => v).map(([k]) => (
+                              <Badge key={k} size="xs" color="indigo" variant="dot">{NOTIFICATION_PREFS_LABELS[k] ?? k}</Badge>
+                            ))}
+                          </Group>
+                        )}
+                      </Stack>
+                      <ActionIcon size="xs" color="red" variant="subtle" onClick={() => deleteContactMutation.mutate(c.id)}>✕</ActionIcon>
+                    </Group>
+                  ))}
+                </Stack>
+              )}
+            </Paper>
 
             {/* ועד הבית */}
             <Paper withBorder p="md" radius="md">
@@ -1006,7 +1391,11 @@ export default function ElevatorDetailPage() {
           <Paper withBorder p="lg" radius="md">
             <Grid>
               <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="ביקורת אחרונה" value={formatDate(elevator.last_inspection_date)} />
+                {editing ? (
+                  <DateInput label="ביקורת אחרונה" value={parseDate(form.last_inspection_date)} onChange={d => dateSet('last_inspection_date', d)} clearable />
+                ) : (
+                  <Field label="ביקורת אחרונה" value={formatDate(elevator.last_inspection_date)} />
+                )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
@@ -1089,7 +1478,7 @@ export default function ElevatorDetailPage() {
             {(calls as any[]).length === 0 ? (
               <Center h={200}><Text c="dimmed">אין קריאות שירות למעלית זו</Text></Center>
             ) : (
-              <Table>
+              <Table highlightOnHover>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>עדיפות</Table.Th>
@@ -1097,16 +1486,20 @@ export default function ElevatorDetailPage() {
                     <Table.Th>סוג תקלה</Table.Th>
                     <Table.Th>סטטוס</Table.Th>
                     <Table.Th>תאריך</Table.Th>
+                    <Table.Th></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {(calls as any[]).map((call: any) => (
-                    <Table.Tr key={call.id}>
+                    <Table.Tr key={call.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/calls')}>
                       <Table.Td><Badge color={PRIORITY_COLORS[call.priority]} size="sm">{PRIORITY_LABELS[call.priority]}</Badge></Table.Td>
                       <Table.Td><Text size="sm" lineClamp={2}>{call.description}</Text></Table.Td>
                       <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[call.fault_type]}</Text></Table.Td>
                       <Table.Td><Badge color={CALL_STATUS_COLORS[call.status]} variant="light" size="sm">{CALL_STATUS_LABELS[call.status]}</Badge></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{formatDateTime(call.created_at)}</Text></Table.Td>
+                      <Table.Td onClick={e => e.stopPropagation()}>
+                        <ActionIcon size="xs" variant="subtle" color="blue" component="a" href="/calls">↗</ActionIcon>
+                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -1247,6 +1640,11 @@ export default function ElevatorDetailPage() {
               הסר מחברת הניהול
             </Button>
           </Stack>
+        </Tabs.Panel>
+
+        {/* ── LOGBOOK (ספר מעלית) ── */}
+        <Tabs.Panel value="logbook" pt="md">
+          <ElevatorLogbook elevatorId={id!} elevator={elevator} calls={calls as any[]} />
         </Tabs.Panel>
       </Tabs>
 

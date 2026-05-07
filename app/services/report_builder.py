@@ -66,7 +66,7 @@ def _build_schemas():
                 "city":           {"label_he": "עיר",     "type": "text",   "filter": Elevator.city,          "get": lambda o: _safe(o, "elevator", "city")},
                 "elevator_model": {"label_he": "דגם מעלית","type": "text",  "filter": Elevator.model,         "get": lambda o: _safe(o, "elevator", "model")},
                 "is_recurring":   {"label_he": "חוזרת",   "type": "bool",   "filter": ServiceCall.is_recurring,"get": lambda o: _fmt(o.is_recurring)},
-                "resolution_notes":{"label":"הערות סגירה","type":"text", "filter": ServiceCall.resolution_notes,"get": lambda o: o.resolution_notes},
+                "resolution_notes":{"label_he":"הערות סגירה","type":"text", "filter": ServiceCall.resolution_notes,"get": lambda o: o.resolution_notes},
             },
             "filter_joins": {Elevator: (ServiceCall.elevator_id == Elevator.id)},
         },
@@ -93,8 +93,8 @@ def _build_schemas():
                                        "get": lambda o: _safe(o, "management_company", "name")},
                 "customer":        {"label_he": "לקוח",        "type": "text",   "filter": None,
                                     "get": lambda o: _safe(o, "customer", "name")},
-                "last_service_date":{"label":"שירות אחרון", "type": "date",   "filter": Elevator.last_service_date,"get": lambda o: _fmt(o.last_service_date)},
-                "next_service_date":{"label":"שירות הבא",   "type": "date",   "filter": Elevator.next_service_date,"get": lambda o: _fmt(o.next_service_date)},
+                "last_service_date":{"label_he":"שירות אחרון", "type": "date",   "filter": Elevator.last_service_date,"get": lambda o: _fmt(o.last_service_date)},
+                "next_service_date":{"label_he":"שירות הבא",   "type": "date",   "filter": Elevator.next_service_date,"get": lambda o: _fmt(o.next_service_date)},
             },
             "filter_joins": {},
         },
@@ -136,8 +136,7 @@ def _build_schemas():
                 "issue_date":    {"label_he": "תאריך הנפקה","type": "date",  "filter": Invoice.issue_date,   "get": lambda o: _fmt(o.issue_date)},
                 "due_date":      {"label_he": "תאריך פירעון","type":"date",  "filter": Invoice.due_date,     "get": lambda o: _fmt(o.due_date)},
                 "paid_at":       {"label_he": "שולם בתאריך","type":"datetime","filter": Invoice.paid_at,     "get": lambda o: _fmt(o.paid_at)},
-                "invoice_type":  {"label_he": "סוג",       "type": "select", "filter": Invoice.invoice_type, "get": lambda o: o.invoice_type,
-                                  "options": ["TAX","RECEIPT","PROFORMA","CREDIT"]},
+                "notes":         {"label_he": "הערות",     "type": "text",   "filter": Invoice.notes,        "get": lambda o: o.notes or ""},
             },
             "filter_joins": {},
         },
@@ -145,7 +144,7 @@ def _build_schemas():
             "label_he": "מלאי",
             "model": Part,
             "eager": [],
-            "default_columns": ["name", "sku", "category", "quantity", "min_quantity", "unit_cost"],
+            "default_columns": ["name", "sku", "category", "quantity", "min_quantity", "cost_price"],
             "columns": {
                 "id":           {"label_he": "מזהה",     "type": "text",   "filter": Part.id,           "get": lambda o: str(o.id)},
                 "sku":          {"label_he": "מק\"ט",    "type": "text",   "filter": Part.sku,          "get": lambda o: o.sku},
@@ -153,9 +152,8 @@ def _build_schemas():
                 "category":     {"label_he": "קטגוריה",  "type": "text",   "filter": Part.category,     "get": lambda o: o.category},
                 "quantity":     {"label_he": "כמות",     "type": "number", "filter": Part.quantity,     "get": lambda o: o.quantity},
                 "min_quantity": {"label_he": "מינימום",  "type": "number", "filter": Part.min_quantity, "get": lambda o: o.min_quantity},
-                "unit_cost":    {"label_he": "עלות יחידה","type": "number","filter": Part.unit_cost,    "get": lambda o: float(o.unit_cost or 0)},
-                "unit_price":   {"label_he": "מחיר מכירה","type": "number","filter": Part.unit_price,   "get": lambda o: float(o.unit_price or 0)},
-                "location":     {"label_he": "מיקום",    "type": "text",   "filter": Part.location,     "get": lambda o: o.location},
+                "cost_price":   {"label_he": "עלות יחידה","type": "number","filter": Part.cost_price,   "get": lambda o: float(o.cost_price or 0)},
+                "sell_price":   {"label_he": "מחיר מכירה","type": "number","filter": Part.sell_price,   "get": lambda o: float(o.sell_price or 0)},
                 "is_active":    {"label_he": "פעיל",     "type": "bool",   "filter": Part.is_active,    "get": lambda o: _fmt(o.is_active)},
             },
             "filter_joins": {},
@@ -187,7 +185,7 @@ def _build_schemas():
             "label_he": "חוזים",
             "model": Contract,
             "eager": [joinedload(Contract.customer)],
-            "default_columns": ["number", "customer_name", "contract_type", "status", "start_date", "end_date", "monthly_value"],
+            "default_columns": ["number", "customer_name", "contract_type", "status", "start_date", "end_date", "monthly_price"],
             "columns": {
                 "id":            {"label_he": "מזהה",      "type": "text",   "filter": Contract.id,           "get": lambda o: str(o.id)},
                 "number":        {"label_he": "מספר",      "type": "text",   "filter": Contract.number,       "get": lambda o: o.number},
@@ -199,8 +197,8 @@ def _build_schemas():
                                   "options": ["ACTIVE","EXPIRED","CANCELLED","DRAFT"]},
                 "start_date":    {"label_he": "התחלה",     "type": "date",   "filter": Contract.start_date,   "get": lambda o: _fmt(o.start_date)},
                 "end_date":      {"label_he": "סיום",      "type": "date",   "filter": Contract.end_date,     "get": lambda o: _fmt(o.end_date)},
-                "monthly_value": {"label_he": "תשלום חודשי","type":"number", "filter": Contract.monthly_value,"get": lambda o: float(o.monthly_value or 0)},
-                "auto_renew":    {"label_he": "חידוש אוטו","type": "bool",   "filter": Contract.auto_renew,   "get": lambda o: _fmt(o.auto_renew)},
+                "monthly_price": {"label_he": "תשלום חודשי","type":"number", "filter": Contract.monthly_price,"get": lambda o: float(o.monthly_price or 0)},
+                "total_value":   {"label_he": "שווי כולל",  "type":"number", "filter": Contract.total_value,  "get": lambda o: float(o.total_value or 0)},
             },
             "filter_joins": {},
         },
@@ -331,7 +329,8 @@ def run_report(
     model = schema["model"]
 
     # Ensure "id" is always fetched (needed for custom field lookup)
-    fetch_cols = list(dict.fromkeys(["id"] + [c for c in columns if c in col_defs]))
+    cols_input = columns or schema["default_columns"]
+    fetch_cols = list(dict.fromkeys(["id"] + [c for c in cols_input if c in col_defs]))
 
     # Base query with eager loads
     query = db.query(model)
@@ -430,7 +429,7 @@ def run_report(
     ]
 
     # Remove "id" from output if not requested by user (but keep it for CF lookup)
-    if "id" not in columns:
+    if "id" not in cols_input:
         for row in rows:
             row.pop("id", None)
         columns_meta = [m for m in columns_meta if m["key"] != "id"]
@@ -469,5 +468,112 @@ def export_to_excel(result: dict, entity_label: str) -> io.BytesIO:
 
     buf = io.BytesIO()
     wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+# ---------------------------------------------------------------------------
+# PDF export
+# ---------------------------------------------------------------------------
+
+def _rtl(text: str) -> str:
+    """Apply BiDi algorithm so Hebrew renders correctly in reportlab."""
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        reshaped = arabic_reshaper.reshape(str(text))
+        return get_display(reshaped)
+    except Exception:
+        return str(text)
+
+
+_PDF_FONT_REGISTERED = False
+
+def _register_pdf_font():
+    global _PDF_FONT_REGISTERED
+    if _PDF_FONT_REGISTERED:
+        return
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import os
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    if all(os.path.exists(p) for p in candidates):
+        pdfmetrics.registerFont(TTFont("DejaVu", candidates[0]))
+        pdfmetrics.registerFont(TTFont("DejaVu-Bold", candidates[1]))
+        _PDF_FONT_REGISTERED = True
+
+
+def export_to_pdf(result: dict, entity_label: str) -> io.BytesIO:
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_RIGHT
+
+    _register_pdf_font()
+    font_name = "DejaVu" if _PDF_FONT_REGISTERED else "Helvetica"
+    font_bold = "DejaVu-Bold" if _PDF_FONT_REGISTERED else "Helvetica-Bold"
+
+    headers = [m["label_he"] for m in result["columns_meta"]]
+    keys = [m["key"] for m in result["columns_meta"]]
+    rows = result["rows"]
+
+    buf = io.BytesIO()
+    page = landscape(A4) if len(headers) > 6 else A4
+    doc = SimpleDocTemplate(buf, pagesize=page,
+                            rightMargin=1*cm, leftMargin=1*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "he_title", parent=styles["Normal"],
+        fontName=font_bold, fontSize=14, alignment=TA_RIGHT,
+    )
+    normal_style = ParagraphStyle(
+        "he_normal", parent=styles["Normal"],
+        fontName=font_name, fontSize=9, alignment=TA_RIGHT,
+    )
+
+    from datetime import date
+    title_text = _rtl(f"{entity_label} — {date.today().strftime('%d/%m/%Y')}")
+    total_text = _rtl(f"סה\"כ: {result['total']} רשומות")
+
+    col_count = len(headers)
+    avail_w = page[0] - 2 * cm
+    col_w = avail_w / max(col_count, 1)
+
+    # RTL: reverse columns so rightmost column is first in visual order
+    rtl_headers = [_rtl(h) for h in headers[::-1]]
+    table_data = [rtl_headers]
+    for row in rows:
+        table_data.append([_rtl(str(row.get(k, "") or "")) for k in keys[::-1]])
+
+    tbl = Table(table_data, colWidths=[col_w] * col_count, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a2744")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), font_bold),
+        ("FONTNAME", (0, 1), (-1, -1), font_name),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6fa")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cccccc")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    story = [
+        Paragraph(title_text, title_style),
+        Spacer(1, 0.3 * cm),
+        Paragraph(total_text, normal_style),
+        Spacer(1, 0.4 * cm),
+        tbl,
+    ]
+    doc.build(story)
     buf.seek(0)
     return buf

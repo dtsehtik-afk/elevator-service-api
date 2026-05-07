@@ -98,6 +98,51 @@ def create_call(
     return call
 
 
+@router.get(
+    "/unassigned",
+    summary="List OPEN calls with no confirmed/pending technician assignment",
+)
+def list_unassigned_calls(
+    db: Session = Depends(get_db),
+    _: Technician = Depends(get_current_user),
+):
+    """Return OPEN service calls that have no CONFIRMED or PENDING_CONFIRMATION assignment."""
+    from app.models.service_call import ServiceCall
+    from app.models.assignment import Assignment
+    from app.models.elevator import Elevator
+    assigned_ids = {
+        a.service_call_id
+        for a in db.query(Assignment)
+        .filter(Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]))
+        .all()
+    }
+    q = db.query(ServiceCall).filter(ServiceCall.status == "OPEN")
+    if assigned_ids:
+        q = q.filter(ServiceCall.id.notin_(assigned_ids))
+    calls = q.order_by(ServiceCall.created_at.desc()).all()
+
+    elevator_ids = {c.elevator_id for c in calls if c.elevator_id}
+    elevators = {e.id: e for e in db.query(Elevator).filter(Elevator.id.in_(elevator_ids)).all()}
+
+    result = []
+    for c in calls:
+        elev = elevators.get(c.elevator_id)
+        result.append({
+            "id": str(c.id),
+            "call_number": c.call_number,
+            "elevator_id": str(c.elevator_id),
+            "address": elev.address if elev else None,
+            "city": elev.city if elev else None,
+            "reported_by": c.reported_by,
+            "description": c.description,
+            "fault_type": c.fault_type,
+            "priority": c.priority,
+            "status": c.status,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+    return result
+
+
 @router.delete(
     "",
     status_code=status.HTTP_200_OK,

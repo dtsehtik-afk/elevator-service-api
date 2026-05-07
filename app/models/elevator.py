@@ -130,6 +130,14 @@ class Elevator(Base):
         Uuid(as_uuid=True), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    # ── Acquisition ───────────────────────────────────────────────────────────
+    # איך הגיעה המעלית — e.g. "פה מוקד", "שיווק", "הפניה", "חוזה ישן"
+    lead_source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # טכנאי אחראי — primary technician responsible for this elevator
+    responsible_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -137,6 +145,10 @@ class Elevator(Base):
     @property
     def management_company_name(self) -> Optional[str]:
         return self.management_company.name if self.management_company else None
+
+    @property
+    def responsible_technician_name(self) -> Optional[str]:
+        return self.responsible_technician.name if self.responsible_technician else None
 
     # ── Relationships ─────────────────────────────────────────────────────────
     building: Mapped[Optional["Building"]] = relationship(  # noqa: F821
@@ -153,4 +165,7 @@ class Elevator(Base):
     )
     customer: Mapped[Optional["Customer"]] = relationship(  # noqa: F821
         "Customer", back_populates="elevators", foreign_keys="Elevator.customer_id"
+    )
+    responsible_technician: Mapped[Optional["Technician"]] = relationship(  # noqa: F821
+        "Technician", foreign_keys=[responsible_technician_id]
     )

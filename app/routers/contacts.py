@@ -19,6 +19,7 @@ router = APIRouter(prefix="/contacts", tags=["Contacts"])
 def list_contacts(
     building_id: Optional[uuid.UUID] = Query(None),
     management_company_id: Optional[uuid.UUID] = Query(None),
+    elevator_id: Optional[uuid.UUID] = Query(None),
     role: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
@@ -31,6 +32,8 @@ def list_contacts(
         q = q.filter(Contact.building_id == building_id)
     if management_company_id:
         q = q.filter(Contact.management_company_id == management_company_id)
+    if elevator_id:
+        q = q.filter(Contact.elevator_id == elevator_id)
     if role:
         q = q.filter(Contact.role == role)
     if search:

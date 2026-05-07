@@ -90,7 +90,7 @@ def get_all_schemas(
                 "key": k,
                 "label_he": v["label_he"],
                 "type": v["type"],
-                "filterable": v.get("filter_attr") is not None,
+                "filterable": v.get("filter") is not None,
             }
             for k, v in schema["columns"].items()
         ]
@@ -161,32 +161,36 @@ def run_report(
 
 # ── Export endpoint ───────────────────────────────────────────────────────────
 
-@router.get("/export", summary="Export report as Excel (.xlsx)")
+@router.get("/export", summary="Export report as Excel or PDF")
 def export_report(
     entity_type: str = Query(...),
     columns: Optional[str] = Query(None, description="Comma-separated column keys"),
     filters: Optional[str] = Query(None, description="JSON array of filter objects"),
     sort_by: Optional[str] = Query(None),
     sort_dir: str = Query("desc"),
+    format: str = Query("xlsx", description="xlsx|pdf"),
     db: Session = Depends(get_db),
     current_user: Technician = Depends(get_current_user),
 ):
     import json
-    from app.services.report_builder import run_report as _run, export_to_excel, get_schemas
+    from app.services.report_builder import run_report as _run, export_to_excel, export_to_pdf, get_schemas
 
     schemas = get_schemas()
     if entity_type not in schemas:
         raise HTTPException(status_code=400, detail=f"Unknown entity_type: {entity_type}")
 
-    col_list = [c.strip() for c in columns.split(",")] if columns else None
-    filter_list = json.loads(filters) if filters else []
+    col_list = [c.strip() for c in columns.split(",")] if columns and columns != "undefined" else None
+    # Guard against "undefined" string sent by old JS or missing values
+    safe_filters = filters if filters and filters not in ("undefined", "null", "") else None
+    filter_list = json.loads(safe_filters) if safe_filters else []
+    safe_sort = sort_by if sort_by and sort_by != "undefined" else None
 
     result = _run(
         db=db,
         entity_type=entity_type,
         columns=col_list,
         filters=filter_list,
-        sort_by=sort_by,
+        sort_by=safe_sort,
         sort_dir=sort_dir,
         skip=0,
         limit=10000,
@@ -194,10 +198,21 @@ def export_report(
     )
 
     label_he = schemas[entity_type]["label_he"]
-    xlsx_bytes = export_to_excel(result, label_he)
 
+    if format == "pdf":
+        try:
+            pdf_buf = export_to_pdf(result, label_he)
+            return StreamingResponse(
+                pdf_buf,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename={entity_type}_report.pdf"},
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    xlsx_bytes = export_to_excel(result, label_he)
     return StreamingResponse(
-        io.BytesIO(xlsx_bytes),
+        xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={entity_type}_report.xlsx"},
     )

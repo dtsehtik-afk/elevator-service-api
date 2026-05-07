@@ -18,6 +18,13 @@ IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
 SENDER_FILTER = "TELESERVICE@beepertalk.co.il"  # legacy constant — overridden by settings
 
+# Keywords that indicate a sales lead / inquiry in an email body
+_LEAD_KEYWORDS = {
+    "מתעניין", "מתעניינת", "הצעת מחיר", "הצעה", "לקוח חדש", "לקוחה חדשה",
+    "חוזה שירות", "חוזה חדש", "מחיר שירות", "כמה עולה", "כמה זה עולה",
+    "לקוח פוטנציאלי", "רוצה לדעת", "אשמח לשמוע", "תחשיב", "עסקה",
+}
+
 # Maps Hebrew call-type strings to our fault_type enum values
 _FAULT_TYPE_MAP = {
     "תקיעה":  "STUCK",
@@ -349,7 +356,7 @@ def _gemini_fuzzy_match(candidates, email_address: str, api_key: str):
     return None
 
 
-def _find_elevator(db, city: str, address: str, fields: dict):
+def _find_elevator(db, city: str, address: str, fields: dict, skip_notify: bool = False):
     """
     Multi-signal elevator lookup. NEVER creates a new elevator.
 
@@ -417,22 +424,25 @@ def _find_elevator(db, city: str, address: str, fields: dict):
             "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
             addr_norm, ambiguous.address,
         )
-        _notify_no_match(
-            city_norm, addr_norm, fields,
-            extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{ambiguous.address}, {ambiguous.city}*\n"
-        )
+        if not skip_notify:
+            _notify_no_match(
+                city_norm, addr_norm, fields,
+                extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{ambiguous.address}, {ambiguous.city}*\n"
+            )
         return None
 
     # 6. Nothing found
-    logger.info("📍 No elevator found for %s %s — notifying dispatcher", city_norm, addr_norm)
-    _notify_no_match(city_norm, addr_norm, fields)
+    logger.info("📍 No elevator found for %s %s", city_norm, addr_norm)
+    if not skip_notify:
+        _notify_no_match(city_norm, addr_norm, fields)
     return None
 
 
-def _notify_no_match(city: str, address: str, fields: dict, extra: str = "") -> None:
+def _notify_no_match(city: str, address: str, fields: dict, extra: str = "", log_id: str = "") -> None:
     """Send dispatcher a detailed WhatsApp with all parsed call data when no elevator matched."""
     try:
         from app.services.whatsapp_service import notify_dispatcher
+        from app.config import get_settings
         name    = fields.get("name", "")
         phone   = fields.get("phone", "")
         floors  = fields.get("floor_count", "")
@@ -461,6 +471,9 @@ def _notify_no_match(city: str, address: str, fields: dict, extra: str = "") -> 
         if intnum:
             lines.append(f"#️⃣ מ.ע: {intnum}")
         lines.append("\nנא לפתוח קריאה ידנית ולשייך למעלית הנכונה.")
+        if log_id:
+            base = get_settings().app_base_url.rstrip("/")
+            lines.append(f"🔗 {base}/pending-calls")
         notify_dispatcher("\n".join(lines))
     except Exception as exc:
         logger.error("Failed to notify dispatcher about unmatched address: %s", exc)
@@ -602,6 +615,41 @@ def _send_rescue_blast(db, fields: dict, caller_name: str, caller_phone: str, de
     logger.info("🚨 Rescue blast sent to %d technicians", len(technicians))
 
 
+def _try_create_email_lead(db, body: str, fields: dict) -> bool:
+    """Create a CRM lead if the email body contains lead-intent keywords."""
+    body_lower = body.lower()
+    if not any(kw in body_lower for kw in _LEAD_KEYWORDS):
+        return False
+    try:
+        from app.models.lead import Lead
+        phone = (fields.get("phone") or "").strip()
+        name = (fields.get("name") or "").strip()
+        if not name or name == "לא ידוע":
+            name = phone or "ליד ממייל"
+        if phone:
+            existing = db.query(Lead).filter(
+                Lead.phone == phone,
+                Lead.status.in_(["NEW", "CONTACTED", "QUALIFIED"]),
+            ).first()
+            if existing:
+                return False
+        lead = Lead(
+            name=name,
+            phone=phone or None,
+            source="EMAIL",
+            status="NEW",
+            notes=f"זוהה אוטומטית ממייל\n{body[:500]}",
+        )
+        db.add(lead)
+        db.commit()
+        logger.info("📊 Lead created from email: name=%s phone=%s", name, phone)
+        return True
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Failed to create email lead: %s", exc)
+        return False
+
+
 def _record_as_scanned(db, message_id: str):
     from app.models.service_call_email_scan import ServiceCallEmailScan
     try:
@@ -632,23 +680,30 @@ def poll_emails(db) -> int:
 
     created = 0
     try:
+        import socket as _socket
+        _socket.setdefaulttimeout(30)  # global socket timeout — prevents IMAP hangs
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(user, password)
 
         senders_lower = [s.lower() for s in senders]
 
+        # Only fetch emails from TODAY — prevents reprocessing historical messages
+        # on server restart. Dedup by Message-ID handles same-day reruns safely.
+        from datetime import date as _date
+        _today_str = _date.today().strftime("%d-%b-%Y")  # e.g. "05-May-2026"
+
         # Scan both the configured folder AND Spam (beepertalk emails can end up in spam)
-        # Only fetch UNSEEN emails — processed emails are marked as read so they won't reappear
+        # Open in readonly — we rely on Message-ID dedup, not SEEN flag
         folders_to_scan = [imap_folder, "[Gmail]/Spam"]
         msg_ids = []
         for folder in folders_to_scan:
-            status, resp = mail.select(f'"{folder}"', readonly=False)
+            status, resp = mail.select(f'"{folder}"', readonly=True)
             if status != "OK":
                 logger.debug("📧 Folder '%s' not accessible — skipping", folder)
                 continue
-            _, all_ids = mail.search(None, "UNSEEN")
+            _, all_ids = mail.search(None, f'SINCE {_today_str}')
             folder_ids = all_ids[0].split() if all_ids[0] else []
-            logger.info("📧 [%s] unseen: %d emails", folder, len(folder_ids))
+            logger.info("📧 [%s] since %s: %d emails", folder, _today_str, len(folder_ids))
             msg_ids.extend([(mid, folder) for mid in folder_ids])
 
         if not msg_ids:
@@ -663,7 +718,7 @@ def poll_emails(db) -> int:
         for mid, folder in msg_ids:
             try:
                 # Re-select folder in case last iteration was a different one
-                mail.select(f'"{folder}"', readonly=False)
+                mail.select(f'"{folder}"', readonly=True)
                 _, data = mail.fetch(mid, "(RFC822)")
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
@@ -681,7 +736,7 @@ def poll_emails(db) -> int:
                 if already:
                     continue
 
-                # Extract email send time — use as created_at for the service call
+                # Extract email send time as fallback timestamp
                 email_date: datetime | None = None
                 try:
                     date_str = msg.get("Date", "")
@@ -700,7 +755,6 @@ def poll_emails(db) -> int:
                 if any(p in body for p in _SKIP_PATTERNS):
                     logger.info("📧 Skipping closure/summary email (not a new call)")
                     _record_as_scanned(db, message_id)
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 import time as _time
@@ -709,24 +763,48 @@ def poll_emails(db) -> int:
 
                 if fields is None:
                     logger.warning("Email parsing returned no data — skipping (see above for reason)")
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 if not fields.get("city") and not fields.get("address"):
                     logger.warning("Could not extract address — body preview: %s", body[:600])
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
-                elevator = _find_elevator(db, fields["city"], fields["address"], fields)
+                # Lead detection — create CRM lead if body contains inquiry keywords
+                _try_create_email_lead(db, body, fields)
+
+                elevator = _find_elevator(db, fields["city"], fields["address"], fields, skip_notify=True)
 
                 if elevator is None:
-                    # No match or ambiguous address — dispatcher already notified inside _find_elevator
+                    # No match — save an IncomingCallLog so it appears in PendingCallsPage
                     logger.info(
-                        "📍 Skipping call creation — no elevator match for (%s %s), awaiting dispatcher review",
+                        "📍 No elevator match for (%s %s) — saving to pending queue",
                         fields.get("city"), fields.get("address"),
                     )
-                    _record_as_scanned(db, message_id)
-                    mail.store(mid, "+FLAGS", "\\Seen")
+                    log_id = ""
+                    try:
+                        from app.models.incoming_call import IncomingCallLog
+                        pending_log = IncomingCallLog(
+                            raw_text=body[:10000],
+                            caller_name=fields.get("name") or None,
+                            caller_phone=fields.get("phone") or None,
+                            call_city=fields.get("city") or None,
+                            call_street=fields.get("address") or None,
+                            call_type=fields.get("call_type") or None,
+                            fault_type=fields.get("fault_type") or "OTHER",
+                            priority="MEDIUM",
+                            match_status="UNMATCHED",
+                        )
+                        db.add(pending_log)
+                        db.add(ServiceCallEmailScan(message_id=message_id))
+                        db.commit()
+                        log_id = str(pending_log.id)
+                        logger.info("📋 Saved unmatched call to pending queue: %s", log_id)
+                    except Exception as log_exc:
+                        db.rollback()
+                        logger.error("Failed to save unmatched call log: %s", log_exc)
+                        _record_as_scanned(db, message_id)
+                    # Re-notify dispatcher with link to pending-calls page
+                    _notify_no_match(fields.get("city", ""), fields.get("address", ""), fields, log_id=log_id)
                     continue
 
                 # Enrich the matched elevator with any new data from this email
@@ -775,6 +853,10 @@ def poll_emails(db) -> int:
                     db.commit()
                     continue
 
+                # Prefer the call body's "מועד התקשרות" timestamp over the email Date header
+                from app.routers.webhooks import _parse_call_time as _pct
+                call_body_ts = _pct(fields.get("call_time", ""))
+                call_ts = call_body_ts or email_date  # body timestamp is the actual call time
                 call = ServiceCall(
                     elevator_id=elevator.id,
                     reported_by=reported_by,
@@ -782,9 +864,14 @@ def poll_emails(db) -> int:
                     fault_type=fault_type,
                     priority="CRITICAL" if is_rescue else "MEDIUM",
                     status="OPEN",
-                    **({"created_at": email_date} if email_date else {}),
+                    **({"created_at": call_ts} if call_ts else {}),
                 )
                 db.add(call)
+                db.flush()
+                from sqlalchemy import func as _func
+                import random as _rnd
+                max_num = db.query(_func.max(ServiceCall.call_number)).scalar()
+                call.call_number = _rnd.randint(10000, 99999) if max_num is None else max_num + 1
                 db.add(ServiceCallEmailScan(message_id=message_id))
                 db.commit()
                 created += 1
@@ -846,13 +933,6 @@ def poll_emails(db) -> int:
                 if "OVERQUOTA" in str(exc):
                     logger.warning("📧 OVERQUOTA on email %s — stopping this poll cycle to avoid rate limiting", mid)
                     break
-
-            finally:
-                # Mark as read regardless of success/failure to avoid re-processing
-                try:
-                    mail.store(mid, "+FLAGS", "\\Seen")
-                except Exception:
-                    pass
 
         mail.close()
         mail.logout()

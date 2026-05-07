@@ -28,12 +28,20 @@ _INSPECTION_PROMPT = """אתה מנתח דוחות ביקורת תקינות מ�
   "city": "שם העיר בלבד (לדוגמה: עפולה)",
   "labor_file_number": "מספר תיק במשרד העבודה — מספר שמופיע ליד הכיתוב 'מס תיק במשרד העבודה' או 'מס תיק'. לדוגמה: 7022",
   "inspection_date": "YYYY-MM-DD או null אם לא ידוע",
+  "next_inspection_date": "YYYY-MM-DD — תאריך הבדיקה הבאה כפי שמופיע בדוח, או null אם לא מצוין",
   "result": "PASS אם הכל תקין, FAIL אם יש ליקויים",
   "deficiencies": [
     {"description": "תיאור הליקוי בעברית", "severity": "HIGH|MEDIUM|LOW"}
   ],
-  "inspector_name": "שם הבודק או null",
-  "serial_number": "מספר סידורי של המעלית או null"
+  "inspector_name": "שם הבודק המוסמך או null",
+  "inspector_phone": "טלפון הבודק (קווי או נייד) או null",
+  "inspector_mobile": "נייד הבודק אם שונה מהטלפון, או null",
+  "inspector_email": "אימייל הבודק או null",
+  "inspector_license": "מספר רישיון/תעודת הסמכה של הבודק או null",
+  "serial_number": "מספר סידורי של המעלית או null",
+  "manufacturer": "יצרן המעלית (Otis / Schindler / KONE / ThyssenKrupp / טמה / מגל וכו') או null",
+  "model": "דגם המעלית או null",
+  "floor_count": "מספר תחנות / קומות של המעלית כמספר שלם, או null"
 }
 
 חוקים:
@@ -43,6 +51,7 @@ _INSPECTION_PROMPT = """אתה מנתח דוחות ביקורת תקינות מ�
 - אם אין ליקויים, deficiencies = []
 - severity: HIGH=מסוכן/דחוף, MEDIUM=רגיל, LOW=קוסמטי/קל
 - אם result לא ברור, הסק לפי נוכחות ליקויים
+- floor_count: מספר שלם בלבד (לדוגמה: 6)
 - החזר JSON תקני בלבד"""
 
 
@@ -202,6 +211,15 @@ def process_inspection_report(
         else:
             match_status = "UNMATCHED"
 
+    # Parse next_inspection_date from report
+    next_inspection_date = None
+    next_date_str = parsed.get("next_inspection_date")
+    if next_date_str:
+        try:
+            next_inspection_date = datetime.strptime(next_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
     # Create inspection report record
     report = InspectionReport(
         elevator_id=elevator.id if elevator else None,
@@ -215,8 +233,16 @@ def process_inspection_report(
         raw_city=city,
         labor_file_number=labor_file_number,
         inspection_date=inspection_date,
+        next_inspection_date=next_inspection_date,
         result=result_str if result_str in ("PASS", "FAIL") else "UNKNOWN",
         inspector_name=inspector_name,
+        inspector_phone=parsed.get("inspector_phone"),
+        inspector_mobile=parsed.get("inspector_mobile"),
+        inspector_email=parsed.get("inspector_email"),
+        inspector_license=parsed.get("inspector_license"),
+        manufacturer=parsed.get("manufacturer"),
+        model=parsed.get("model"),
+        floor_count=parsed.get("floor_count"),
         deficiency_count=len(deficiencies),
         deficiencies=deficiencies if deficiencies else None,
         match_status=match_status,
@@ -287,14 +313,38 @@ def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
     inspection_date = report.inspection_date
     inspector_name = report.inspector_name
 
+    from dateutil.relativedelta import relativedelta
+
     if getattr(report, "labor_file_number", None) and not elevator.labor_file_number:
         elevator.labor_file_number = report.labor_file_number
 
     if inspection_date:
         elevator.last_inspection_date = inspection_date
+        # Auto-calculate next_inspection_date: prefer report's stated date, fallback to +6 months
+        report_next = getattr(report, "next_inspection_date", None)
+        if report_next:
+            elevator.next_inspection_date = report_next
+        else:
+            elevator.next_inspection_date = inspection_date + relativedelta(months=6)
 
     if inspector_name:
         elevator.inspector_name = inspector_name
+
+    # Sync inspector contact details from report
+    for attr in ("inspector_phone", "inspector_mobile", "inspector_email"):
+        val = getattr(report, attr, None)
+        if val and not getattr(elevator, attr, None):
+            setattr(elevator, attr, val)
+
+    # Sync technical specs from report (only fill if elevator field is blank)
+    if getattr(report, "manufacturer", None) and not elevator.manufacturer:
+        elevator.manufacturer = report.manufacturer
+    if getattr(report, "model", None) and not elevator.model:
+        elevator.model = report.model
+    if getattr(report, "floor_count", None) and elevator.floor_count in (None, 1):
+        elevator.floor_count = report.floor_count
+    if getattr(report, "serial_number", None) and not elevator.serial_number:
+        elevator.serial_number = report.serial_number
 
     # Auto-update report link on elevator
     if getattr(report, "drive_file_id", None):

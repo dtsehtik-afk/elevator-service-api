@@ -195,10 +195,11 @@ def update_checklist(
     current_user=Depends(get_current_user),
 ):
     """
-    updates: list of {index: int, done: bool}
-    Records done_by (current user name) on each deficiency when marking done.
+    updates: list of {index: int, done: bool, done_description?: str}
+    Records done_by, done_at, done_description on each deficiency when marking done.
     When all items done → report_status = CLOSED; otherwise PARTIAL.
     """
+    from datetime import datetime
     from app.models.inspection_report import InspectionReport
 
     report = db.query(InspectionReport).filter(InspectionReport.id == uuid.UUID(report_id)).first()
@@ -212,9 +213,15 @@ def update_checklist(
             done = bool(upd.get("done", False))
             entry = {**checklist[idx], "done": done}
             if done:
+                from app.services.text_cleaner import clean_tech_text
+                raw_desc = upd.get("done_description", "")
                 entry["done_by"] = current_user.name
+                entry["done_at"] = datetime.utcnow().isoformat()
+                entry["done_description"] = clean_tech_text(raw_desc) if raw_desc else raw_desc
             else:
                 entry.pop("done_by", None)
+                entry.pop("done_at", None)
+                entry.pop("done_description", None)
             if "action_notes" in upd:
                 entry["action_notes"] = upd["action_notes"]
             checklist[idx] = entry

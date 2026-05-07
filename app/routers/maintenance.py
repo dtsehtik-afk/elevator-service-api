@@ -16,12 +16,7 @@ from app.services import maintenance_service
 router = APIRouter()
 
 
-@router.get(
-    "",
-    response_model=List[MaintenanceResponse],
-    summary="List maintenance schedules",
-    description="Return filtered maintenance schedules.",
-)
+@router.get("", summary="List maintenance schedules")
 def list_maintenances(
     elevator_id: Optional[uuid.UUID] = Query(None),
     technician_id: Optional[uuid.UUID] = Query(None),
@@ -33,10 +28,40 @@ def list_maintenances(
     db: Session = Depends(get_db),
     _: Technician = Depends(get_current_user),
 ):
-    """List maintenance events with optional filters."""
-    return maintenance_service.list_maintenances(
+    """List maintenance events with optional filters. Includes elevator address/city."""
+    from sqlalchemy.orm import joinedload
+    from app.models.maintenance import MaintenanceSchedule as MS
+    items = maintenance_service.list_maintenances(
         db, elevator_id, technician_id, status, from_date, to_date, skip, limit
     )
+    # Eagerly load elevator for each item
+    ids = [m.id for m in items]
+    if ids:
+        enriched = (
+            db.query(MS)
+            .options(joinedload(MS.elevator))
+            .filter(MS.id.in_(ids))
+            .all()
+        )
+        idx = {m.id: m for m in enriched}
+        items = [idx.get(m.id, m) for m in items]
+    return [
+        {
+            "id": str(m.id),
+            "elevator_id": str(m.elevator_id),
+            "elevator_address": m.elevator.address if m.elevator else "",
+            "elevator_city": m.elevator.city if m.elevator else "",
+            "technician_id": str(m.technician_id) if m.technician_id else None,
+            "scheduled_date": str(m.scheduled_date),
+            "maintenance_type": m.maintenance_type,
+            "status": m.status,
+            "notes": m.completion_notes,
+            "checklist": m.checklist,
+            "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in items
+    ]
 
 
 @router.post(

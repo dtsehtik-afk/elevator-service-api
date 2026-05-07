@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react'
 import {
-  Stack, Title, Paper, Group, Select, Button, Text, Table, Badge,
-  ActionIcon, Checkbox, Modal, TextInput, ScrollArea, Divider,
-  Loader, Center, Pagination, Tabs, Tooltip, NumberInput, CloseButton,
-  Box, rem,
+  Stack, Title, Paper, Group, Select, Button, Text, Table,
+  ActionIcon, Checkbox, Modal, TextInput, ScrollArea, Alert,
+  Loader, Center, Pagination, CloseButton, SegmentedControl,
+  SimpleGrid, Divider,
 } from '@mantine/core'
+import { DateInput } from '@mantine/dates'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { reportsApi, type EntitySchema, type FilterItem, type ReportResult, type SavedView } from '../api/reports'
 import client from '../api/client'
+import 'dayjs/locale/he'
 
 const ENTITY_LABELS: Record<string, string> = {
   service_calls: 'קריאות שירות',
@@ -36,7 +38,56 @@ const OPS = [
   { value: 'is_not_null', label: 'לא ריק' },
 ]
 
+const PERIODS = [
+  { value: 'all', label: 'הכל' },
+  { value: 'today', label: 'היום' },
+  { value: 'week', label: 'שבוע זה' },
+  { value: 'month', label: 'חודש זה' },
+  { value: 'quarter', label: 'רבעון זה' },
+  { value: 'half', label: 'חציון זה' },
+  { value: 'ytd', label: 'מתחילת השנה' },
+  { value: 'last_year', label: 'שנה שעברה' },
+  { value: 'custom', label: 'מותאם אישית' },
+]
+
 const PAGE_SIZE = 50
+
+function getPeriodRange(period: string): { from: Date | null; to: Date | null } {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth()
+
+  if (period === 'all') return { from: null, to: null }
+  if (period === 'today') {
+    const start = new Date(year, month, now.getDate(), 0, 0, 0)
+    const end = new Date(year, month, now.getDate(), 23, 59, 59)
+    return { from: start, to: end }
+  }
+  if (period === 'week') {
+    const dayOfWeek = now.getDay() // 0=Sun
+    const start = new Date(now); start.setDate(now.getDate() - dayOfWeek); start.setHours(0,0,0,0)
+    const end = new Date(start); end.setDate(start.getDate() + 6); end.setHours(23,59,59,999)
+    return { from: start, to: end }
+  }
+  if (period === 'month') {
+    return { from: new Date(year, month, 1), to: new Date(year, month + 1, 0, 23, 59, 59) }
+  }
+  if (period === 'quarter') {
+    const q = Math.floor(month / 3)
+    return { from: new Date(year, q * 3, 1), to: new Date(year, q * 3 + 3, 0, 23, 59, 59) }
+  }
+  if (period === 'half') {
+    const isFirst = month < 6
+    return { from: new Date(year, isFirst ? 0 : 6, 1), to: new Date(year, isFirst ? 6 : 12, 0, 23, 59, 59) }
+  }
+  if (period === 'ytd') {
+    return { from: new Date(year, 0, 1), to: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59) }
+  }
+  if (period === 'last_year') {
+    return { from: new Date(year - 1, 0, 1), to: new Date(year - 1, 11, 31, 23, 59, 59) }
+  }
+  return { from: null, to: null }
+}
 
 export default function ReportsPage() {
   const qc = useQueryClient()
@@ -52,9 +103,15 @@ export default function ReportsPage() {
   const [viewName, setViewName] = useState('')
   const [activeView, setActiveView] = useState<string | null>(null)
 
-  const { data: schemas } = useQuery({
+  // Date range state
+  const [period, setPeriod] = useState<string>('all')
+  const [customFrom, setCustomFrom] = useState<Date | null>(null)
+  const [customTo, setCustomTo] = useState<Date | null>(null)
+
+  const { data: schemas, isError: schemasError } = useQuery({
     queryKey: ['report-schemas'],
     queryFn: reportsApi.getAllSchemas,
+    retry: 2,
   })
 
   const { data: views, refetch: refetchViews } = useQuery({
@@ -65,8 +122,9 @@ export default function ReportsPage() {
   const currentSchema: EntitySchema | undefined = schemas?.find(s => s.entity_type === entityType)
 
   useEffect(() => {
-    if (currentSchema && selectedCols.length === 0) {
-      setSelectedCols(currentSchema.default_columns)
+    if (currentSchema) {
+      if (selectedCols.length === 0) setSelectedCols(currentSchema.default_columns)
+      runReport(1)
     }
   }, [currentSchema?.entity_type])
 
@@ -93,13 +151,38 @@ export default function ReportsPage() {
     setFilters(prev => prev.filter((_, i) => i !== idx))
   }
 
+  function buildDateFilters(): FilterItem[] {
+    const dateFilters: FilterItem[] = []
+    let from: Date | null = null
+    let to: Date | null = null
+
+    if (period === 'custom') {
+      from = customFrom
+      to = customTo
+    } else if (period !== 'all') {
+      const range = getPeriodRange(period)
+      from = range.from
+      to = range.to
+    }
+
+    // Only apply date filter if the entity has a created_at column
+    const hasCreatedAt = currentSchema?.columns.some(c => c.key === 'created_at')
+    if (!hasCreatedAt) return []
+
+    if (from) dateFilters.push({ field: 'created_at', op: 'gte', value: from.toISOString() })
+    if (to) dateFilters.push({ field: 'created_at', op: 'lte', value: to.toISOString() })
+    return dateFilters
+  }
+
   async function runReport(pg = page) {
     setLoading(true)
     try {
+      const manualFilters = filters.filter(f => f.op === 'is_null' || f.op === 'is_not_null' || f.value !== '')
+      const allFilters = [...buildDateFilters(), ...manualFilters]
       const data = await reportsApi.query({
         entity_type: entityType,
         columns: selectedCols.length > 0 ? selectedCols : undefined,
-        filters: filters.filter(f => f.op === 'is_null' || f.op === 'is_not_null' || f.value !== ''),
+        filters: allFilters,
         sort_by: sortBy,
         sort_dir: sortDir,
         skip: (pg - 1) * PAGE_SIZE,
@@ -113,25 +196,30 @@ export default function ReportsPage() {
     }
   }
 
-  async function handleExport() {
+  async function handleExport(format: 'xlsx' | 'pdf' = 'xlsx') {
     try {
-      const cols = selectedCols.length > 0 ? selectedCols.join(',') : undefined
-      const filtersJson = filters.length > 0 ? JSON.stringify(filters) : undefined
-      const url = reportsApi.exportUrl({
+      const manualFilters = filters.filter(f => f.op === 'is_null' || f.op === 'is_not_null' || f.value !== '')
+      const allFilters = [...buildDateFilters(), ...manualFilters]
+
+      const params: Record<string, string> = {
         entity_type: entityType,
-        columns: cols,
-        filters: filtersJson,
-        sort_by: sortBy,
         sort_dir: sortDir,
-      })
-      const resp = await client.get(url.replace(client.defaults.baseURL || '', ''), {
+      }
+      if (selectedCols.length > 0) params.columns = selectedCols.join(',')
+      if (allFilters.length > 0) params.filters = JSON.stringify(allFilters)
+      if (sortBy) params.sort_by = sortBy
+      if (format === 'pdf') params.format = 'pdf'
+
+      const resp = await client.get('/reports/export', {
         responseType: 'blob',
-        params: { entity_type: entityType, columns: cols, filters: filtersJson, sort_by: sortBy, sort_dir: sortDir },
+        params,
       })
-      const blob = new Blob([resp.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const mime = format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const ext = format === 'pdf' ? 'pdf' : 'xlsx'
+      const blob = new Blob([resp.data], { type: mime })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = `${entityType}_report.xlsx`
+      a.download = `${entityType}_report.${ext}`
       a.click()
     } catch {
       notifications.show({ message: 'שגיאה בייצוא', color: 'red' })
@@ -172,6 +260,14 @@ export default function ReportsPage() {
   const totalPages = result ? Math.ceil(result.total / PAGE_SIZE) : 0
   const filterable = currentSchema?.columns.filter(c => c.filterable) ?? []
 
+  if (schemasError) return (
+    <Alert color="red" title="שגיאה בטעינת הדוחות">
+      לא ניתן לטעון את הסכמה מהשרת. בדוק שהשרת פועל ונסה לרענן את הדף.
+    </Alert>
+  )
+
+  if (!schemas) return <Center h={200}><Loader /></Center>
+
   return (
     <Stack gap="md" dir="rtl">
       <Group justify="space-between">
@@ -180,8 +276,11 @@ export default function ReportsPage() {
           <Button variant="light" onClick={() => runReport()} loading={loading}>
             הרץ דוח
           </Button>
-          <Button variant="outline" onClick={handleExport}>
-            ייצא Excel
+          <Button variant="outline" color="green" onClick={() => handleExport('xlsx')}>
+            📊 Excel
+          </Button>
+          <Button variant="outline" color="red" onClick={() => handleExport('pdf')}>
+            📄 PDF
           </Button>
         </Group>
       </Group>
@@ -197,6 +296,51 @@ export default function ReportsPage() {
             w={220}
           />
         </Group>
+      </Paper>
+
+      {/* Date range filter */}
+      <Paper withBorder radius="md" p="md">
+        <Text size="sm" fw={600} mb="xs">📅 תקופת דוח</Text>
+        <Stack gap="sm">
+          <SegmentedControl
+            value={period}
+            onChange={p => { setPeriod(p) }}
+            data={PERIODS}
+            size="xs"
+            fullWidth
+          />
+          {period === 'custom' && (
+            <SimpleGrid cols={2} spacing="xs">
+              <DateInput
+                label="מתאריך"
+                placeholder="dd/mm/yyyy"
+                value={customFrom}
+                onChange={setCustomFrom}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                size="xs"
+              />
+              <DateInput
+                label="עד תאריך"
+                placeholder="dd/mm/yyyy"
+                value={customTo}
+                onChange={setCustomTo}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                size="xs"
+              />
+            </SimpleGrid>
+          )}
+          {period !== 'all' && period !== 'custom' && (
+            <Text size="xs" c="dimmed">
+              {(() => {
+                const r = getPeriodRange(period)
+                if (!r.from || !r.to) return ''
+                return `${r.from.toLocaleDateString('he-IL')} — ${r.to.toLocaleDateString('he-IL')}`
+              })()}
+            </Text>
+          )}
+        </Stack>
       </Paper>
 
       {/* Saved views bar */}
@@ -224,7 +368,7 @@ export default function ReportsPage() {
       <Group align="flex-start" gap="md">
         {/* Column picker */}
         <Paper withBorder radius="md" p="md" style={{ width: 280, flexShrink: 0 }}>
-          <Title order={5} mb="sm">בחירת עמודות</Title>
+          <Text fw={600} size="sm" mb="sm">בחירת עמודות</Text>
           <ScrollArea h={400}>
             <Stack gap="xs">
               {currentSchema?.columns.map(col => (
@@ -243,12 +387,14 @@ export default function ReportsPage() {
               ))}
             </Stack>
           </ScrollArea>
-          <Button size="xs" variant="subtle" mt="sm" onClick={() => setSelectedCols(currentSchema?.columns.map(c => c.key) ?? [])}>
-            בחר הכל
-          </Button>
-          <Button size="xs" variant="subtle" mt="sm" mr="xs" color="red" onClick={() => setSelectedCols([])}>
-            נקה
-          </Button>
+          <Group mt="sm" gap="xs">
+            <Button size="xs" variant="subtle" onClick={() => setSelectedCols(currentSchema?.columns.map(c => c.key) ?? [])}>
+              בחר הכל
+            </Button>
+            <Button size="xs" variant="subtle" color="red" onClick={() => setSelectedCols([])}>
+              נקה
+            </Button>
+          </Group>
         </Paper>
 
         {/* Filters + results */}
@@ -256,7 +402,7 @@ export default function ReportsPage() {
           {/* Filters */}
           <Paper withBorder radius="md" p="md">
             <Group justify="space-between" mb="sm">
-              <Title order={5}>סינונים</Title>
+              <Text fw={600} size="sm">סינונים</Text>
               <Button size="xs" variant="light" onClick={addFilter}>+ הוסף סינון</Button>
             </Group>
             {filters.length === 0 && (

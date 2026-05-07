@@ -275,28 +275,27 @@ def tech_map_data(tech_id: str, db: Session = Depends(get_db)):
                  "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית"}
     _PRI_HE   = {"CRITICAL": "קריטי 🔴", "HIGH": "גבוה 🟠", "MEDIUM": "בינוני 🟡", "LOW": "נמוך 🟢"}
 
-    # ── 1. Service calls assigned to this technician (accepted or in-progress)
+    # ── 1. Service calls assigned to this technician (accepted, confirmed or in-progress)
     from app.models.assignment import Assignment
-    accepted_call_ids = {
+    my_call_ids = {
         a.service_call_id
         for a in db.query(Assignment).filter(
             Assignment.technician_id == tid,
-            Assignment.status.in_(["ACCEPTED", "IN_PROGRESS"]),
+            Assignment.status.in_(["ACCEPTED", "CONFIRMED", "IN_PROGRESS"]),
         ).all()
     }
-    open_calls = (
+    my_calls = (
         db.query(ServiceCall)
         .filter(
-            ServiceCall.id.in_(accepted_call_ids),
-            ServiceCall.status.in_(["ASSIGNED", "IN_PROGRESS"]),
+            ServiceCall.id.in_(my_call_ids),
+            ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]),
         )
         .all()
-    ) if accepted_call_ids else []
-    for call in open_calls:
+    ) if my_call_ids else []
+    for call in my_calls:
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
         if not elev or not elev.latitude or not elev.longitude:
             continue
-        pri_color = {"CRITICAL": "#dc2626", "HIGH": "#ea580c"}.get(call.priority, "#eab308")
         pins.append({
             "type": "call",
             "lat": elev.latitude,
@@ -305,7 +304,7 @@ def tech_map_data(tech_id: str, db: Session = Depends(get_db)):
             "title": _FAULT_HE.get(call.fault_type, call.fault_type),
             "detail": _PRI_HE.get(call.priority, call.priority),
             "status": call.status,
-            "color": pri_color,
+            "color": "#1c7ed6",
             "call_id": str(call.id),
         })
 
@@ -516,7 +515,8 @@ def submit_report(tech_id: str, data: ReportSubmit, db: Session = Depends(get_db
     call.status = "RESOLVED" if data.resolved else "IN_PROGRESS"
     if data.resolved:
         call.resolved_at = datetime.now(timezone.utc)
-    call.resolution_notes = data.notes
+    from app.services.text_cleaner import clean_tech_text
+    call.resolution_notes = clean_tech_text(data.notes) if data.notes else data.notes
     call.quote_needed = data.quote_needed
 
     if data.resolved and assignment:

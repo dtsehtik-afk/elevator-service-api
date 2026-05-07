@@ -17,6 +17,8 @@ from app.routers import customers, quotes, contracts, invoices, inventory, leads
 from app.routers import settings as settings_router, conversations
 from app.routers import reports as reports_router, custom_fields as custom_fields_router
 from app.routers import hr as hr_router
+from app.routers import geo as geo_router
+from app.routers import transcribe as transcribe_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -144,6 +146,36 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_hr_records_technician_id ON hr_records (technician_id)",
+                # Contacts — new fields for enhanced contact management
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS elevator_id UUID REFERENCES elevators(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_contacts_elevator_id ON contacts (elevator_id)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS company VARCHAR(200)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS mobile VARCHAR(30)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS landline VARCHAR(30)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notification_prefs JSONB",
+                # system_settings — ensure value column exists for key-value store queries
+                "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS value TEXT",
+                # InspectionReport — extended fields from Gemini extraction
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS next_inspection_date DATE",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_phone VARCHAR(30)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_mobile VARCHAR(30)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_email VARCHAR(100)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS inspector_license VARCHAR(50)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(100)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS model VARCHAR(100)",
+                "ALTER TABLE inspection_reports ADD COLUMN IF NOT EXISTS floor_count INTEGER",
+                # ServiceCall — sequential human-readable call number
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS call_number INTEGER",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_calls_call_number ON service_calls (call_number) WHERE call_number IS NOT NULL",
+                # IncomingCallLog — ensure all parsed fields exist
+                "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_type VARCHAR(200)",
+                "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_time_raw VARCHAR(50)",
+                # Elevator — lead source and responsible technician
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS lead_source VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS responsible_technician_id UUID REFERENCES technicians(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_responsible_technician_id ON elevators (responsible_technician_id)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -161,6 +193,22 @@ async def lifespan(app: FastAPI):
             _db.close()
     except Exception:
         pass
+    # Backfill: set next_service_date for elevators that are missing it
+    try:
+        from app.database import SessionLocal as _SL2
+        from app.services.elevator_service import backfill_next_service_dates
+        _db2 = _SL2()
+        try:
+            _filled = backfill_next_service_dates(_db2)
+            if _filled:
+                _logging.getLogger(__name__).info(f"Backfilled next_service_date for {_filled} elevators")
+        finally:
+            _db2.close()
+    except Exception:
+        pass
+    # Pre-load Israeli cities list in background so first /geo/cities call is instant
+    from app.services.geo_service import load_cities_background
+    load_cities_background()
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield
@@ -200,11 +248,14 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
-    "/reports", "/custom-fields", "/roles", "/hr",
+    "/reports", "/custom-fields", "/roles", "/hr", "/geo",
     "/elevators", "/calls", "/technicians", "/assignments", "/maintenance",
     "/inspections", "/management-companies", "/import", "/conversations",
 )
 
+
+_NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+_IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 @app.middleware("http")
 async def spa_browser_fallback(request: Request, call_next):
@@ -219,7 +270,7 @@ async def spa_browser_fallback(request: Request, call_next):
         file = _FRONTEND_DIST / path.lstrip("/")
         if file.is_file():
             return FileResponse(str(file))
-        return FileResponse(str(_FRONTEND_DIST / "index.html"))
+        return FileResponse(str(_FRONTEND_DIST / "index.html"), headers=_NO_CACHE)
     return await call_next(request)
 
 
@@ -252,6 +303,8 @@ app.include_router(conversations.router)
 app.include_router(reports_router.router)
 app.include_router(custom_fields_router.router)
 app.include_router(hr_router.router)
+app.include_router(geo_router.router)
+app.include_router(transcribe_router.router)
 
 
 @app.get("/health", tags=["Health"])
@@ -287,5 +340,6 @@ if _FRONTEND_DIST.exists():
             raise HTTPException(status_code=404, detail="API route not found")
         file = _FRONTEND_DIST / full_path
         if file.exists() and file.is_file():
-            return FileResponse(str(file))
-        return FileResponse(str(_FRONTEND_DIST / "index.html"))
+            headers = _IMMUTABLE if full_path.startswith("assets/") else _NO_CACHE
+            return FileResponse(str(file), headers=headers)
+        return FileResponse(str(_FRONTEND_DIST / "index.html"), headers=_NO_CACHE)

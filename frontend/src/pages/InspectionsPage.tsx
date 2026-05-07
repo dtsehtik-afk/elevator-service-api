@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import TranscribeButton from '../components/TranscribeButton'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
   FileInput, Center, Collapse, Card, Loader, Alert, Modal, ActionIcon,
@@ -9,6 +10,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { CitySelect, StreetInput } from '../components/GeoInputs'
 
 interface Deficiency {
   description: string
@@ -97,6 +99,8 @@ export default function InspectionsPage() {
   const [activeTab, setActiveTab] = useState<string | null>('all')
   const [completionModal, setCompletionModal] = useState<{ reportId: string; elevatorAddress: string; deficiencies: Deficiency[] } | null>(null)
   const [completionNotes, setCompletionNotes] = useState('')
+  const [pendingDefCheck, setPendingDefCheck] = useState<{ report: InspectionReport; idx: number } | null>(null)
+  const [defCompletionDesc, setDefCompletionDesc] = useState('')
   const [addDefFor, setAddDefFor] = useState<string | null>(null)
   const [newDefDesc, setNewDefDesc] = useState('')
   const [newDefSeverity, setNewDefSeverity] = useState('MEDIUM')
@@ -167,7 +171,7 @@ export default function InspectionsPage() {
   })
 
   const checklistMutation = useMutation({
-    mutationFn: ({ reportId, updates }: { reportId: string; updates: { index: number; done: boolean }[] }) =>
+    mutationFn: ({ reportId, updates }: { reportId: string; updates: { index: number; done: boolean; done_description?: string }[] }) =>
       client.patch(`/inspections/checklist/${reportId}`, updates),
     onSuccess: (res, { reportId }) => {
       qc.invalidateQueries({ queryKey: ['inspections'] })
@@ -239,8 +243,17 @@ export default function InspectionsPage() {
     setElevOptions(data)
   }
 
-  function toggleDeficiency(report: InspectionReport, idx: number, done: boolean) {
-    checklistMutation.mutate({ reportId: report.id, updates: [{ index: idx, done }] })
+  function toggleDeficiency(report: InspectionReport, idx: number, done: boolean, desc?: string) {
+    checklistMutation.mutate({ reportId: report.id, updates: [{ index: idx, done, done_description: desc }] })
+  }
+
+  function handleDefCheckbox(report: InspectionReport, idx: number, checked: boolean) {
+    if (checked) {
+      setPendingDefCheck({ report, idx })
+      setDefCompletionDesc('')
+    } else {
+      toggleDeficiency(report, idx, false)
+    }
   }
 
   return (
@@ -396,13 +409,14 @@ export default function InspectionsPage() {
                         <Checkbox
                           key={i}
                           checked={!!d.done}
-                          onChange={e => toggleDeficiency(r, i, e.target.checked)}
+                          onChange={e => handleDefCheckbox(r, i, e.target.checked)}
                           label={
                             <Group gap="xs">
                               <Badge color={SEVERITY_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
                               <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
                                 {d.description}
-                                {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
+                                {d.done && d.done_by && <Text span size="xs" c="teal"> ✓ {d.done_by}</Text>}
+                                {d.done && (d as any).done_description && <Text span size="xs" c="dimmed"> — {(d as any).done_description}</Text>}
                               </Text>
                             </Group>
                           }
@@ -551,10 +565,10 @@ export default function InspectionsPage() {
               <Paper withBorder p="sm" radius="sm">
                 <Stack gap="sm">
                   <Text size="xs" c="dimmed">פרטי המעלית החדשה (מולאו מהדוח — ניתן לעדכן):</Text>
-                  <TextInput label="כתובת *" size="xs" value={createElev.address}
-                    onChange={e => setCreateElev(f => ({ ...f, address: e.target.value }))} />
-                  <TextInput label="עיר *" size="xs" value={createElev.city}
-                    onChange={e => setCreateElev(f => ({ ...f, city: e.target.value }))} />
+                  <StreetInput label="כתובת *" size="xs" value={createElev.address}
+                    onChange={v => setCreateElev(f => ({ ...f, address: v }))} city={createElev.city} />
+                  <CitySelect label="עיר *" size="xs" required value={createElev.city}
+                    onChange={v => setCreateElev(f => ({ ...f, city: v }))} />
                   <TextInput label="שם בניין (אופציונלי)" size="xs" value={createElev.building_name}
                     onChange={e => setCreateElev(f => ({ ...f, building_name: e.target.value }))} />
                   <Button color="green" size="sm"
@@ -566,6 +580,45 @@ export default function InspectionsPage() {
                 </Stack>
               </Paper>
             )}
+          </Stack>
+        )}
+      </Modal>
+
+      {/* Deficiency completion description modal */}
+      <Modal
+        opened={!!pendingDefCheck}
+        onClose={() => { setPendingDefCheck(null); setDefCompletionDesc('') }}
+        title="✅ תיאור ביצוע הטיפול"
+        dir="rtl"
+        size="sm"
+      >
+        {pendingDefCheck && (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">ליקוי: <strong>{pendingDefCheck.report.deficiencies?.[pendingDefCheck.idx]?.description}</strong></Text>
+            <Text size="xs" c="dimmed">תאריך ביצוע: {new Date().toLocaleString('he-IL')}</Text>
+            <Group justify="space-between" mb={4}>
+              <Text size="sm" fw={500}>תאר את הטיפול שבוצע *</Text>
+              <TranscribeButton onResult={t => setDefCompletionDesc(d => d ? d + ' ' + t : t)} />
+            </Group>
+            <Textarea
+              placeholder="לדוגמה: החלפת חלק, כיוונון, ניקוי..."
+              value={defCompletionDesc}
+              onChange={e => setDefCompletionDesc(e.target.value)}
+              minRows={3}
+              autosize
+              autoFocus
+            />
+            <Button
+              disabled={!defCompletionDesc.trim()}
+              loading={checklistMutation.isPending}
+              onClick={() => {
+                toggleDeficiency(pendingDefCheck.report, pendingDefCheck.idx, true, defCompletionDesc)
+                setPendingDefCheck(null)
+                setDefCompletionDesc('')
+              }}
+            >
+              שמור
+            </Button>
           </Stack>
         )}
       </Modal>
@@ -582,8 +635,11 @@ export default function InspectionsPage() {
           <Stack gap="md">
             <Text size="sm">📍 <strong>{completionModal.elevatorAddress}</strong></Text>
             <Text size="sm" c="dimmed">כל הליקויים סומנו כמטופלים. ניתן לערוך את הסיכום לפני שליחה:</Text>
+            <Group justify="space-between" mb={4}>
+              <Text size="sm" fw={500}>סיכום הטיפול</Text>
+              <TranscribeButton onResult={t => setCompletionNotes(n => n ? n + ' ' + t : t)} />
+            </Group>
             <Textarea
-              label="סיכום הטיפול"
               value={completionNotes}
               onChange={e => setCompletionNotes(e.target.value)}
               minRows={4}

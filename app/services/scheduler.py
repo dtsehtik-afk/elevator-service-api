@@ -146,6 +146,11 @@ def _run_nightly_maintenance():
                 status="OPEN",
             )
             db.add(sc)
+            db.flush()
+            from sqlalchemy import func as _func_sc
+            import random as _rnd_sc
+            max_n = db.query(_func_sc.max(ServiceCall.call_number)).scalar()
+            sc.call_number = _rnd_sc.randint(10000, 99999) if max_n is None else max_n + 1
             db.commit()
             opened += 1
 
@@ -1727,14 +1732,17 @@ _DEFICIENCY_THRESHOLDS = [
 
 def _check_inspection_deficiency_escalation():
     """
-    Runs every 6 hours. For open inspection reports with deficiencies:
+    Runs every 6 hours — only during working hours.
+    For open inspection reports with deficiencies:
     - 7+ days: yellow warning to dispatcher (WhatsApp)
     - 14+ days: orange urgent to dispatcher (WhatsApp)
     - 30+ days: red urgent to dispatcher (WhatsApp only — no auto service-call)
-
-    Inspection deficiencies are tracked and resolved through the inspection-reports
-    dashboard, not through regular service calls.
     """
+    from app.services.working_hours import is_working_hours
+    if not is_working_hours():
+        logger.debug("⏰ Off-hours — skipping inspection deficiency escalation")
+        return
+
     from datetime import date
     from app.database import SessionLocal
     from app.models.inspection_report import InspectionReport

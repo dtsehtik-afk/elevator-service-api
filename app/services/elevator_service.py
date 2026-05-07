@@ -215,14 +215,62 @@ def list_elevators(
     return query.offset(skip).limit(min(limit, 2000)).all()
 
 
+# Israeli public holidays + eves (dates to skip when scheduling)
+# Format: (month, day) — year-agnostic recurring and year-specific combined
+_IL_HOLIDAY_DATES: set = {
+    # Yom Kippur eve + day
+    (10, 1), (10, 2),
+    # Rosh Hashana (1-2 Tishrei)
+    (9, 22), (9, 23), (9, 24),   # 2025
+    (9, 11), (9, 12), (9, 13),   # 2026
+    (9, 1),  (9, 2),  (9, 3),    # 2027
+    # Sukkot first + last day + eve
+    (10, 5), (10, 6), (10, 12), (10, 13),  # 2025
+    (9, 24), (9, 25), (10, 1), (10, 2),    # 2026
+    (9, 14), (9, 15), (9, 21), (9, 22),    # 2027
+    # Pesach first + last + eves
+    (4, 12), (4, 13), (4, 19), (4, 20),   # 2025
+    (4, 1),  (4, 2),  (4, 8),  (4, 9),    # 2026
+    (3, 21), (3, 22), (3, 28), (3, 29),   # 2027
+    # Shavuot + eve
+    (6, 1), (6, 2),    # 2025
+    (5, 21), (5, 22),  # 2026
+    (5, 10), (5, 11),  # 2027
+    # Yom Haatzmaut + eve (Yom Hazikaron)
+    (4, 29), (4, 30),  # 2025
+    (4, 21), (4, 22),  # 2026
+    (4, 11), (4, 12),  # 2027
+    # Purim
+    (3, 13), (3, 14),  # 2025
+    (3, 3),  (3, 4),   # 2026
+    (2, 20), (2, 21),  # 2027
+}
+
+
+def _skip_to_workday(d) -> "date":
+    """Advance d past any Friday (weekday=4), Saturday (5), or Israeli holiday."""
+    from datetime import timedelta as _td
+    from datetime import date as _date
+    d = d if isinstance(d, _date) else _date(d.year, d.month, d.day)
+    for _ in range(14):  # max 2-week scan
+        if d.weekday() >= 4:  # Friday=4, Saturday=5
+            d += _td(days=1)
+            continue
+        if (d.month, d.day) in _IL_HOLIDAY_DATES:
+            d += _td(days=1)
+            continue
+        break
+    return d
+
+
 def _recalculate_next_service(elevator: Elevator) -> None:
     """Auto-fill next_service_date from last_service_date + maintenance interval.
 
     Priority:
     1. maintenance_interval_days (explicit, set from import or edit)
     2. service_contract: ANNUAL_6 → 60 days, ANNUAL_12 → 30 days
-    3. service_type: COMPREHENSIVE → 30 days, REGULAR → 60 days
-    4. Default: 60 days
+    3. Default: 60 days (monthly contract)
+    Result is shifted to the nearest workday (skips Fri/Sat/holidays).
     """
     from datetime import timedelta
     if not elevator.last_service_date:
@@ -233,11 +281,46 @@ def _recalculate_next_service(elevator: Elevator) -> None:
         days = 30
     elif elevator.service_contract == "ANNUAL_6":
         days = 60
-    elif elevator.service_type == "COMPREHENSIVE":
-        days = 30
     else:
         days = 60
-    elevator.next_service_date = elevator.last_service_date + timedelta(days=days)
+    candidate = elevator.last_service_date + timedelta(days=days)
+    elevator.next_service_date = _skip_to_workday(candidate)
+
+
+def backfill_next_service_dates(db: Session) -> int:
+    """Set next_service_date for every elevator that is missing it.
+
+    - Has last_service_date → compute from interval (workday-adjusted)
+    - No last_service_date  → random workday within the next 30 days
+      (spread randomly to avoid scheduling overload)
+    Only touches elevators where next_service_date is currently NULL.
+    """
+    import random
+    from datetime import date, timedelta
+
+    elevators = db.query(Elevator).filter(Elevator.next_service_date.is_(None)).all()
+    count = 0
+    today = date.today()
+
+    for elevator in elevators:
+        try:
+            if elevator.last_service_date:
+                _recalculate_next_service(elevator)
+            else:
+                # Random workday in the next 1–30 days so maintenance is spread out
+                offset = random.randint(1, 30)
+                candidate = today + timedelta(days=offset)
+                elevator.next_service_date = _skip_to_workday(candidate)
+            count += 1
+        except Exception:
+            continue
+
+    if count:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+    return count
 
 
 def _recalculate_contract_renewal(elevator: Elevator) -> None:
@@ -265,10 +348,9 @@ def update_elevator(
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(elevator, field, value)
-    # Always recalculate next_service_date unless it was explicitly overridden in this call
-    if "next_service_date" not in updates:
-        _recalculate_next_service(elevator)
-    elif "last_service_date" in updates and "next_service_date" not in updates:
+    # Recalculate next_service_date whenever any of its inputs change
+    service_inputs = {"last_service_date", "maintenance_interval_days", "service_contract", "service_type"}
+    if service_inputs & set(updates.keys()) or "next_service_date" not in updates:
         _recalculate_next_service(elevator)
     # Auto-calculate contract_renewal when contract_start is set but renewal is not
     if "contract_start" in updates and "contract_renewal" not in updates:

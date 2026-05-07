@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime
 from typing import Optional
-from sqlalchemy import Date, DateTime, Float, Integer, JSON, String, Text, func
+from sqlalchemy import Date, DateTime, Float, Integer, JSON, String, Text, func  # noqa: F401
 from sqlalchemy.types import Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -22,8 +22,16 @@ class InspectionReport(Base):
     raw_city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     labor_file_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     inspection_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    next_inspection_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     result: Mapped[str] = mapped_column(String(10), nullable=False, default="UNKNOWN")  # PASS | FAIL | UNKNOWN
     inspector_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    inspector_phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    inspector_mobile: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    inspector_email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    inspector_license: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    manufacturer: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    floor_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     deficiency_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deficiencies: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     service_call_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)

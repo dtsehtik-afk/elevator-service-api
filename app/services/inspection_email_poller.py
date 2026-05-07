@@ -35,6 +35,12 @@ _KEYWORDS = [
     "elevator inspection", "inspection report",
 ]
 
+_LEAD_KEYWORDS = {
+    "מתעניין", "מתעניינת", "הצעת מחיר", "הצעה", "לקוח חדש", "לקוחה חדשה",
+    "חוזה שירות", "חוזה חדש", "מחיר שירות", "כמה עולה", "כמה זה עולה",
+    "לקוח פוטנציאלי", "רוצה לדעת", "אשמח לשמוע", "תחשיב", "עסקה",
+}
+
 _VALID_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif"}
 _EXT_TO_MIME = {
     ".pdf":  "application/pdf",
@@ -131,6 +137,32 @@ def _extract_attachments(msg) -> list[dict]:
 
 
 # ── deduplication ──────────────────────────────────────────────────────────────
+
+def _try_create_inspection_lead(db, sender: str, subject: str, body: str) -> None:
+    """Create a CRM lead from an inspection-related email that contains inquiry keywords."""
+    try:
+        from app.models.lead import Lead
+        name = sender.split("<")[0].strip().strip('"') or sender
+        existing = db.query(Lead).filter(
+            Lead.notes.ilike(f"%{sender[:60]}%"),
+            Lead.status.in_(["NEW", "CONTACTED", "QUALIFIED"]),
+        ).first()
+        if existing:
+            return
+        lead = Lead(
+            name=name or "ליד ממייל",
+            email=re.search(r"<([^>]+)>", sender).group(1) if "<" in sender else sender,
+            source="EMAIL",
+            status="NEW",
+            notes=f"נושא: {subject}\n{body[:400]}",
+        )
+        db.add(lead)
+        db.commit()
+        logger.info("📊 Lead created from inspection email: %s", sender)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Failed to create lead from inspection email: %s", exc)
+
 
 def _already_scanned(db, message_id: str) -> bool:
     from app.models.inspection_email_scan import InspectionEmailScan
@@ -256,6 +288,10 @@ def poll_inspection_emails(db, since_date: Optional[date] = None) -> int:
                 combined       = f"{subject} {body_text[:800]} {filenames_text}"
 
                 if not _has_keyword(combined):
+                    # Even without inspection keywords, check for lead inquiry intent
+                    _body_lower = body_text.lower()
+                    if any(kw in _body_lower for kw in _LEAD_KEYWORDS):
+                        _try_create_inspection_lead(db, sender, subject, body_text)
                     _record_scan(db, message_id, uid.decode(), subject, sender, 0, 0)
                     continue
 

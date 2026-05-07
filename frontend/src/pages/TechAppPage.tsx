@@ -2,8 +2,9 @@
  * TechAppPage — Mobile technician app
  * Accessible at /tech — no admin shell, optimized for phone
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select } from '@mantine/core'
+import { useState, useEffect, useRef } from 'react'
+import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse } from '@mantine/core'
+import TranscribeButton from '../components/TranscribeButton'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -144,11 +145,17 @@ async function sendLocation(techId: string, lat: number, lng: number) {
   await client.post(`/webhooks/location/${techId}`, { latitude: lat, longitude: lng })
 }
 
-async function fetchMaintenance(techId: string): Promise<MaintenanceItem[]> {
-  const today = new Date().toISOString().split('T')[0]
-  const future = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-  const { data } = await client.get('/maintenance', { params: { technician_id: techId, from: today, to: future, status: 'SCHEDULED', limit: 50 } })
-  return data
+async function fetchMaintenance(_techId: string): Promise<MaintenanceItem[]> {
+  const past = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
+  const future = new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]
+  // Fetch SCHEDULED (upcoming) and OVERDUE separately then merge
+  const [scheduled, overdue] = await Promise.all([
+    client.get('/maintenance', { params: { from: new Date().toISOString().split('T')[0], to: future, status: 'SCHEDULED', limit: 50 } }),
+    client.get('/maintenance', { params: { from: past, to: new Date().toISOString().split('T')[0], status: 'OVERDUE', limit: 50 } }),
+  ])
+  const scheduledData = Array.isArray(scheduled.data) ? scheduled.data : []
+  const overdueData = Array.isArray(overdue.data) ? overdue.data : []
+  return [...overdueData, ...scheduledData]
 }
 
 async function fetchMyReports(): Promise<InspReport[]> {
@@ -161,28 +168,13 @@ async function fetchMapPins(techId: string): Promise<MapPin[]> {
   return data.pins ?? []
 }
 
-async function toggleDeficiency(reportId: string, idx: number, done: boolean, action_notes?: string) {
-  const upd: Record<string, unknown> = { index: idx, done }
+async function toggleDeficiency(reportId: string, idx: number, done: boolean, doneDescription?: string, action_notes?: string) {
+  const upd: Record<string, unknown> = { index: idx, done, done_description: doneDescription ?? '' }
   if (action_notes !== undefined) upd.action_notes = action_notes
   await client.patch(`/inspections/checklist/${reportId}`, [upd])
 }
 
 // ── Voice transcription hook ──────────────────────────────────────────────
-function useVoice(onResult: (t: string) => void) {
-  const [active, setActive] = useState(false)
-  const start = useCallback(() => {
-    const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
-    if (!SR) { notifications.show({ message: 'הדפדפן לא תומך בתמלול קולי', color: 'orange' }); return }
-    const r = new SR()
-    r.lang = 'he-IL'; r.continuous = false; r.interimResults = false
-    r.onstart = () => setActive(true)
-    r.onend = () => setActive(false)
-    r.onresult = (e: any) => onResult(e.results[0][0].transcript)
-    r.onerror = () => setActive(false)
-    r.start()
-  }, [onResult])
-  return { start, active }
-}
 
 // ── Login Screen ───────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
@@ -325,19 +317,19 @@ const SEV_COLOR: Record<string, string> = { HIGH: 'red', MEDIUM: 'orange', LOW: 
 function ReportsTab() {
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({})
-  const [voiceTarget, setVoiceTarget] = useState<string | null>(null)
+  const [pendingCheck, setPendingCheck] = useState<{ reportId: string; idx: number } | null>(null)
+  const [completionDesc, setCompletionDesc] = useState('')
   const { data: reports = [], isLoading } = useQuery({ queryKey: ['tech-reports'], queryFn: fetchMyReports })
 
   const checkMut = useMutation({
-    mutationFn: ({ reportId, idx, done, action_notes }: { reportId: string; idx: number; done: boolean; action_notes?: string }) =>
-      toggleDeficiency(reportId, idx, done, action_notes),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tech-reports'] }),
+    mutationFn: ({ reportId, idx, done, desc }: { reportId: string; idx: number; done: boolean; desc?: string }) =>
+      toggleDeficiency(reportId, idx, done, desc),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tech-reports'] })
+      setPendingCheck(null)
+      setCompletionDesc('')
+    },
     onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
-  })
-
-  const voice = useVoice((t) => {
-    if (voiceTarget) setNoteDraft(prev => ({ ...prev, [voiceTarget]: (prev[voiceTarget] ? prev[voiceTarget] + ' ' : '') + t }))
   })
 
   const open = reports.filter(r => r.report_status === 'OPEN' || r.report_status === 'PARTIAL')
@@ -346,72 +338,91 @@ function ReportsTab() {
   if (!open.length) return <Card withBorder p="xl" ta="center"><Text c="dimmed">אין דוחות פתוחים לטיפול</Text></Card>
 
   return (
-    <Stack gap="sm">
-      {open.map(r => (
-        <Card key={r.id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #fa5252' }}>
+    <>
+      <Modal
+        opened={!!pendingCheck}
+        onClose={() => { setPendingCheck(null); setCompletionDesc('') }}
+        title="✅ תיאור ביצוע הטיפול"
+        centered
+        size="sm"
+      >
+        <Stack gap="sm">
+          <Text size="xs" c="dimmed">
+            {new Date().toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}
+          </Text>
           <Group justify="space-between" mb={4}>
-            <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
-            <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
+            <Text size="sm" fw={500}>תאר את הטיפול שבוצע</Text>
+            <TranscribeButton onResult={t => setCompletionDesc(d => d ? d + ' ' + t : t)} />
           </Group>
-          {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
-          <Button size="xs" variant="subtle" mt={6}
-            onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
-            {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
-          </Button>
-          <Collapse in={expanded === r.id}>
-            <Stack gap="sm" mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
-              {(r.deficiencies || []).map((d, i) => {
-                const key = `${r.id}-${i}`
-                const draft = noteDraft[key] ?? d.action_notes ?? ''
-                return (
-                  <Stack key={i} gap={4} p={6} style={{ background: '#fff', borderRadius: 6, border: '1px solid #ffd6d6' }}>
-                    <Checkbox checked={!!d.done}
+          <Textarea
+            placeholder="פרט את הפעולות שבוצעו לתיקון הליקוי..."
+            value={completionDesc}
+            onChange={e => setCompletionDesc(e.target.value)}
+            rows={4}
+            autosize
+          />
+          <Group justify="space-between" mt="xs">
+            <Button variant="subtle" color="gray" onClick={() => { setPendingCheck(null); setCompletionDesc('') }}>
+              ביטול
+            </Button>
+            <Button
+              loading={checkMut.isPending}
+              onClick={() => pendingCheck && checkMut.mutate({ reportId: pendingCheck.reportId, idx: pendingCheck.idx, done: true, desc: completionDesc })}
+            >
+              שמור טיפול
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Stack gap="sm">
+        {open.map(r => (
+          <Card key={r.id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #fa5252' }}>
+            <Group justify="space-between" mb={4}>
+              <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
+              <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
+            </Group>
+            {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
+            <Button size="xs" variant="subtle" mt={6}
+              onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+              {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
+            </Button>
+            <Collapse in={expanded === r.id}>
+              <Stack gap={6} mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
+                {(r.deficiencies || []).map((d: any, i: number) => (
+                  <div key={i}>
+                    <Checkbox
+                      checked={!!d.done}
                       onChange={e => {
-                        const done = e.target.checked
-                        const notes = noteDraft[key] ?? d.action_notes
-                        checkMut.mutate({ reportId: r.id, idx: i, done, action_notes: notes })
+                        if (e.target.checked) {
+                          setPendingCheck({ reportId: r.id, idx: i })
+                        } else {
+                          checkMut.mutate({ reportId: r.id, idx: i, done: false })
+                        }
                       }}
                       label={
-                        <Group gap="xs" wrap="nowrap">
+                        <Group gap="xs">
                           <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
                           <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
                             {d.description}
-                            {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
                           </Text>
                         </Group>
                       }
                     />
-                    <Group gap="xs" align="flex-end">
-                      <Textarea
-                        placeholder="תיאור ביצוע..."
-                        value={draft}
-                        onChange={e => setNoteDraft(prev => ({ ...prev, [key]: e.target.value }))}
-                        onBlur={() => {
-                          if (draft !== (d.action_notes ?? ''))
-                            checkMut.mutate({ reportId: r.id, idx: i, done: !!d.done, action_notes: draft })
-                        }}
-                        autosize minRows={1} maxRows={3}
-                        size="xs"
-                        style={{ flex: 1, direction: 'rtl' }}
-                      />
-                      <ActionIcon
-                        color={voice.active && voiceTarget === key ? 'red' : 'blue'}
-                        variant="light" size="md"
-                        onClick={() => { setVoiceTarget(key); voice.start() }}
-                        title="תמלול קולי"
-                      >🎤</ActionIcon>
-                    </Group>
-                    {d.action_notes && draft === (d.action_notes ?? '') && (
-                      <Text size="xs" c="teal">✅ נשמר: {d.action_notes}</Text>
+                    {d.done && (
+                      <div style={{ paddingRight: 28, marginTop: 2 }}>
+                        {d.done_by && <Text size="xs" c="teal">✅ {d.done_by}{d.done_at ? ` · ${new Date(d.done_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}` : ''}</Text>}
+                        {d.done_description && <Text size="xs" c="dimmed" style={{ fontStyle: 'italic' }}>"{d.done_description}"</Text>}
+                      </div>
                     )}
-                  </Stack>
-                )
-              })}
-            </Stack>
-          </Collapse>
-        </Card>
-      ))}
-    </Stack>
+                  </div>
+                ))}
+              </Stack>
+            </Collapse>
+          </Card>
+        ))}
+      </Stack>
+    </>
   )
 }
 
@@ -470,7 +481,6 @@ function TechMain() {
   const [resolveOpen, setResolveOpen] = useState(false)
   const [resolveCallId, setResolveCallId] = useState<string | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
-  const voice = useVoice(t => setResolveNotes(n => n ? n + ' ' + t : t))
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
@@ -503,9 +513,13 @@ function TechMain() {
 
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
-    if (q.length < 2) { setElevResults([]); return }
-    const results = await searchElevators(techId!, q)
-    setElevResults(results)
+    if (q.length < 1 || !techId) { setElevResults([]); return }
+    try {
+      const results = await searchElevators(techId, q)
+      setElevResults(Array.isArray(results) ? results : [])
+    } catch {
+      setElevResults([])
+    }
   }
 
   const claimMutation = useMutation({
@@ -626,9 +640,7 @@ function TechMain() {
               <Stack gap="sm">
                 <Group justify="space-between">
                   <Text size="sm" c="dimmed">תאר את הפעולות שבוצעו (אופציונלי)</Text>
-                  <Button size="xs" variant={voice.active ? 'filled' : 'subtle'} color={voice.active ? 'red' : 'blue'} onClick={voice.start}>
-                    {voice.active ? '🎤 מאזין...' : '🎤 תמלול'}
-                  </Button>
+                  <TranscribeButton onResult={t => setResolveNotes(n => n ? n + ' ' + t : t)} />
                 </Group>
                 <Textarea
                   placeholder="לדוגמה: הוחלף חיישן הדלת, נבדקה תקינות המנוע..."
@@ -669,7 +681,7 @@ function TechMain() {
                     <Text size="sm" c="dimmed">{e.city} {e.building_name && `— ${e.building_name}`}</Text>
                   </Card>
                 ))}
-                {elevSearch.length >= 2 && elevResults.length === 0 && (
+                {elevSearch.length >= 1 && elevResults.length === 0 && (
                   <Text c="dimmed" ta="center" size="sm">לא נמצאו תוצאות</Text>
                 )}
               </Stack>

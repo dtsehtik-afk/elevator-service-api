@@ -45,24 +45,30 @@ def _upsert_caller_contact(db: Session, elevator, reported_by: str) -> None:
     if not phone:
         return  # no identifiable phone — skip
 
-    # Find the elevator's building_id (can be None)
     building_id = getattr(elevator, "building_id", None)
+    elevator_id = getattr(elevator, "id", None)
 
-    # Check if contact with same phone already exists for this building
-    existing = db.query(Contact).filter(
-        Contact.phone == phone,
-        Contact.building_id == building_id,
-    ).first()
+    # Dedup: by building when available, otherwise by elevator
+    if building_id:
+        existing = db.query(Contact).filter(
+            Contact.phone == phone,
+            Contact.building_id == building_id,
+        ).first()
+    else:
+        existing = db.query(Contact).filter(
+            Contact.phone == phone,
+            Contact.elevator_id == elevator_id,
+        ).first()
 
     if existing:
-        # Update name if we have a better one
         if name and name != phone and existing.name == phone:
             existing.name = name
             db.commit()
         return
 
     contact = Contact(
-        building_id=building_id,
+        building_id=building_id if building_id else None,
+        elevator_id=None if building_id else elevator_id,
         name=name or phone,
         phone=phone,
         role="RESIDENT",
@@ -92,7 +98,8 @@ def _check_recurring(db: Session, elevator_id: uuid.UUID, fault_type: str) -> bo
 
 
 def create_service_call(
-    db: Session, data: ServiceCallCreate, current_user_email: str
+    db: Session, data: ServiceCallCreate, current_user_email: str,
+    original_created_at: Optional[datetime] = None,
 ) -> ServiceCall:
     """Open a new service call.
 
@@ -105,6 +112,7 @@ def create_service_call(
         db: Database session.
         data: Validated service call creation data.
         current_user_email: Email of the user opening the call (for audit log).
+        original_created_at: If provided, use as created_at instead of now().
 
     Returns:
         The newly created ServiceCall ORM object.
@@ -118,9 +126,19 @@ def create_service_call(
         priority=data.priority,
         fault_type=data.fault_type,
         is_recurring=is_recurring,
+        **({"created_at": original_created_at} if original_created_at else {}),
     )
     db.add(call)
     db.flush()  # Get the ID before commit
+
+    # Assign sequential call number
+    from sqlalchemy import func as _func
+    import random as _random
+    max_num = db.query(_func.max(ServiceCall.call_number)).scalar()
+    if max_num is None:
+        call.call_number = _random.randint(10000, 99999)
+    else:
+        call.call_number = max_num + 1
 
     # Write initial audit log
     audit = AuditLog(

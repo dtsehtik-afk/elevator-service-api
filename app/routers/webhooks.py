@@ -6,6 +6,7 @@ import html as html_lib
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -24,6 +25,27 @@ from app.services import whatsapp_service
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+
+def _parse_call_time(call_time_str: str) -> Optional[datetime]:
+    """Parse the original call time from the email body field 'מועד התקשרות'.
+    Tries common Israeli formats: DD/MM/YYYY HH:MM or DD/MM/YYYY HH:MM:SS.
+    Returns a timezone-aware UTC datetime, or None on failure.
+    """
+    if not call_time_str:
+        return None
+    s = call_time_str.strip()
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+        try:
+            dt = datetime.strptime(s, fmt)
+            # Assume Israel time (UTC+2 / UTC+3) — store as UTC+2 (non-DST safe approximation)
+            # Using Israel Standard Time offset +02:00 as conservative default
+            from datetime import timezone as _tz, timedelta as _td
+            israel_tz = _tz(_td(hours=3))  # IDT (summer) is UTC+3; IST (winter) is UTC+2
+            return dt.replace(tzinfo=israel_tz)
+        except ValueError:
+            continue
+    return None
 
 
 def _clean_html(text: str) -> str:
@@ -176,13 +198,15 @@ async def receive_call(
     if match.elevator:
         enriched = enrich_elevator(db, match.elevator, parsed)
 
-    # 3b. Save caller phone to elevator for future matching (if not already saved)
+    # 3b. Save caller phone to elevator + auto-create resident contact for new callers
     if match.match_status == "MATCHED" and match.elevator and parsed.phone:
         _save_caller_phone(match.elevator, parsed.phone, db)
+        _ensure_resident_contact(db, match.elevator, parsed)
 
     # 4. Create service call (only on confident match) — otherwise alert dispatcher
     service_call = None
     if match.match_status == "MATCHED" and match.elevator:
+        original_ts = _parse_call_time(getattr(parsed, "call_time", ""))
         call_data = ServiceCallCreate(
             elevator_id=match.elevator.id,
             reported_by=(f"{parsed.name} | {parsed.phone}" if parsed.name and parsed.phone else parsed.name or parsed.phone or "מוקד טלפוני"),
@@ -191,7 +215,7 @@ async def receive_call(
             fault_type=parsed.fault_type,
         )
         service_call = service_call_service.create_service_call(
-            db, call_data, "webhook@system"
+            db, call_data, "webhook@system", original_created_at=original_ts
         )
     elif match.match_status in ("PARTIAL", "UNMATCHED"):
         # Elevator not found with enough confidence — notify dispatcher to handle manually
@@ -211,6 +235,32 @@ async def receive_call(
             )
         except Exception as exc:
             logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
+        # Fault-related unmatched call → already in IncomingCallLog (pending queue)
+        # Non-fault call → open a CRM lead and notify sales managers
+        _FAULT_TYPES = {"STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "RESCUE"}
+        is_fault_call = parsed.fault_type in _FAULT_TYPES
+        if not is_fault_call and parsed.phone:
+            try:
+                from app.models.lead import Lead
+                existing_lead = db.query(Lead).filter(Lead.phone == parsed.phone).first()
+                if not existing_lead:
+                    lead = Lead(
+                        name=parsed.name or parsed.phone,
+                        phone=parsed.phone,
+                        source="PHONE",
+                        status="NEW",
+                        notes=(
+                            f"נוסף אוטומטית מקריאה נכנסת — "
+                            f"{parsed.street or ''} {parsed.city or ''}"
+                        ),
+                    )
+                    db.add(lead)
+                    db.commit()
+                    logger.info("Auto-created lead for unknown caller %s", parsed.phone)
+                    _notify_sales_managers(db, lead, parsed.name or "", parsed.phone)
+            except Exception as exc:
+                db.rollback()
+                logger.error("Failed to auto-create lead for caller %s: %s", parsed.phone, exc)
 
     # 5. AI assignment — with after-hours caller confirmation for non-RESCUE calls
     assignment = None
@@ -252,26 +302,37 @@ async def receive_call(
                 parsed.fault_type,
             )
 
-    # 6. Log
+    # 6. Log — always save regardless of earlier failures; rollback any pending error first
+    try:
+        db.rollback()
+    except Exception:
+        pass
     log = IncomingCallLog(
-        raw_text=email_body,
-        caller_name=parsed.name or None,
-        caller_phone=parsed.phone or None,
-        call_city=parsed.city or None,
-        call_street=parsed.street or None,
-        call_type=parsed.call_type or None,
-        call_time_raw=parsed.call_time or None,
+        raw_text=email_body[:10000],  # cap to avoid oversized text
+        caller_name=(parsed.name or None),
+        caller_phone=(parsed.phone or None),
+        call_city=(parsed.city or None),
+        call_street=(parsed.street or None),
+        call_type=(getattr(parsed, "call_type", None) or None),
+        call_time_raw=(getattr(parsed, "call_time", None) or None),
         fault_type=parsed.fault_type,
         priority=parsed.priority,
         match_status=match.match_status,
         match_score=match.score,
         match_notes=match.match_notes,
-        elevator_id=match.elevator.id if match.elevator else None,
-        service_call_id=service_call.id if service_call else None,
+        elevator_id=(match.elevator.id if match.elevator else None),
+        service_call_id=(service_call.id if service_call else None),
     )
     db.add(log)
-    db.commit()
-    db.refresh(log)
+    try:
+        db.commit()
+        db.refresh(log)
+    except Exception as log_exc:
+        logger.error("Failed to save IncomingCallLog: %s", log_exc)
+        db.rollback()
+        # Create a minimal in-memory log object so the response can still be built
+        import uuid as _uuid
+        log.id = _uuid.uuid4()
 
     # Resolve assigned technician name for the response
     assigned_name = None
@@ -458,6 +519,38 @@ def receive_whatsapp(
         _handle_tech_reply(db, phone, text, pending, settings)
         return {"status": "processed"}
 
+    # Auto-create lead when message contains inquiry keywords from an unknown number
+    _LEAD_KEYWORDS = {
+        "מתעניין", "מתעניינת", "הצעת מחיר", "הצעה", "לקוח חדש", "לקוחה חדשה",
+        "חוזה", "חוזה חדש", "מחיר", "כמה עולה", "כמה זה עולה", "שאלה", "יצירת קשר",
+        "לקוח פוטנציאלי", "רוצה לדעת", "אשמח לשמוע", "תחשיב", "עסקה",
+    }
+    _text_lower = text.lower()
+    if any(kw in _text_lower for kw in _LEAD_KEYWORDS):
+        try:
+            # Only create lead if phone doesn't belong to a known technician or contact
+            from app.models.technician import Technician as _Tech
+            _is_tech = db.query(_Tech).filter(
+                (_Tech.phone == phone) | (_Tech.whatsapp_number == phone)
+            ).first()
+            if not _is_tech:
+                from app.models.lead import Lead as _Lead
+                _existing = db.query(_Lead).filter(_Lead.phone == phone).first()
+                if not _existing:
+                    _lead = _Lead(
+                        name=phone,
+                        phone=phone,
+                        source="PHONE",
+                        status="NEW",
+                        notes=f"נוסף אוטומטית מהודעת WhatsApp: {text[:200]}",
+                    )
+                    db.add(_lead)
+                    db.commit()
+                    logger.info("Auto-created lead from WhatsApp inquiry from %s", phone)
+        except Exception as _exc:
+            db.rollback()
+            logger.error("Failed to auto-create lead from WhatsApp: %s", _exc)
+
     # Free-text: report / question / self-assign
     # Pass is_reply=True for quoted messages so the chat agent loads conversation history
     from app.services.scheduler import _handle_free_text
@@ -633,6 +726,76 @@ def _save_caller_phone(elevator, phone: str, db) -> None:
         logger.warning("📞 Saved caller phone %s to elevator %s", normalized, elevator.id)
     except Exception as exc:
         logger.error("Failed to save caller phone: %s", exc)
+
+
+def _ensure_resident_contact(db, elevator, parsed) -> None:
+    """Auto-create a RESIDENT contact when an unknown caller is matched to an elevator."""
+    try:
+        phone = (parsed.phone or "").strip()
+        if not phone:
+            return
+        digits = "".join(c for c in phone if c.isdigit())
+        if len(digits) < 9:
+            return
+        from app.models.contact import Contact
+        tail = digits[-9:]
+        existing = (
+            db.query(Contact)
+            .filter(
+                Contact.elevator_id == elevator.id,
+                Contact.mobile.isnot(None),
+            )
+            .all()
+        )
+        for c in existing:
+            if "".join(d for d in (c.mobile or "") if d.isdigit())[-9:] == tail:
+                return  # already a contact
+        name = (parsed.name or "").strip()
+        contact = Contact(
+            elevator_id=elevator.id,
+            name=name or phone,
+            first_name=name or None,
+            mobile=phone,
+            role="RESIDENT",
+        )
+        db.add(contact)
+        db.commit()
+        logger.info("👤 Auto-created RESIDENT contact %s for elevator %s", phone, elevator.id)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Failed to auto-create resident contact: %s", exc)
+
+
+def _notify_sales_managers(db, lead, parsed_name: str, parsed_phone: str) -> None:
+    """Send WhatsApp notification to all SALES_MANAGER users when a lead is auto-created."""
+    try:
+        from app.models.technician import Technician
+        from app.services.whatsapp_service import send_whatsapp_message
+        from app.config import get_settings
+        managers = (
+            db.query(Technician)
+            .filter(Technician.role == "SALES_MANAGER", Technician.is_active == True)  # noqa: E712
+            .all()
+        )
+        if not managers:
+            return
+        base_url = get_settings().app_base_url.rstrip("/")
+        msg = (
+            f"📊 *ליד חדש נוצר אוטומטית*\n"
+            f"👤 {parsed_name or 'לא ידוע'}\n"
+            f"📞 {parsed_phone or ''}\n"
+            f"🔗 {base_url}/leads"
+        )
+        for mgr in managers:
+            dest = mgr.whatsapp_number or mgr.phone
+            if dest:
+                try:
+                    send_whatsapp_message(dest, msg)
+                except Exception:
+                    pass
+        logger.info("📊 Notified %d sales manager(s) about new lead", len(managers))
+    except Exception as exc:
+        logger.warning("Failed to notify sales managers: %s", exc)
 
 
 def _find_tech_by_phone_local(db, phone: str):
@@ -1455,6 +1618,18 @@ def list_pending_unmatched(db: Session = Depends(get_db)):
     return result
 
 
+@router.delete("/pending-unmatched/{log_id}", summary="Dismiss an unmatched call log without action")
+def dismiss_pending_unmatched(log_id: str, db: Session = Depends(get_db)):
+    """Mark an unmatched incoming call as DISMISSED so it no longer appears in the queue."""
+    import uuid as _uuid
+    log = db.query(IncomingCallLog).filter(IncomingCallLog.id == _uuid.UUID(log_id)).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+    log.match_status = "DISMISSED"
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/pending-unmatched/{log_id}/add-elevator", summary="Create a new elevator from an unmatched call and open a service call")
 def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
     """Create a new elevator from the call data, open a service call, and trigger AI assignment."""
@@ -1486,7 +1661,8 @@ def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
     db.add(elevator)
     db.flush()
 
-    # Create service call
+    # Create service call — preserve original call time
+    original_ts = _parse_call_time(log.call_time_raw or "") or log.created_at
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
         reported_by=(f"{log.caller_name} | {log.caller_phone}" if log.caller_name and log.caller_phone else log.caller_name or log.caller_phone or "מוקד טלפוני"),
@@ -1494,7 +1670,7 @@ def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
         priority=log.priority or "MEDIUM",
         fault_type=log.fault_type or "OTHER",
     )
-    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+    service_call = service_call_service.create_service_call(db, call_data, "webhook@system", original_created_at=original_ts)
 
     # Update log
     log.elevator_id = elevator.id
@@ -1544,7 +1720,8 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
             phones.append(log.caller_phone)
             elevator.caller_phones = phones
 
-    # Create service call
+    # Create service call — preserve original call time
+    original_ts = _parse_call_time(log.call_time_raw or "") or log.created_at
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
         reported_by=(f"{log.caller_name} | {log.caller_phone}" if log.caller_name and log.caller_phone else log.caller_name or log.caller_phone or "מוקד טלפוני"),
@@ -1552,7 +1729,7 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
         priority=log.priority or "MEDIUM",
         fault_type=log.fault_type or "OTHER",
     )
-    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+    service_call = service_call_service.create_service_call(db, call_data, "webhook@system", original_created_at=original_ts)
 
     # Update log
     log.elevator_id = elevator.id
