@@ -178,6 +178,7 @@ def list_elevators(
     max_risk: Optional[float] = None,
     skip: int = 0,
     limit: int = 50,
+    search: Optional[str] = None,
 ) -> List[Elevator]:
     """Return a filtered, paginated list of elevators.
 
@@ -189,11 +190,20 @@ def list_elevators(
         max_risk: Maximum risk_score filter.
         skip: Pagination offset.
         limit: Page size (max 200).
+        search: Free-text search across address, city, building_name.
 
     Returns:
         List of Elevator objects.
     """
+    from sqlalchemy import or_
     query = db.query(Elevator)
+    if search:
+        like = f"%{search}%"
+        query = query.filter(or_(
+            Elevator.address.ilike(like),
+            Elevator.city.ilike(like),
+            Elevator.building_name.ilike(like),
+        ))
     if city:
         query = query.filter(Elevator.city.ilike(f"%{city}%"))
     if status:

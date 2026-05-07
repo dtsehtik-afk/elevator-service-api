@@ -56,3 +56,11 @@ class MaintenanceSchedule(Base):
     technician: Mapped["Technician"] = relationship(  # noqa: F821
         "Technician", back_populates="maintenance_schedules"
     )
+
+    @property
+    def elevator_address(self) -> str | None:
+        return self.elevator.address if self.elevator else None
+
+    @property
+    def elevator_city(self) -> str | None:
+        return self.elevator.city if self.elevator else None

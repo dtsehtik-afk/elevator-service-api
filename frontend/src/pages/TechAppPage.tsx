@@ -66,7 +66,7 @@ interface MaintenanceItem {
   elevator_city: string
   scheduled_date: string
   status: string
-  notes: string | null
+  completion_notes: string | null
 }
 
 interface ReportDeficiency {
@@ -74,6 +74,7 @@ interface ReportDeficiency {
   severity: string
   done?: boolean
   done_by?: string
+  action_notes?: string
 }
 
 interface InspReport {
@@ -160,8 +161,10 @@ async function fetchMapPins(techId: string): Promise<MapPin[]> {
   return data.pins ?? []
 }
 
-async function toggleDeficiency(reportId: string, idx: number, done: boolean) {
-  await client.patch(`/inspections/checklist/${reportId}`, [{ index: idx, done }])
+async function toggleDeficiency(reportId: string, idx: number, done: boolean, action_notes?: string) {
+  const upd: Record<string, unknown> = { index: idx, done }
+  if (action_notes !== undefined) upd.action_notes = action_notes
+  await client.patch(`/inspections/checklist/${reportId}`, [upd])
 }
 
 // ── Voice transcription hook ──────────────────────────────────────────────
@@ -309,7 +312,7 @@ function MaintenanceTab({ techId }: { techId: string }) {
             <Text size="sm" c="dimmed">{new Date(m.scheduled_date).toLocaleDateString('he-IL')}</Text>
           </Group>
           <Text fw={700}>📍 {m.elevator_address}, {m.elevator_city}</Text>
-          {m.notes && <Text size="sm" c="dimmed" mt={4}>📝 {m.notes}</Text>}
+          {m.completion_notes && <Text size="sm" c="dimmed" mt={4}>📝 {m.completion_notes}</Text>}
         </Card>
       ))}
     </Stack>
@@ -322,12 +325,19 @@ const SEV_COLOR: Record<string, string> = { HIGH: 'red', MEDIUM: 'orange', LOW: 
 function ReportsTab() {
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({})
+  const [voiceTarget, setVoiceTarget] = useState<string | null>(null)
   const { data: reports = [], isLoading } = useQuery({ queryKey: ['tech-reports'], queryFn: fetchMyReports })
 
   const checkMut = useMutation({
-    mutationFn: ({ reportId, idx, done }: { reportId: string; idx: number; done: boolean }) => toggleDeficiency(reportId, idx, done),
+    mutationFn: ({ reportId, idx, done, action_notes }: { reportId: string; idx: number; done: boolean; action_notes?: string }) =>
+      toggleDeficiency(reportId, idx, done, action_notes),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tech-reports'] }),
     onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
+  })
+
+  const voice = useVoice((t) => {
+    if (voiceTarget) setNoteDraft(prev => ({ ...prev, [voiceTarget]: (prev[voiceTarget] ? prev[voiceTarget] + ' ' : '') + t }))
   })
 
   const open = reports.filter(r => r.report_status === 'OPEN' || r.report_status === 'PARTIAL')
@@ -349,21 +359,54 @@ function ReportsTab() {
             {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
           </Button>
           <Collapse in={expanded === r.id}>
-            <Stack gap={6} mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
-              {(r.deficiencies || []).map((d, i) => (
-                <Checkbox key={i} checked={!!d.done}
-                  onChange={e => checkMut.mutate({ reportId: r.id, idx: i, done: e.target.checked })}
-                  label={
-                    <Group gap="xs">
-                      <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
-                      <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
-                        {d.description}
-                        {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
-                      </Text>
+            <Stack gap="sm" mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
+              {(r.deficiencies || []).map((d, i) => {
+                const key = `${r.id}-${i}`
+                const draft = noteDraft[key] ?? d.action_notes ?? ''
+                return (
+                  <Stack key={i} gap={4} p={6} style={{ background: '#fff', borderRadius: 6, border: '1px solid #ffd6d6' }}>
+                    <Checkbox checked={!!d.done}
+                      onChange={e => {
+                        const done = e.target.checked
+                        const notes = noteDraft[key] ?? d.action_notes
+                        checkMut.mutate({ reportId: r.id, idx: i, done, action_notes: notes })
+                      }}
+                      label={
+                        <Group gap="xs" wrap="nowrap">
+                          <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
+                          <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
+                            {d.description}
+                            {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
+                          </Text>
+                        </Group>
+                      }
+                    />
+                    <Group gap="xs" align="flex-end">
+                      <Textarea
+                        placeholder="תיאור ביצוע..."
+                        value={draft}
+                        onChange={e => setNoteDraft(prev => ({ ...prev, [key]: e.target.value }))}
+                        onBlur={() => {
+                          if (draft !== (d.action_notes ?? ''))
+                            checkMut.mutate({ reportId: r.id, idx: i, done: !!d.done, action_notes: draft })
+                        }}
+                        autosize minRows={1} maxRows={3}
+                        size="xs"
+                        style={{ flex: 1, direction: 'rtl' }}
+                      />
+                      <ActionIcon
+                        color={voice.active && voiceTarget === key ? 'red' : 'blue'}
+                        variant="light" size="md"
+                        onClick={() => { setVoiceTarget(key); voice.start() }}
+                        title="תמלול קולי"
+                      >🎤</ActionIcon>
                     </Group>
-                  }
-                />
-              ))}
+                    {d.action_notes && draft === (d.action_notes ?? '') && (
+                      <Text size="xs" c="teal">✅ נשמר: {d.action_notes}</Text>
+                    )}
+                  </Stack>
+                )
+              })}
             </Stack>
           </Collapse>
         </Card>

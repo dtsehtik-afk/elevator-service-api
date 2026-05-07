@@ -41,5 +41,7 @@ class MaintenanceResponse(BaseModel):
     completed_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    elevator_address: Optional[str] = None
+    elevator_city: Optional[str] = None
 
     model_config = {"from_attributes": True}

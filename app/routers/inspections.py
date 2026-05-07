@@ -215,6 +215,8 @@ def update_checklist(
                 entry["done_by"] = current_user.name
             else:
                 entry.pop("done_by", None)
+            if "action_notes" in upd:
+                entry["action_notes"] = upd["action_notes"]
             checklist[idx] = entry
 
     report.deficiencies = checklist
