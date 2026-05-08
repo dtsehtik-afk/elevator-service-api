@@ -1546,10 +1546,11 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
 
     # Create service call
     call_type = (log.call_type or "").strip()
+    description = call_type if len(call_type) >= 5 else (f"קריאת שירות: {call_type}" if call_type else "קריאת שירות")
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
         reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
-        description=f"קריאת שירות: {call_type}" if call_type else "קריאת שירות",
+        description=description,
         priority=log.priority or "MEDIUM",
         fault_type=log.fault_type or "OTHER",
     )
