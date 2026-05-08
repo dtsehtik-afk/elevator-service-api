@@ -12,6 +12,7 @@ import { listElevators, updateElevator } from '../api/elevators'
 import client from '../api/client'
 import LocationPickerModal from '../components/LocationPickerModal'
 import { listTechnicians } from '../api/technicians'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import {
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -53,6 +54,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function CallsPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const userName = useAuthStore(s => s.userName)
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
@@ -421,7 +423,10 @@ export default function CallsPage() {
                 {'elevator_address' in detail && (
                   <Group gap="xs">
                     <Text size="sm" c="dimmed" w={100}>📍 כתובת</Text>
-                    <Text size="sm" fw={600}>{detail.elevator_address}, {detail.elevator_city}</Text>
+                    <Text
+                      size="sm" fw={600} style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                      onClick={() => { closeDetail(); navigate(`/elevators/${detail.elevator_id}`) }}
+                    >{detail.elevator_address}, {detail.elevator_city}</Text>
                     {detail.elevator_serial && <Text size="xs" c="dimmed">#{detail.elevator_serial}</Text>}
                     <Button
                       size="xs" variant="subtle" color="teal" px={6}

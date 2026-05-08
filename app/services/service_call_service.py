@@ -45,23 +45,26 @@ def _upsert_caller_contact(db: Session, elevator, reported_by: str) -> None:
     if not phone:
         return  # no identifiable phone — skip
 
-    # Find the elevator's building_id (can be None)
     building_id = getattr(elevator, "building_id", None)
+    management_company_id = getattr(elevator, "management_company_id", None)
 
-    # Only auto-create contacts when the elevator is linked to a building.
-    # Without a building_id all contacts share the NULL pool and contaminate
-    # every elevator that has no building assignment.
-    if building_id is None:
-        return
+    if building_id is None and management_company_id is None:
+        return  # no anchor point — skip to avoid the NULL-pool contamination bug
 
-    # Check if contact with same phone already exists for this building
-    existing = db.query(Contact).filter(
-        Contact.phone == phone,
-        Contact.building_id == building_id,
-    ).first()
+    # Dedup: check by building first, then management company
+    if building_id is not None:
+        existing = db.query(Contact).filter(
+            Contact.phone == phone,
+            Contact.building_id == building_id,
+        ).first()
+    else:
+        existing = db.query(Contact).filter(
+            Contact.phone == phone,
+            Contact.management_company_id == management_company_id,
+            Contact.building_id == None,
+        ).first()
 
     if existing:
-        # Update name if we have a better one
         if name and name != phone and existing.name == phone:
             existing.name = name
             db.commit()
@@ -69,6 +72,7 @@ def _upsert_caller_contact(db: Session, elevator, reported_by: str) -> None:
 
     contact = Contact(
         building_id=building_id,
+        management_company_id=management_company_id if building_id is None else None,
         name=name or phone,
         phone=phone,
         role="RESIDENT",

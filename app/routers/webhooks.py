@@ -194,23 +194,48 @@ async def receive_call(
             db, call_data, "webhook@system"
         )
     elif match.match_status in ("PARTIAL", "UNMATCHED"):
-        # Elevator not found with enough confidence — notify dispatcher to handle manually
-        closest_address = match.elevator.address if match.elevator else None
-        closest_city = match.elevator.city if match.elevator else None
-        try:
-            whatsapp_service.notify_dispatcher_elevator_not_found(
-                street=parsed.street,
-                house_number=parsed.house_number,
-                city=parsed.city,
-                fault_type=parsed.fault_type,
-                caller_name=parsed.name,
-                caller_phone=parsed.phone,
-                score=match.score,
-                closest_address=closest_address,
-                closest_city=closest_city,
-            )
-        except Exception as exc:
-            logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
+        fault_is_specific = parsed.fault_type in ("STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "RESCUE")
+        if fault_is_specific:
+            # Specific fault with unknown address → dispatcher alert + pending queue
+            closest_address = match.elevator.address if match.elevator else None
+            closest_city = match.elevator.city if match.elevator else None
+            try:
+                whatsapp_service.notify_dispatcher_elevator_not_found(
+                    street=parsed.street,
+                    house_number=parsed.house_number,
+                    city=parsed.city,
+                    fault_type=parsed.fault_type,
+                    caller_name=parsed.name,
+                    caller_phone=parsed.phone,
+                    score=match.score,
+                    closest_address=closest_address,
+                    closest_city=closest_city,
+                )
+            except Exception as exc:
+                logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
+        else:
+            # No specific fault + unknown address → potential lead, notify sales manager
+            try:
+                from app.models.lead import Lead
+                address_str = " ".join(filter(None, [parsed.street, parsed.house_number, parsed.city]))
+                lead = Lead(
+                    name=parsed.name or parsed.phone or "ליד נכנס",
+                    phone=parsed.phone or None,
+                    source="PHONE",
+                    status="NEW",
+                    notes=f"קריאה נכנסת ללא זיהוי מעלית\nכתובת: {address_str}\nתיאור: {parsed.call_type or parsed.description or ''}",
+                )
+                db.add(lead)
+                db.commit()
+                whatsapp_service.notify_sales_managers(
+                    db,
+                    f"🆕 *ליד חדש נכנס*\n"
+                    f"📞 {parsed.name or ''} {parsed.phone or ''}\n"
+                    f"📍 {address_str}\n"
+                    f"💬 {parsed.call_type or parsed.description or 'ללא תיאור'}",
+                )
+            except Exception as exc:
+                logger.error("Failed to create lead from unmatched call: %s", exc)
 
     # 5. AI assignment — with after-hours caller confirmation for non-RESCUE calls
     assignment = None
