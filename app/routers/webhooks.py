@@ -1572,6 +1572,11 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
         logger.error("match-elevator ServiceCallCreate failed log_id=%s: %s", log_id, exc, exc_info=True)
         raise HTTPException(status_code=400, detail=f"שגיאה ביצירת קריאת שירות: {exc}")
 
+    # Backdate the service call to the original incoming-call time, not the assignment time
+    if log.created_at:
+        service_call.created_at = log.created_at
+        db.commit()
+
     # Update log
     log.elevator_id = elevator.id
     log.service_call_id = service_call.id

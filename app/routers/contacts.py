@@ -72,6 +72,26 @@ def update_contact(
     return contact
 
 
+@router.delete("/admin/purge-orphan-auto-contacts", status_code=200)
+def purge_orphan_auto_contacts(
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Delete all auto-added contacts that have no building link (building_id IS NULL).
+    These were incorrectly created and pollute every elevator's contact list.
+    Admin only.
+    """
+    from app.models.technician import Technician as TechModel
+    if current_user.role not in ("ADMIN", "MANAGER"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    deleted = db.query(Contact).filter(
+        Contact.auto_added == True,
+        Contact.building_id == None,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": deleted}
+
+
 @router.delete("/{contact_id}", status_code=204)
 def delete_contact(
     contact_id: uuid.UUID,
