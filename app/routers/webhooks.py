@@ -1547,14 +1547,30 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
     # Create service call
     call_type = (log.call_type or "").strip()
     description = call_type if len(call_type) >= 5 else (f"קריאת שירות: {call_type}" if call_type else "קריאת שירות")
-    call_data = ServiceCallCreate(
-        elevator_id=elevator.id,
-        reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
-        description=description,
-        priority=log.priority or "MEDIUM",
-        fault_type=log.fault_type or "OTHER",
+    raw_name = (log.caller_name or "").strip()
+    reported_by = raw_name if len(raw_name) >= 2 else (log.caller_phone or "מוקד טלפוני")
+    valid_fault_types = {"MECHANICAL", "ELECTRICAL", "SOFTWARE", "STUCK", "DOOR", "RESCUE", "OTHER"}
+    fault_type = log.fault_type if log.fault_type in valid_fault_types else "OTHER"
+    valid_priorities = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
+    priority = log.priority if log.priority in valid_priorities else "MEDIUM"
+
+    logger.info(
+        "match-elevator log_id=%s elevator_id=%s reported_by=%r description=%r fault_type=%r priority=%r",
+        log_id, elevator_id, reported_by, description, fault_type, priority,
     )
-    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+
+    try:
+        call_data = ServiceCallCreate(
+            elevator_id=elevator.id,
+            reported_by=reported_by,
+            description=description,
+            priority=priority,
+            fault_type=fault_type,
+        )
+        service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+    except Exception as exc:
+        logger.error("match-elevator ServiceCallCreate failed log_id=%s: %s", log_id, exc, exc_info=True)
+        raise HTTPException(status_code=400, detail=f"שגיאה ביצירת קריאת שירות: {exc}")
 
     # Update log
     log.elevator_id = elevator.id
