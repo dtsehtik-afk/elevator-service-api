@@ -45,18 +45,14 @@ def _upsert_caller_contact(db: Session, elevator, reported_by: str) -> None:
     if not phone:
         return  # no identifiable phone — skip
 
-    building_id = getattr(elevator, "building_id", None)
-
-    # Only create formal Contact when the elevator belongs to a building —
-    # contacts are shared across all elevators in the same building.
-    # For standalone elevators (no building_id), the phone is already saved
-    # to elevator.caller_phones; no Contact record needed.
-    if building_id is None:
+    elevator_id = getattr(elevator, "id", None)
+    if not elevator_id:
         return
 
+    # Check if this phone is already a contact on this elevator
     existing = db.query(Contact).filter(
         Contact.phone == phone,
-        Contact.building_id == building_id,
+        Contact.elevator_id == elevator_id,
     ).first()
 
     if existing:
@@ -66,12 +62,12 @@ def _upsert_caller_contact(db: Session, elevator, reported_by: str) -> None:
         return
 
     contact = Contact(
-        building_id=building_id,
+        elevator_id=elevator_id,
+        building_id=getattr(elevator, "building_id", None),
         name=name or phone,
         phone=phone,
         role="RESIDENT",
         auto_added=True,
-        notes=f"נוסף אוטומטית מקריאת שירות — מעלית {getattr(elevator, 'address', '')}",
     )
     db.add(contact)
     try:

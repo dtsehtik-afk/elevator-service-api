@@ -154,3 +154,6 @@ class Elevator(Base):
     customer: Mapped[Optional["Customer"]] = relationship(  # noqa: F821
         "Customer", back_populates="elevators", foreign_keys="Elevator.customer_id"
     )
+    contacts: Mapped[list["Contact"]] = relationship(  # noqa: F821
+        "Contact", back_populates="elevator", foreign_keys="Contact.elevator_id"
+    )

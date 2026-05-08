@@ -17,6 +17,7 @@ router = APIRouter(prefix="/contacts", tags=["Contacts"])
 
 @router.get("", response_model=List[ContactResponse])
 def list_contacts(
+    elevator_id: Optional[uuid.UUID] = Query(None),
     building_id: Optional[uuid.UUID] = Query(None),
     management_company_id: Optional[uuid.UUID] = Query(None),
     role: Optional[str] = Query(None),
@@ -27,6 +28,8 @@ def list_contacts(
     _: Technician = Depends(get_current_user),
 ):
     q = db.query(Contact)
+    if elevator_id:
+        q = q.filter(Contact.elevator_id == elevator_id)
     if building_id:
         q = q.filter(Contact.building_id == building_id)
     if management_company_id:
@@ -87,6 +90,7 @@ def purge_orphan_auto_contacts(
     deleted = db.query(Contact).filter(
         Contact.auto_added == True,
         Contact.building_id == None,
+        Contact.elevator_id == None,
     ).delete(synchronize_session=False)
     db.commit()
     return {"deleted": deleted}
