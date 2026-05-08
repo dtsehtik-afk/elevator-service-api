@@ -29,6 +29,7 @@ class ServiceCallUpdate(BaseModel):
 class ServiceCallResponse(BaseModel):
     """Full service call response."""
     id: uuid.UUID
+    call_number: Optional[int] = None
     elevator_id: uuid.UUID
     reported_by: str
     description: str

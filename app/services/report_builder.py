@@ -43,17 +43,22 @@ def _build_schemas():
     from app.models.maintenance import MaintenanceSchedule
     from app.models.inspection_report import InspectionReport
     from app.models.technician import Technician
+    from app.models.assignment import Assignment
 
     return {
         "service_calls": {
             "label_he": "קריאות שירות",
             "model": ServiceCall,
-            "eager": [joinedload(ServiceCall.elevator), joinedload(ServiceCall.assignments)],
-            "default_columns": ["created_at", "address", "city", "status", "priority", "fault_type", "reported_by"],
+            "eager": [
+                joinedload(ServiceCall.elevator).joinedload(Elevator.customer),
+                joinedload(ServiceCall.assignments).joinedload(Assignment.technician),
+            ],
+            "default_columns": ["call_number", "created_at", "address", "city", "status", "priority", "fault_type", "technician_name", "reported_by"],
             "columns": {
-                "id":             {"label_he": "מזהה", "type": "text",     "filter": ServiceCall.id,          "get": lambda o: str(o.id)},
-                "created_at":     {"label_he": "תאריך פתיחה", "type": "datetime", "filter": ServiceCall.created_at, "get": lambda o: _fmt(o.created_at)},
-                "resolved_at":    {"label_he": "תאריך סגירה", "type": "datetime", "filter": ServiceCall.resolved_at, "get": lambda o: _fmt(o.resolved_at)},
+                "call_number":    {"label_he": "מס' קריאה","type": "text",   "filter": ServiceCall.call_number,"get": lambda o: (f"S{o.call_number:05d}" if o.call_number else None)},
+                "id":             {"label_he": "מזהה",     "type": "text",   "filter": ServiceCall.id,         "get": lambda o: str(o.id)},
+                "created_at":     {"label_he": "תאריך פתיחה","type": "datetime","filter": ServiceCall.created_at,"get": lambda o: _fmt(o.created_at)},
+                "resolved_at":    {"label_he": "תאריך סגירה","type": "datetime","filter": ServiceCall.resolved_at,"get": lambda o: _fmt(o.resolved_at)},
                 "status":         {"label_he": "סטטוס",   "type": "select", "filter": ServiceCall.status,    "get": lambda o: o.status,
                                    "options": ["OPEN","ASSIGNED","IN_PROGRESS","RESOLVED","CLOSED","MONITORING"]},
                 "priority":       {"label_he": "עדיפות",  "type": "select", "filter": ServiceCall.priority,  "get": lambda o: o.priority,
@@ -66,7 +71,14 @@ def _build_schemas():
                 "city":           {"label_he": "עיר",     "type": "text",   "filter": Elevator.city,          "get": lambda o: _safe(o, "elevator", "city")},
                 "elevator_model": {"label_he": "דגם מעלית","type": "text",  "filter": Elevator.model,         "get": lambda o: _safe(o, "elevator", "model")},
                 "is_recurring":   {"label_he": "חוזרת",   "type": "bool",   "filter": ServiceCall.is_recurring,"get": lambda o: _fmt(o.is_recurring)},
-                "resolution_notes":{"label":"הערות סגירה","type":"text", "filter": ServiceCall.resolution_notes,"get": lambda o: o.resolution_notes},
+                "resolution_notes":{"label_he": "הערות סגירה","type": "text","filter": ServiceCall.resolution_notes,"get": lambda o: o.resolution_notes},
+                "technician_name":{"label_he": "טכנאי",   "type": "text",   "filter": None,
+                                   "get": lambda o: next(
+                                       (_safe(a, "technician", "name") for a in (o.assignments or []) if a.status == "ACCEPTED"),
+                                       next((_safe(a, "technician", "name") for a in (o.assignments or [])), None)
+                                   )},
+                "customer_name":  {"label_he": "לקוח",    "type": "text",   "filter": None,
+                                   "get": lambda o: _safe(o, "elevator", "customer", "name")},
             },
             "filter_joins": {Elevator: (ServiceCall.elevator_id == Elevator.id)},
         },

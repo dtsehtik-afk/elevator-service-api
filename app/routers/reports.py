@@ -90,7 +90,7 @@ def get_all_schemas(
                 "key": k,
                 "label_he": v["label_he"],
                 "type": v["type"],
-                "filterable": v.get("filter_attr") is not None,
+                "filterable": v.get("filter") is not None,
             }
             for k, v in schema["columns"].items()
         ]
@@ -201,6 +201,85 @@ def export_report(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={entity_type}_report.xlsx"},
     )
+
+
+# ── AI Natural-Language Query ─────────────────────────────────────────────────
+
+class AIQueryRequest(BaseModel):
+    question: str
+
+
+@router.post("/ai-query", summary="Convert natural language question to a report query and execute it")
+def ai_report_query(
+    body: AIQueryRequest,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Accepts a Hebrew natural language question, uses Gemini to produce filter params, executes the query."""
+    import json, os, httpx
+    from datetime import datetime, timedelta
+
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="No question provided")
+
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="AI לא מוגדר")
+
+    from app.services.report_builder import get_schemas
+    schemas = get_schemas()
+    schema_lines = []
+    for etype, schema in schemas.items():
+        filterable_cols = [k for k, v in schema["columns"].items() if v.get("filter") is not None]
+        schema_lines.append(f"- {etype} ({schema['label_he']}): {', '.join(filterable_cols)}")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    prompt = (
+        f"אתה מנוע שאילתות לדוח שירות מעליות. המשתמש שאל שאלה בעברית."
+        f" החזר JSON בלבד (ללא markdown) עם פרמטרים לשאילתה.\n\n"
+        f"סוגי נתונים:\n" + "\n".join(schema_lines) + "\n\n"
+        f"פעולות סינון: eq, neq, contains, gt, gte, lt, lte, is_null, is_not_null\n"
+        f"היום: {today}\n\n"
+        f"שאלה: {question}\n\n"
+        f"החזר בפורמט:\n"
+        f'{{"entity_type":"service_calls","columns":["call_number","created_at","address","city","status","technician_name"],'
+        f'"filters":[{{"field":"status","op":"eq","value":"CLOSED"}}],"sort_by":"created_at","sort_dir":"desc"}}'
+    )
+
+    try:
+        resp = httpx.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            f"?key={api_key}",
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 600, "responseMimeType": "application/json"},
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        ai_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        params = json.loads(ai_text)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"שגיאת AI: {exc}")
+
+    entity_type = params.get("entity_type", "service_calls")
+    if entity_type not in schemas:
+        entity_type = "service_calls"
+
+    from app.services.report_builder import run_report as _run
+    result = _run(
+        db=db,
+        entity_type=entity_type,
+        columns=params.get("columns"),
+        filters=params.get("filters", []),
+        sort_by=params.get("sort_by"),
+        sort_dir=params.get("sort_dir", "desc"),
+        skip=0,
+        limit=200,
+        include_custom_fields=False,
+    )
+    return {**result, "ai_params": params}
 
 
 # ── Saved Views CRUD ──────────────────────────────────────────────────────────

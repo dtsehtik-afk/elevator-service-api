@@ -146,6 +146,10 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS ix_hr_records_technician_id ON hr_records (technician_id)",
                 "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS elevator_id UUID REFERENCES elevators(id) ON DELETE SET NULL",
                 "CREATE INDEX IF NOT EXISTS ix_contacts_elevator_id ON contacts (elevator_id)",
+                # Service call sequential numbering (S + 5 digits)
+                "CREATE SEQUENCE IF NOT EXISTS service_calls_call_number_seq",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS call_number BIGINT DEFAULT nextval('service_calls_call_number_seq')",
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_service_calls_call_number ON service_calls (call_number)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
