@@ -60,6 +60,7 @@ export interface Elevator {
 
 export interface ServiceCall {
   id: string
+  call_number: number | null
   elevator_id: string
   reported_by: string
   description: string

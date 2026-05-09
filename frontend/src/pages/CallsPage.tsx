@@ -330,6 +330,7 @@ export default function CallsPage() {
             <Table highlightOnHover style={{ cursor: 'pointer' }}>
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th>#</Table.Th>
                   <Table.Th>עדיפות</Table.Th>
                   <Table.Th>תיאור</Table.Th>
                   <Table.Th>סוג תקלה</Table.Th>
@@ -352,6 +353,11 @@ export default function CallsPage() {
                       onClick={() => openDetailModal(c)}
                       style={isRescue && !['RESOLVED','CLOSED'].includes(c.status) ? rescueStyle : undefined}
                     >
+                      <Table.Td>
+                        <Text size="xs" c="dimmed" ff="monospace">
+                          {c.call_number ? `S${String(c.call_number).padStart(5, '0')}` : '—'}
+                        </Text>
+                      </Table.Td>
                       <Table.Td>
                         <Group gap={4}>
                           {isRescue && <Text size="sm">🚨</Text>}
@@ -442,6 +448,12 @@ export default function CallsPage() {
                   <Text size="sm" c="dimmed" w={100}>👤 דווח ע"י</Text>
                   <Text size="sm">{detail.reported_by}</Text>
                 </Group>
+                {detail.call_number && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>🔢 מס' קריאה</Text>
+                    <Text size="sm" ff="monospace" fw={600}>S{String(detail.call_number).padStart(5, '0')}</Text>
+                  </Group>
+                )}
                 <Group gap="xs">
                   <Text size="sm" c="dimmed" w={100}>📅 נפתחה</Text>
                   <Text size="sm">{formatDateTime(detail.created_at)}</Text>

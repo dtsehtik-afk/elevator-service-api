@@ -1831,8 +1831,8 @@ def start_scheduler():
     global _scheduler
     # All cron times are in Israel local time (Asia/Jerusalem)
     _scheduler = BackgroundScheduler(timezone=ZoneInfo("Asia/Jerusalem"))
-    _scheduler.add_job(_run_nightly_maintenance,             "cron",     hour=0,  minute=5)
-    _scheduler.add_job(_send_morning_maintenance_alerts,     "cron",     hour=7,  minute=35)
+    _scheduler.add_job(_run_nightly_maintenance,         "cron", hour=0,  minute=5,  day_of_week="sun,mon,tue,wed,thu,fri")
+    _scheduler.add_job(_send_morning_maintenance_alerts, "cron", hour=7,  minute=35, day_of_week="sun,mon,tue,wed,thu,fri")
     # Morning location requests disabled — technicians use the app now
     # _scheduler.add_job(_send_morning_location_requests,   "cron",     hour=7,  minute=45)
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)
