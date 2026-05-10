@@ -167,13 +167,6 @@ Searches across: elevators (SN/address), customers, calls, technicians.
 
 ---
 
-## Phase 6 — Inventory Barcode (quick win)
-**Effort: 0.5 days | Risk: Low**
-
-Already captured in Phase 2C above.
-
----
-
 ## Execution Summary
 
 | Phase | Description | Effort | Status |
