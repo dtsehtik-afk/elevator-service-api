@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Title, Table, Badge, Button, Group, Select, Modal, Stack, Text,
-  Paper, TextInput, NumberInput, Textarea, Alert,
+  Paper, TextInput, NumberInput, Textarea, Alert, Tooltip,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { inventoryApi } from '../api/inventory'
@@ -12,6 +12,7 @@ export default function InventoryPage() {
   const [categories, setCategories] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [barcodeInput, setBarcodeInput] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [lowStockOnly, setLowStockOnly] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
@@ -70,6 +71,23 @@ export default function InventoryPage() {
       {lowStockCount > 0 && (
         <Alert color="orange" mb="md">⚠️ {lowStockCount} חלקים במלאי נמוך מהמינימום</Alert>
       )}
+
+      <Group mb="xs">
+        <Tooltip label="חבר סורק ברקוד USB — מקד כאן וסרוק חלק לחיפוש מיידי" position="right">
+          <TextInput
+            placeholder="📷 סורק ברקוד — לחץ כאן וסרוק"
+            style={{ width: 280 }}
+            value={barcodeInput}
+            onChange={e => setBarcodeInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && barcodeInput.trim()) {
+                setSearch(barcodeInput.trim())
+                setBarcodeInput('')
+              }
+            }}
+          />
+        </Tooltip>
+      </Group>
 
       <Group mb="md" grow>
         <TextInput placeholder="חיפוש שם / מקט..." value={search} onChange={e => setSearch(e.target.value)} />

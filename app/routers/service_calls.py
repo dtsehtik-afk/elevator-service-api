@@ -45,6 +45,7 @@ def trigger_email_poll(
 )
 def list_calls(
     elevator_id: Optional[uuid.UUID] = Query(None),
+    customer_id: Optional[uuid.UUID] = Query(None),
     status: Optional[str] = Query(None, description="OPEN|ASSIGNED|IN_PROGRESS|RESOLVED|CLOSED"),
     priority: Optional[str] = Query(None, description="CRITICAL|HIGH|MEDIUM|LOW"),
     fault_type: Optional[str] = Query(None),
@@ -55,7 +56,7 @@ def list_calls(
 ):
     """List service calls with optional filters."""
     return service_call_service.list_service_calls(
-        db, elevator_id, status, priority, fault_type, skip, limit
+        db, elevator_id, customer_id, status, priority, fault_type, skip, limit
     )
 
 

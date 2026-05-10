@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Text, Button, Paper, Badge, Group,
@@ -588,6 +589,8 @@ export default function InspectionsPage() {
               onChange={e => setCompletionNotes(e.target.value)}
               minRows={4}
               autosize
+              rightSection={<AIRefineButton value={completionNotes} onChange={setCompletionNotes} />}
+              rightSectionPointerEvents="all"
             />
             <Group justify="flex-end" gap="sm">
               <Button variant="subtle" onClick={() => { setCompletionModal(null); setCompletionNotes('') }}>סגור ללא שליחה</Button>

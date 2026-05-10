@@ -47,6 +47,13 @@ export interface Elevator {
   inspector_mobile: string | null
   inspector_email: string | null
   last_inspection_report_url: string | null
+  // Extended tech specs
+  motor_type: string | null
+  controller_model: string | null
+  door_type: string | null
+  pit_depth_cm: number | null
+  headroom_cm: number | null
+  safety_certificate_expiry: string | null
   // Status
   status: 'ACTIVE' | 'INACTIVE' | 'UNDER_REPAIR'
   risk_score: number
@@ -69,6 +76,7 @@ export interface ServiceCall {
   is_recurring: boolean
   resolution_notes: string | null
   quote_needed: boolean
+  sla_deadline: string | null
   technician_id: string | null
   created_at: string
   assigned_at: string | null
@@ -142,6 +150,8 @@ export interface MaintenanceSchedule {
 export interface ElevatorFilters {
   city?: string
   status?: string
+  customer_id?: string
+  min_risk?: number
   skip?: number
   limit?: number
 }
@@ -151,6 +161,8 @@ export interface CallFilters {
   priority?: string
   fault_type?: string
   technician_id?: string
+  elevator_id?: string
+  customer_id?: string
   skip?: number
   limit?: number
 }

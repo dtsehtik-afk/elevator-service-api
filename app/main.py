@@ -17,6 +17,8 @@ from app.routers import customers, quotes, contracts, invoices, inventory, leads
 from app.routers import settings as settings_router, conversations
 from app.routers import reports as reports_router, custom_fields as custom_fields_router
 from app.routers import hr as hr_router
+from app.routers import ai as ai_router
+from app.routers import projects as projects_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -125,6 +127,15 @@ async def lifespan(app: FastAPI):
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_custom_field_values_entity_id ON custom_field_values (entity_id)",
                 "CREATE INDEX IF NOT EXISTS ix_custom_field_values_entity_type ON custom_field_values (entity_type)",
+                # Elevator extended tech specs
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS motor_type VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS controller_model VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS door_type VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS pit_depth_cm INTEGER",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS headroom_cm INTEGER",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS safety_certificate_expiry DATE",
+                # SLA deadline on service calls
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS sla_deadline TIMESTAMPTZ",
                 # HR module
                 """CREATE TABLE IF NOT EXISTS hr_records (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -200,7 +211,7 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
-    "/reports", "/custom-fields", "/roles", "/hr",
+    "/reports", "/custom-fields", "/roles", "/hr", "/projects",
 )
 
 
@@ -250,6 +261,8 @@ app.include_router(conversations.router)
 app.include_router(reports_router.router)
 app.include_router(custom_fields_router.router)
 app.include_router(hr_router.router)
+app.include_router(ai_router.router)
+app.include_router(projects_router.router)
 
 
 @app.get("/health", tags=["Health"])

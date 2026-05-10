@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Stack, Title, Paper, Group, Select, Button, Text, Table, Badge,
   ActionIcon, Checkbox, Modal, TextInput, ScrollArea, Divider,
   Loader, Center, Pagination, Tabs, Tooltip, NumberInput, CloseButton,
-  Box, rem,
+  Box, rem, Drawer, Textarea, Avatar, Collapse,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
+import { DateInput } from '@mantine/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { reportsApi, type EntitySchema, type FilterItem, type ReportResult, type SavedView } from '../api/reports'
@@ -36,6 +37,59 @@ const OPS = [
   { value: 'is_not_null', label: 'לא ריק' },
 ]
 
+// Which date field to use per entity for date-range quick filter
+const ENTITY_DATE_FIELD: Record<string, string> = {
+  service_calls: 'created_at',
+  maintenance: 'scheduled_date',
+  invoices: 'issue_date',
+  contracts: 'start_date',
+  leads: 'created_at',
+  customers: 'created_at',
+  inspections: 'inspection_date',
+}
+
+// Which city field per entity
+const ENTITY_CITY_FIELD: Record<string, string> = {
+  service_calls: 'city',
+  maintenance: 'city',
+  elevators: 'city',
+  customers: 'city',
+  inspections: 'raw_city',
+}
+
+// Which status field per entity (undefined = no status)
+const ENTITY_STATUS_FIELD: Record<string, string> = {
+  service_calls: 'status',
+  elevators: 'status',
+  maintenance: 'status',
+  contracts: 'status',
+  invoices: 'status',
+  leads: 'status',
+  inspections: 'result',
+}
+
+// Which customer field per entity (undefined = no customer filter)
+const ENTITY_CUSTOMER_FIELD: Record<string, string> = {
+  elevators: 'customer',
+  invoices: 'customer_name',
+  contracts: 'customer_name',
+  leads: 'customer_name',
+}
+
+interface QuickFilters {
+  status?: string
+  city?: string
+  technician?: string
+  customer?: string
+  dateFrom?: Date | null
+  dateTo?: Date | null
+}
+
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+}
+
 const PAGE_SIZE = 50
 
 export default function ReportsPage() {
@@ -43,6 +97,7 @@ export default function ReportsPage() {
   const [entityType, setEntityType] = useState<string>('service_calls')
   const [selectedCols, setSelectedCols] = useState<string[]>([])
   const [filters, setFilters] = useState<FilterItem[]>([])
+  const [quickFilters, setQuickFilters] = useState<QuickFilters>({})
   const [sortBy, setSortBy] = useState<string | undefined>(undefined)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(1)
@@ -51,10 +106,23 @@ export default function ReportsPage() {
   const [saveModalOpen, { open: openSaveModal, close: closeSaveModal }] = useDisclosure(false)
   const [viewName, setViewName] = useState('')
   const [activeView, setActiveView] = useState<string | null>(null)
+  const [quickOpen, { toggle: toggleQuick }] = useDisclosure(true)
+
+  // AI chat
+  const [chatOpen, { open: openChat, close: closeChat }] = useDisclosure(false)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const chatBottomRef = useRef<HTMLDivElement>(null)
 
   const { data: schemas } = useQuery({
     queryKey: ['report-schemas'],
     queryFn: reportsApi.getAllSchemas,
+  })
+
+  const { data: filterOptions } = useQuery({
+    queryKey: ['report-filter-options'],
+    queryFn: reportsApi.getFilterOptions,
   })
 
   const { data: views, refetch: refetchViews } = useQuery({
@@ -70,11 +138,18 @@ export default function ReportsPage() {
     }
   }, [currentSchema?.entity_type])
 
+  useEffect(() => {
+    if (chatOpen) {
+      setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+    }
+  }, [chatMessages, chatOpen])
+
   function handleEntityChange(val: string | null) {
     if (!val) return
     setEntityType(val)
     setSelectedCols([])
     setFilters([])
+    setQuickFilters({})
     setSortBy(undefined)
     setResult(null)
     setPage(1)
@@ -82,7 +157,8 @@ export default function ReportsPage() {
   }
 
   function addFilter() {
-    setFilters(prev => [...prev, { field: currentSchema?.columns[0]?.key ?? 'id', op: 'eq', value: '' }])
+    const filterable = currentSchema?.columns.filter(c => c.filterable) ?? []
+    setFilters(prev => [...prev, { field: filterable[0]?.key ?? 'id', op: 'eq', value: '' }])
   }
 
   function updateFilter(idx: number, patch: Partial<FilterItem>) {
@@ -93,13 +169,45 @@ export default function ReportsPage() {
     setFilters(prev => prev.filter((_, i) => i !== idx))
   }
 
+  function buildAllFilters(): FilterItem[] {
+    const all: FilterItem[] = [...filters.filter(f => f.op === 'is_null' || f.op === 'is_not_null' || f.value !== '')]
+
+    if (quickFilters.status) {
+      const field = ENTITY_STATUS_FIELD[entityType]
+      if (field) all.push({ field, op: 'eq', value: quickFilters.status })
+    }
+    if (quickFilters.city) {
+      const field = ENTITY_CITY_FIELD[entityType]
+      if (field) all.push({ field, op: 'eq', value: quickFilters.city })
+    }
+    if (quickFilters.technician) {
+      all.push({ field: 'technician_name', op: 'eq', value: quickFilters.technician })
+    }
+    if (quickFilters.customer) {
+      const field = ENTITY_CUSTOMER_FIELD[entityType]
+      if (field) all.push({ field, op: 'contains', value: quickFilters.customer })
+    }
+    if (quickFilters.dateFrom) {
+      const field = ENTITY_DATE_FIELD[entityType]
+      if (field) all.push({ field, op: 'gte', value: quickFilters.dateFrom.toISOString().split('T')[0] })
+    }
+    if (quickFilters.dateTo) {
+      const field = ENTITY_DATE_FIELD[entityType]
+      if (field) all.push({ field, op: 'lte', value: quickFilters.dateTo.toISOString().split('T')[0] })
+    }
+
+    return all
+  }
+
+  const activeQuickCount = Object.values(quickFilters).filter(v => v != null && v !== '').length
+
   async function runReport(pg = page) {
     setLoading(true)
     try {
       const data = await reportsApi.query({
         entity_type: entityType,
         columns: selectedCols.length > 0 ? selectedCols : undefined,
-        filters: filters.filter(f => f.op === 'is_null' || f.op === 'is_not_null' || f.value !== ''),
+        filters: buildAllFilters(),
         sort_by: sortBy,
         sort_dir: sortDir,
         skip: (pg - 1) * PAGE_SIZE,
@@ -116,15 +224,9 @@ export default function ReportsPage() {
   async function handleExport() {
     try {
       const cols = selectedCols.length > 0 ? selectedCols.join(',') : undefined
-      const filtersJson = filters.length > 0 ? JSON.stringify(filters) : undefined
-      const url = reportsApi.exportUrl({
-        entity_type: entityType,
-        columns: cols,
-        filters: filtersJson,
-        sort_by: sortBy,
-        sort_dir: sortDir,
-      })
-      const resp = await client.get(url.replace(client.defaults.baseURL || '', ''), {
+      const allFilters = buildAllFilters()
+      const filtersJson = allFilters.length > 0 ? JSON.stringify(allFilters) : undefined
+      const resp = await client.get('/reports/export', {
         responseType: 'blob',
         params: { entity_type: entityType, columns: cols, filters: filtersJson, sort_by: sortBy, sort_dir: sortDir },
       })
@@ -169,14 +271,42 @@ export default function ReportsPage() {
     if (activeView === id) setActiveView(null)
   }
 
+  async function sendChatMessage() {
+    const q = chatInput.trim()
+    if (!q || chatLoading) return
+    setChatInput('')
+    setChatMessages(prev => [...prev, { role: 'user', text: q }])
+    setChatLoading(true)
+    try {
+      const { answer } = await reportsApi.aiChat(q)
+      setChatMessages(prev => [...prev, { role: 'assistant', text: answer }])
+    } catch {
+      setChatMessages(prev => [...prev, { role: 'assistant', text: 'שגיאה בתקשורת עם ה-AI. נסה שוב.' }])
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
   const totalPages = result ? Math.ceil(result.total / PAGE_SIZE) : 0
   const filterable = currentSchema?.columns.filter(c => c.filterable) ?? []
+
+  // Status options for quick filter
+  const statusField = ENTITY_STATUS_FIELD[entityType]
+  const statusOptions = currentSchema?.columns.find(c => c.key === statusField)?.options ?? []
+
+  const hasCityFilter = entityType in ENTITY_CITY_FIELD
+  const hasTechnicianFilter = entityType === 'maintenance'
+  const hasCustomerFilter = entityType in ENTITY_CUSTOMER_FIELD
+  const hasDateFilter = entityType in ENTITY_DATE_FIELD
 
   return (
     <Stack gap="md" dir="rtl">
       <Group justify="space-between">
         <Title order={2}>📊 בניית דוחות</Title>
         <Group>
+          <Button variant="light" color="grape" leftSection="🤖" onClick={openChat}>
+            שאל AI
+          </Button>
           <Button variant="light" onClick={() => runReport()} loading={loading}>
             הרץ דוח
           </Button>
@@ -253,14 +383,125 @@ export default function ReportsPage() {
 
         {/* Filters + results */}
         <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
-          {/* Filters */}
+
+          {/* Quick filters */}
+          <Paper withBorder radius="md" p="md">
+            <Group justify="space-between" mb={quickOpen ? 'sm' : 0}>
+              <Group gap="xs">
+                <Title order={5}>סינונים מהירים</Title>
+                {activeQuickCount > 0 && (
+                  <Badge color="blue" size="sm">{activeQuickCount} פעיל</Badge>
+                )}
+              </Group>
+              <Group gap="xs">
+                {activeQuickCount > 0 && (
+                  <Button size="xs" variant="subtle" color="red" onClick={() => setQuickFilters({})}>
+                    נקה הכל
+                  </Button>
+                )}
+                <Button size="xs" variant="subtle" onClick={toggleQuick}>
+                  {quickOpen ? '▲ כווץ' : '▼ הרחב'}
+                </Button>
+              </Group>
+            </Group>
+
+            <Collapse in={quickOpen}>
+              <Group gap="sm" align="flex-end" wrap="wrap">
+                {statusField && statusOptions.length > 0 && (
+                  <Select
+                    label="סטטוס"
+                    placeholder="כל הסטטוסים"
+                    value={quickFilters.status ?? null}
+                    onChange={v => setQuickFilters(prev => ({ ...prev, status: v ?? undefined }))}
+                    data={statusOptions.map(o => ({ value: o, label: o }))}
+                    clearable
+                    w={160}
+                    size="sm"
+                  />
+                )}
+
+                {hasCityFilter && (
+                  <Select
+                    label="עיר / אזור"
+                    placeholder="כל הערים"
+                    value={quickFilters.city ?? null}
+                    onChange={v => setQuickFilters(prev => ({ ...prev, city: v ?? undefined }))}
+                    data={(filterOptions?.cities ?? []).map(c => ({ value: c, label: c }))}
+                    clearable
+                    searchable
+                    w={160}
+                    size="sm"
+                  />
+                )}
+
+                {hasTechnicianFilter && (
+                  <Select
+                    label="טכנאי"
+                    placeholder="כל הטכנאים"
+                    value={quickFilters.technician ?? null}
+                    onChange={v => setQuickFilters(prev => ({ ...prev, technician: v ?? undefined }))}
+                    data={(filterOptions?.technicians ?? []).map(t => ({ value: t, label: t }))}
+                    clearable
+                    searchable
+                    w={160}
+                    size="sm"
+                  />
+                )}
+
+                {hasCustomerFilter && (
+                  <Select
+                    label="לקוח"
+                    placeholder="כל הלקוחות"
+                    value={quickFilters.customer ?? null}
+                    onChange={v => setQuickFilters(prev => ({ ...prev, customer: v ?? undefined }))}
+                    data={(filterOptions?.customers ?? []).map(c => ({ value: c.name, label: c.name }))}
+                    clearable
+                    searchable
+                    w={200}
+                    size="sm"
+                  />
+                )}
+
+                {hasDateFilter && (
+                  <>
+                    <DateInput
+                      label="מתאריך"
+                      placeholder="בחר תאריך"
+                      value={quickFilters.dateFrom ?? null}
+                      onChange={v => setQuickFilters(prev => ({ ...prev, dateFrom: v }))}
+                      clearable
+                      w={150}
+                      size="sm"
+                      valueFormat="DD/MM/YYYY"
+                    />
+                    <DateInput
+                      label="עד תאריך"
+                      placeholder="בחר תאריך"
+                      value={quickFilters.dateTo ?? null}
+                      onChange={v => setQuickFilters(prev => ({ ...prev, dateTo: v }))}
+                      clearable
+                      w={150}
+                      size="sm"
+                      valueFormat="DD/MM/YYYY"
+                    />
+                  </>
+                )}
+
+                {!statusField && !hasCityFilter && !hasTechnicianFilter && !hasCustomerFilter && !hasDateFilter && (
+                  <Text size="sm" c="dimmed">אין סינונים מהירים זמינים לסוג זה</Text>
+                )}
+              </Group>
+            </Collapse>
+          </Paper>
+
+          {/* Advanced filters */}
           <Paper withBorder radius="md" p="md">
             <Group justify="space-between" mb="sm">
-              <Title order={5}>סינונים</Title>
-              <Button size="xs" variant="light" onClick={addFilter}>+ הוסף סינון</Button>
+              <Title order={5}>סינונים מתקדמים</Title>
+              <Button size="xs" variant="light" onClick={addFilter} disabled={filterable.length === 0}>+ הוסף סינון</Button>
             </Group>
             {filters.length === 0 && (
-              <Text size="sm" c="dimmed">אין סינונים פעילים</Text>
+              <Text size="sm" c="dimmed">אין סינונים מתקדמים פעילים</Text>
             )}
             <Stack gap="xs">
               {filters.map((f, idx) => (
@@ -396,6 +637,112 @@ export default function ReportsPage() {
           </Button>
         </Stack>
       </Modal>
+
+      {/* AI Chat Drawer */}
+      <Drawer
+        opened={chatOpen}
+        onClose={closeChat}
+        title={<Text fw={700} size="lg">🤖 שאל AI על הנתונים</Text>}
+        position="left"
+        size="md"
+        dir="rtl"
+      >
+        <Stack h="calc(100vh - 120px)" gap={0}>
+          {/* Messages */}
+          <ScrollArea style={{ flex: 1 }} p="sm">
+            {chatMessages.length === 0 && (
+              <Stack gap="xs" align="center" pt="xl">
+                <Text size="xl">🤖</Text>
+                <Text c="dimmed" ta="center" size="sm">
+                  שאל אותי על הנתונים בעברית חופשית:
+                </Text>
+                <Stack gap="xs" w="100%">
+                  {[
+                    'כמה קריאות פתוחות יש היום?',
+                    'מה המעליות עם ציון סיכון גבוה?',
+                    'כמה תחזוקות מתוכננות החודש?',
+                    'מי הטכנאי הכי עסוק?',
+                  ].map(ex => (
+                    <Button
+                      key={ex}
+                      variant="light"
+                      size="xs"
+                      fullWidth
+                      style={{ textAlign: 'right', justifyContent: 'flex-start' }}
+                      onClick={() => { setChatInput(ex) }}
+                    >
+                      {ex}
+                    </Button>
+                  ))}
+                </Stack>
+              </Stack>
+            )}
+
+            <Stack gap="sm">
+              {chatMessages.map((msg, i) => (
+                <Box
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                  }}
+                >
+                  <Paper
+                    p="sm"
+                    radius="md"
+                    style={{
+                      maxWidth: '85%',
+                      background: msg.role === 'user' ? 'var(--mantine-color-blue-6)' : 'var(--mantine-color-gray-1)',
+                      color: msg.role === 'user' ? 'white' : 'inherit',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    <Text size="sm">{msg.text}</Text>
+                  </Paper>
+                </Box>
+              ))}
+              {chatLoading && (
+                <Box style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                  <Paper p="sm" radius="md" style={{ background: 'var(--mantine-color-gray-1)' }}>
+                    <Loader size="xs" />
+                  </Paper>
+                </Box>
+              )}
+              <div ref={chatBottomRef} />
+            </Stack>
+          </ScrollArea>
+
+          {/* Input area */}
+          <Divider />
+          <Box p="sm">
+            <Group gap="xs" align="flex-end">
+              <Textarea
+                style={{ flex: 1 }}
+                placeholder="שאל שאלה על הנתונים..."
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                autosize
+                minRows={1}
+                maxRows={4}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    sendChatMessage()
+                  }
+                }}
+              />
+              <Button
+                onClick={sendChatMessage}
+                loading={chatLoading}
+                disabled={!chatInput.trim()}
+              >
+                שלח
+              </Button>
+            </Group>
+            <Text size="xs" c="dimmed" mt={4}>Enter לשליחה • Shift+Enter לשורה חדשה</Text>
+          </Box>
+        </Stack>
+      </Drawer>
     </Stack>
   )
 }

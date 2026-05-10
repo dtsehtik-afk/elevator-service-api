@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { useNavigate } from 'react-router-dom'
 import {
   Title, Table, Badge, Button, Group, Select, Modal, Stack, Text,
@@ -170,7 +171,13 @@ export default function InvoicesPage() {
             const { subtotal, vat_amount, total } = calcTotals(items, form.vat_rate)
             return <Text fw={700} size="lg">סה״כ: ₪{total.toLocaleString()}</Text>
           })()}
-          <Textarea label="הערות" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <Textarea
+            label="הערות"
+            value={form.notes}
+            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            rightSection={<AIRefineButton value={form.notes ?? ''} onChange={v => setForm(f => ({ ...f, notes: v }))} />}
+            rightSectionPointerEvents="all"
+          />
           <Button onClick={handleCreate} disabled={!form.customer_id || !form.issue_date}>צור חשבונית</Button>
         </Stack>
       </Modal>

@@ -174,30 +174,20 @@ def list_elevators(
     db: Session,
     city: Optional[str] = None,
     status: Optional[str] = None,
+    customer_id: Optional[uuid.UUID] = None,
     min_risk: Optional[float] = None,
     max_risk: Optional[float] = None,
     skip: int = 0,
     limit: int = 50,
 ) -> List[Elevator]:
-    """Return a filtered, paginated list of elevators.
-
-    Args:
-        db: Database session.
-        city: Filter by city (case-insensitive partial match).
-        status: Filter by status (ACTIVE/INACTIVE/UNDER_REPAIR).
-        min_risk: Minimum risk_score filter.
-        max_risk: Maximum risk_score filter.
-        skip: Pagination offset.
-        limit: Page size (max 200).
-
-    Returns:
-        List of Elevator objects.
-    """
+    """Return a filtered, paginated list of elevators."""
     query = db.query(Elevator)
     if city:
         query = query.filter(Elevator.city.ilike(f"%{city}%"))
     if status:
         query = query.filter(Elevator.status == status)
+    if customer_id:
+        query = query.filter(Elevator.customer_id == customer_id)
     if min_risk is not None:
         query = query.filter(Elevator.risk_score >= min_risk)
     if max_risk is not None:

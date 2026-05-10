@@ -44,6 +44,8 @@ def _build_schemas():
     from app.models.inspection_report import InspectionReport
     from app.models.technician import Technician
 
+    _Customer = Customer  # alias to avoid shadowing in lambdas
+
     return {
         "service_calls": {
             "label_he": "קריאות שירות",
@@ -91,12 +93,12 @@ def _build_schemas():
                 "warranty_end":    {"label_he": "אחריות עד",   "type": "date",   "filter": Elevator.warranty_end,    "get": lambda o: _fmt(o.warranty_end)},
                 "management_company": {"label_he": "חברת ניהול","type": "text",  "filter": None,
                                        "get": lambda o: _safe(o, "management_company", "name")},
-                "customer":        {"label_he": "לקוח",        "type": "text",   "filter": None,
+                "customer":        {"label_he": "לקוח",        "type": "text",   "filter": _Customer.name,
                                     "get": lambda o: _safe(o, "customer", "name")},
                 "last_service_date":{"label":"שירות אחרון", "type": "date",   "filter": Elevator.last_service_date,"get": lambda o: _fmt(o.last_service_date)},
                 "next_service_date":{"label":"שירות הבא",   "type": "date",   "filter": Elevator.next_service_date,"get": lambda o: _fmt(o.next_service_date)},
             },
-            "filter_joins": {},
+            "filter_joins": {_Customer: (_Customer.id == Elevator.customer_id)},
         },
         "customers": {
             "label_he": "לקוחות",
@@ -127,7 +129,7 @@ def _build_schemas():
             "columns": {
                 "id":            {"label_he": "מזהה",      "type": "text",   "filter": Invoice.id,           "get": lambda o: str(o.id)},
                 "number":        {"label_he": "מספר",      "type": "text",   "filter": Invoice.number,       "get": lambda o: o.number},
-                "customer_name": {"label_he": "לקוח",      "type": "text",   "filter": None,
+                "customer_name": {"label_he": "לקוח",      "type": "text",   "filter": _Customer.name,
                                   "get": lambda o: _safe(o, "customer", "name")},
                 "total":         {"label_he": "סכום",      "type": "number", "filter": Invoice.total,        "get": lambda o: float(o.total or 0)},
                 "amount_paid":   {"label_he": "שולם",      "type": "number", "filter": Invoice.amount_paid,  "get": lambda o: float(o.amount_paid or 0)},
@@ -139,7 +141,7 @@ def _build_schemas():
                 "invoice_type":  {"label_he": "סוג",       "type": "select", "filter": Invoice.invoice_type, "get": lambda o: o.invoice_type,
                                   "options": ["TAX","RECEIPT","PROFORMA","CREDIT"]},
             },
-            "filter_joins": {},
+            "filter_joins": {_Customer: (_Customer.id == Invoice.customer_id)},
         },
         "inventory": {
             "label_he": "מלאי",
@@ -191,7 +193,7 @@ def _build_schemas():
             "columns": {
                 "id":            {"label_he": "מזהה",      "type": "text",   "filter": Contract.id,           "get": lambda o: str(o.id)},
                 "number":        {"label_he": "מספר",      "type": "text",   "filter": Contract.number,       "get": lambda o: o.number},
-                "customer_name": {"label_he": "לקוח",      "type": "text",   "filter": None,
+                "customer_name": {"label_he": "לקוח",      "type": "text",   "filter": _Customer.name,
                                   "get": lambda o: _safe(o, "customer", "name")},
                 "contract_type": {"label_he": "סוג",       "type": "select", "filter": Contract.contract_type,"get": lambda o: o.contract_type,
                                   "options": ["MAINTENANCE","INSPECTION","COMPREHENSIVE","OTHER"]},
@@ -202,7 +204,7 @@ def _build_schemas():
                 "monthly_value": {"label_he": "תשלום חודשי","type":"number", "filter": Contract.monthly_value,"get": lambda o: float(o.monthly_value or 0)},
                 "auto_renew":    {"label_he": "חידוש אוטו","type": "bool",   "filter": Contract.auto_renew,   "get": lambda o: _fmt(o.auto_renew)},
             },
-            "filter_joins": {},
+            "filter_joins": {_Customer: (_Customer.id == Contract.customer_id)},
         },
         "leads": {
             "label_he": "לידים",
@@ -211,7 +213,7 @@ def _build_schemas():
             "default_columns": ["created_at", "customer_name", "source", "status", "estimated_value"],
             "columns": {
                 "id":              {"label_he": "מזהה",    "type": "text",   "filter": Lead.id,              "get": lambda o: str(o.id)},
-                "customer_name":   {"label_he": "לקוח",    "type": "text",   "filter": None,
+                "customer_name":   {"label_he": "לקוח",    "type": "text",   "filter": _Customer.name,
                                     "get": lambda o: _safe(o, "customer", "name")},
                 "source":          {"label_he": "מקור",    "type": "text",   "filter": Lead.source,          "get": lambda o: o.source},
                 "status":          {"label_he": "סטטוס",   "type": "select", "filter": Lead.status,          "get": lambda o: o.status,
@@ -220,7 +222,7 @@ def _build_schemas():
                 "created_at":      {"label_he": "נוצר",    "type": "datetime","filter": Lead.created_at,     "get": lambda o: _fmt(o.created_at)},
                 "notes":           {"label_he": "הערות",   "type": "text",   "filter": Lead.notes,           "get": lambda o: o.notes},
             },
-            "filter_joins": {},
+            "filter_joins": {_Customer: (_Customer.id == Lead.customer_id)},
         },
         "inspections": {
             "label_he": "ביקורות",

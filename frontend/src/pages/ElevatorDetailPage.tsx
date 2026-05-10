@@ -711,6 +711,68 @@ export default function ElevatorDetailPage() {
                 ) : null}
               </Grid.Col>
 
+              {/* Extended tech specs */}
+              <Grid.Col span={12}>
+                <Divider label="מפרט טכני מורחב" labelPosition="right" mt="sm" mb="xs" />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="סוג מנוע" value={form.motor_type ?? ''} onChange={e => set('motor_type', e.target.value || null)} />
+                ) : (
+                  <Field label="סוג מנוע" value={elevator.motor_type} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="דגם בקר" value={form.controller_model ?? ''} onChange={e => set('controller_model', e.target.value || null)} />
+                ) : (
+                  <Field label="דגם בקר" value={elevator.controller_model} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="סוג דלת" value={form.door_type ?? ''} onChange={e => set('door_type', e.target.value || null)} />
+                ) : (
+                  <Field label="סוג דלת" value={elevator.door_type} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label="עומק בור (ס״מ)" value={form.pit_depth_cm ?? ''} onChange={v => set('pit_depth_cm', v || null)} min={0} />
+                ) : (
+                  <Field label="עומק בור (ס״מ)" value={elevator.pit_depth_cm ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label='גובה חדר מכונות (ס"מ)' value={form.headroom_cm ?? ''} onChange={v => set('headroom_cm', v || null)} min={0} />
+                ) : (
+                  <Field label='גובה חדר מכונות (ס"מ)' value={elevator.headroom_cm ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <DateInput label="תוקף תעודת בטיחות" value={parseDate(form.safety_certificate_expiry)} onChange={d => dateSet('safety_certificate_expiry', d)} clearable locale="he" />
+                ) : (
+                  <Field label="תוקף תעודת בטיחות">
+                    {elevator.safety_certificate_expiry ? (() => {
+                      const exp = new Date(elevator.safety_certificate_expiry)
+                      const today = new Date()
+                      today.setHours(0, 0, 0, 0)
+                      const days = Math.ceil((exp.getTime() - today.getTime()) / 86400000)
+                      const color = days < 0 ? 'red' : days <= 30 ? 'orange' : 'green'
+                      const label = days < 0 ? `פג תוקף לפני ${Math.abs(days)} ימים` : days === 0 ? 'פג היום' : `בעוד ${days} ימים`
+                      return (
+                        <Group gap="xs">
+                          <Text fw={500}>{exp.toLocaleDateString('he-IL')}</Text>
+                          <Badge color={color} size="sm" variant="light">{label}</Badge>
+                        </Group>
+                      )
+                    })() : <Text fw={500} c="dimmed">—</Text>}
+                  </Field>
+                )}
+              </Grid.Col>
+
               {/* Location */}
               <Grid.Col span={12}>
                 <Divider label="מיקום גיאוגרפי" labelPosition="right" mt="sm" mb="xs" />

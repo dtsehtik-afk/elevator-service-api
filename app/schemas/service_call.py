@@ -38,6 +38,7 @@ class ServiceCallResponse(BaseModel):
     is_recurring: bool
     resolution_notes: Optional[str]
     quote_needed: bool = False
+    sla_deadline: Optional[datetime] = None
     created_at: datetime
     assigned_at: Optional[datetime]
     resolved_at: Optional[datetime]

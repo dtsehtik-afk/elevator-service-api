@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Select, Modal,
   Pagination, Table, ScrollArea, Loader, Center, SimpleGrid, ThemeIcon, Tooltip,
@@ -20,7 +21,8 @@ const PAGE_SIZE = 20
 
 export default function MaintenancePage() {
   const qc = useQueryClient()
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  const [statusFilter, setStatusFilter] = useState<string | null>(searchParams.get('status'))
   const [page, setPage] = useState(1)
   const [addOpened, { open: openAdd, close: closeAdd }] = useDisclosure()
   const [updateOpened, { open: openUpdate, close: closeUpdate }] = useDisclosure()

@@ -22,6 +22,13 @@ export interface ColumnMeta {
   label_he: string
   type: string
   filterable: boolean
+  options?: string[]
+}
+
+export interface FilterOptions {
+  technicians: string[]
+  cities: string[]
+  customers: { id: string; name: string }[]
 }
 
 export interface EntitySchema {
@@ -87,4 +94,10 @@ export const reportsApi = {
 
   setDefaultView: (id: string) =>
     client.post(`/reports/views/${id}/set-default`).then(r => r.data),
+
+  getFilterOptions: () =>
+    client.get<FilterOptions>('/reports/filter-options').then(r => r.data),
+
+  aiChat: (question: string) =>
+    client.post<{ answer: string }>('/reports/ai-chat', { question }).then(r => r.data),
 }

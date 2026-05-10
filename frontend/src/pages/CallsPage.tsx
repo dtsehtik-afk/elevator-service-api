@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react'
+import { AIRefineButton } from '../components/AIRefineButton'
 import {
   Stack, Title, Group, Select, Badge, Text, Button, Paper, TextInput,
   Modal, Textarea, Pagination, Table, ScrollArea, Loader, Center,
@@ -6,6 +7,7 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { notifications } from '@mantine/notifications'
 import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall, resetAndReassignCall } from '../api/calls'
 import { listElevators, updateElevator } from '../api/elevators'
@@ -51,11 +53,26 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+function SlaBadge({ deadline, status }: { deadline: string | null; status: string }) {
+  if (!deadline || ['RESOLVED', 'CLOSED'].includes(status)) return null
+  const msLeft = new Date(deadline).getTime() - Date.now()
+  const hLeft = msLeft / 3600000
+  if (msLeft < 0) {
+    const hOver = Math.abs(hLeft)
+    const label = hOver < 1 ? `חריגה ${Math.round(hOver * 60)}ד` : `חריגה ${hOver.toFixed(0)}ש`
+    return <Badge color="red" size="xs" variant="filled">{label}</Badge>
+  }
+  const color = hLeft <= 2 ? 'orange' : 'green'
+  const label = hLeft < 1 ? `${Math.round(hLeft * 60)}ד` : hLeft < 24 ? `${hLeft.toFixed(0)}ש` : `${(hLeft / 24).toFixed(0)}י`
+  return <Badge color={color} size="xs" variant="light">SLA {label}</Badge>
+}
+
 export default function CallsPage() {
   const qc = useQueryClient()
   const userName = useAuthStore(s => s.userName)
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
-  const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  const [statusFilter, setStatusFilter] = useState<string | null>(searchParams.get('status'))
+  const [priorityFilter, setPriorityFilter] = useState<string | null>(searchParams.get('priority'))
   const [page, setPage] = useState(1)
   const [newOpened, { open: openNew, close: closeNew }] = useDisclosure()
   const [updateOpened, { open: openUpdate, close: closeUpdate }] = useDisclosure()
@@ -332,6 +349,7 @@ export default function CallsPage() {
                   <Table.Th>תיאור</Table.Th>
                   <Table.Th>סוג תקלה</Table.Th>
                   <Table.Th>סטטוס</Table.Th>
+                  <Table.Th>SLA</Table.Th>
                   <Table.Th>דווח ע"י</Table.Th>
                   <Table.Th>תאריך</Table.Th>
                   <Table.Th></Table.Th>
@@ -340,7 +358,7 @@ export default function CallsPage() {
               <Table.Tbody>
                 {paginated.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={7}><Center h={100}><Text c="dimmed">לא נמצאו קריאות</Text></Center></Table.Td>
+                    <Table.Td colSpan={8}><Center h={100}><Text c="dimmed">לא נמצאו קריאות</Text></Center></Table.Td>
                   </Table.Tr>
                 ) : paginated.map(c => {
                   const isRescue = c.fault_type === 'RESCUE'
@@ -368,6 +386,7 @@ export default function CallsPage() {
                       </Table.Td>
                       <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[c.fault_type]}</Text></Table.Td>
                       <Table.Td><StatusBadge status={c.status} /></Table.Td>
+                      <Table.Td><SlaBadge deadline={c.sla_deadline} status={c.status} /></Table.Td>
                       <Table.Td><Text size="sm">{c.reported_by}</Text></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{formatDateTime(c.created_at)}</Text></Table.Td>
                       <Table.Td onClick={e => e.stopPropagation()}>
@@ -625,6 +644,8 @@ export default function CallsPage() {
             label="תיאור התקלה" required minRows={3}
             value={newForm.description}
             onChange={e => setNewForm(s => ({ ...s, description: e.target.value }))}
+            rightSection={<AIRefineButton value={newForm.description} onChange={v => setNewForm(s => ({ ...s, description: v }))} />}
+            rightSectionPointerEvents="all"
           />
           <Group grow>
             <Select
@@ -677,6 +698,8 @@ export default function CallsPage() {
             value={monitorNotes}
             onChange={e => setMonitorNotes(e.target.value)}
             rows={3}
+            rightSection={<AIRefineButton value={monitorNotes} onChange={setMonitorNotes} />}
+            rightSectionPointerEvents="all"
           />
           <Group justify="flex-end" mt="sm">
             <Button variant="default" onClick={closeMonitor}>ביטול</Button>
@@ -736,6 +759,8 @@ export default function CallsPage() {
             label="תיאור התקלה" required minRows={3}
             value={updateForm.description}
             onChange={e => setUpdateForm(s => ({ ...s, description: e.target.value }))}
+            rightSection={<AIRefineButton value={updateForm.description} onChange={v => setUpdateForm(s => ({ ...s, description: v }))} />}
+            rightSectionPointerEvents="all"
           />
           <Group grow>
             <Select
@@ -773,6 +798,8 @@ export default function CallsPage() {
             label='הערות / דו"ח טיפול' minRows={3}
             value={updateForm.resolution_notes}
             onChange={e => setUpdateForm(s => ({ ...s, resolution_notes: e.target.value }))}
+            rightSection={<AIRefineButton value={updateForm.resolution_notes ?? ''} onChange={v => setUpdateForm(s => ({ ...s, resolution_notes: v }))} />}
+            rightSectionPointerEvents="all"
           />
           <Checkbox
             label="💰 נדרשת הצעת מחיר ללקוח"

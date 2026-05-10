@@ -228,7 +228,7 @@ export default function DashboardPage() {
           <KpiCard
             label="קריאות קריטיות" value={criticalCalls.length}
             icon="🚨" color={criticalCalls.length > 0 ? 'red' : 'green'}
-            onClick={() => navigate('/calls')}
+            onClick={() => navigate('/calls?priority=CRITICAL')}
           />
         </Grid.Col>
         <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
@@ -243,6 +243,7 @@ export default function DashboardPage() {
           <KpiCard
             label="תחזוקה בפיגור" value={overdueMaintenance.length}
             icon="⚠️" color={overdueMaintenance.length > 0 ? 'orange' : 'green'}
+            onClick={() => navigate('/maintenance?status=OVERDUE')}
           />
         </Grid.Col>
         <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
@@ -267,7 +268,7 @@ export default function DashboardPage() {
           )}
           {missingLabor > 0 && (
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Alert color="yellow" variant="light" title="נתונים חסרים">
+              <Alert color="yellow" variant="light" title="נתונים חסרים" style={{ cursor: 'pointer' }} onClick={() => navigate('/elevators')}>
                 <Text size="sm">{missingLabor} מעליות ללא מס׳ מ.ע</Text>
                 {missingService > 0 && <Text size="sm">{missingService} ללא סוג שירות</Text>}
               </Alert>
@@ -275,14 +276,14 @@ export default function DashboardPage() {
           )}
           {debtElevators > 0 && (
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Alert color="orange" variant="light" title="חוב פתוח">
+              <Alert color="orange" variant="light" title="חוב פתוח" style={{ cursor: 'pointer' }} onClick={() => navigate('/elevators')}>
                 <Text size="sm">{debtElevators} מעליות עם חוב מסומן</Text>
               </Alert>
             </Grid.Col>
           )}
           {highRisk > 0 && (
             <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-              <Alert color="red" variant="light" title="סיכון גבוה">
+              <Alert color="red" variant="light" title="סיכון גבוה" style={{ cursor: 'pointer' }} onClick={() => navigate('/elevators?min_risk=50')}>
                 <Text size="sm">{highRisk} מעליות עם risk score &gt; 50</Text>
               </Alert>
             </Grid.Col>
@@ -421,16 +422,33 @@ export default function DashboardPage() {
             {callsByStatus.length === 0 ? (
               <Center h={180}><Text c="dimmed">אין נתונים</Text></Center>
             ) : (
-              <Center>
-                <DonutChart
-                  data={callsByStatus}
-                  size={170}
-                  thickness={28}
-                  tooltipDataSource="segment"
-                  withTooltip
-                  withLabelsLine={false}
-                />
-              </Center>
+              <>
+                <Center>
+                  <DonutChart
+                    data={callsByStatus}
+                    size={150}
+                    thickness={26}
+                    tooltipDataSource="segment"
+                    withTooltip
+                    withLabelsLine={false}
+                  />
+                </Center>
+                <Stack gap={2} mt="xs">
+                  {callsByStatus.map(s => (
+                    <Group key={s.name} justify="space-between" px="xs" py={2}
+                      style={{ cursor: 'pointer', borderRadius: 4 }}
+                      onClick={() => navigate(`/calls?status=${Object.keys(CALL_STATUS_LABELS).find(k => CALL_STATUS_LABELS[k] === s.name) ?? ''}`)}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--mantine-color-gray-1)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '')}>
+                      <Group gap={6}>
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: `var(--mantine-color-${s.color}-6, ${s.color})` }} />
+                        <Text size="xs">{s.name}</Text>
+                      </Group>
+                      <Text size="xs" fw={600}>{s.value}</Text>
+                    </Group>
+                  ))}
+                </Stack>
+              </>
             )}
           </Paper>
         </Grid.Col>
@@ -442,17 +460,34 @@ export default function DashboardPage() {
             {callsByFault.length === 0 ? (
               <Center h={180}><Text c="dimmed">אין תקלות פתוחות</Text></Center>
             ) : (
-              <BarChart
-                h={180}
-                data={callsByFault}
-                dataKey="type"
-                series={[{ name: 'count', color: 'blue.6', label: 'קריאות' }]}
-                tickLine="none"
-                gridAxis="none"
-                withLegend={false}
-                withTooltip
-                barProps={{ radius: 4 }}
-              />
+              <>
+                <BarChart
+                  h={150}
+                  data={callsByFault}
+                  dataKey="type"
+                  series={[{ name: 'count', color: 'blue.6', label: 'קריאות' }]}
+                  tickLine="none"
+                  gridAxis="none"
+                  withLegend={false}
+                  withTooltip
+                  barProps={{ radius: 4, style: { cursor: 'pointer' } }}
+                />
+                <Stack gap={2} mt="xs">
+                  {callsByFault.map(f => {
+                    const faultKey = Object.keys(faultLabels).find(k => faultLabels[k] === f.type) ?? f.type
+                    return (
+                      <Group key={f.type} justify="space-between" px="xs" py={2}
+                        style={{ cursor: 'pointer', borderRadius: 4 }}
+                        onClick={() => navigate(`/calls?fault_type=${faultKey}`)}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--mantine-color-gray-1)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}>
+                        <Text size="xs">{f.type}</Text>
+                        <Text size="xs" fw={600}>{f.count}</Text>
+                      </Group>
+                    )
+                  })}
+                </Stack>
+              </>
             )}
           </Paper>
         </Grid.Col>
@@ -466,9 +501,9 @@ export default function DashboardPage() {
             <Title order={4} mb="sm">התפלגות מעליות לפי עיר (Top 5)</Title>
             <Stack gap="xs">
               {topCities.map(([city, count]) => (
-                <div key={city}>
+                <div key={city} style={{ cursor: 'pointer' }} onClick={() => navigate(`/elevators?city=${encodeURIComponent(city)}`)}>
                   <Group justify="space-between" mb={2}>
-                    <Text size="sm">{city}</Text>
+                    <Text size="sm" c="blue" style={{ textDecoration: 'underline dotted' }}>{city}</Text>
                     <Text size="sm" fw={600}>{count}</Text>
                   </Group>
                   <Progress
@@ -495,7 +530,8 @@ export default function DashboardPage() {
                 const count = elevators.filter(e => e.status === status).length
                 const pct = elevators.length > 0 ? Math.round((count / elevators.length) * 100) : 0
                 return (
-                  <Stack key={status} align="center" gap="xs">
+                  <Stack key={status} align="center" gap="xs" style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/elevators?status=${status}`)}>
                     <RingProgress
                       size={90} thickness={10}
                       sections={[{ value: pct, color }]}
@@ -505,7 +541,8 @@ export default function DashboardPage() {
                   </Stack>
                 )
               })}
-              <Stack align="center" gap="xs">
+              <Stack align="center" gap="xs" style={{ cursor: 'pointer' }}
+                onClick={() => navigate('/elevators?min_risk=50')}>
                 <RingProgress
                   size={90} thickness={10}
                   sections={[{ value: elevators.length > 0 ? Math.round((highRisk / elevators.length) * 100) : 0, color: 'red' }]}

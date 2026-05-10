@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Stack, Title, Group, TextInput, Select, Badge, Text, Button,
   Paper, Table, Loader, Center, Pagination, Modal, NumberInput, ScrollArea,
@@ -49,8 +49,9 @@ function saveVisibleCols(cols: Set<string>) {
 export default function ElevatorsPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  const [search, setSearch] = useState(searchParams.get('city') ?? '')
+  const [statusFilter, setStatusFilter] = useState<string | null>(searchParams.get('status'))
   const [page, setPage] = useState(1)
   const [opened, { open, close }] = useDisclosure()
   const [colsOpened, setColsOpened] = useState(false)

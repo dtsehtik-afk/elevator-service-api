@@ -76,6 +76,18 @@ def _apply_label_overrides(db: Session, entity_type: str, columns: list) -> list
     ]
 
 
+def _col_meta(k: str, v: dict) -> dict:
+    meta: dict = {
+        "key": k,
+        "label_he": v["label_he"],
+        "type": v["type"],
+        "filterable": v.get("filter") is not None,
+    }
+    if "options" in v:
+        meta["options"] = v["options"]
+    return meta
+
+
 @router.get("/schema", summary="All entity types and their available columns")
 def get_all_schemas(
     db: Session = Depends(get_db),
@@ -85,15 +97,7 @@ def get_all_schemas(
     schemas = get_schemas()
     result = []
     for etype, schema in schemas.items():
-        cols = [
-            {
-                "key": k,
-                "label_he": v["label_he"],
-                "type": v["type"],
-                "filterable": v.get("filter_attr") is not None,
-            }
-            for k, v in schema["columns"].items()
-        ]
+        cols = [_col_meta(k, v) for k, v in schema["columns"].items()]
         result.append({
             "entity_type": etype,
             "label_he": schema["label_he"],
@@ -114,21 +118,73 @@ def get_entity_schema(
     if entity_type not in schemas:
         raise HTTPException(status_code=404, detail=f"Entity type '{entity_type}' not found")
     schema = schemas[entity_type]
-    cols = [
-        {
-            "key": k,
-            "label_he": v["label_he"],
-            "type": v["type"],
-            "filterable": v.get("filter_attr") is not None,
-        }
-        for k, v in schema["columns"].items()
-    ]
+    cols = [_col_meta(k, v) for k, v in schema["columns"].items()]
     return {
         "entity_type": entity_type,
         "label_he": schema["label_he"],
         "default_columns": schema["default_columns"],
         "columns": _apply_label_overrides(db, entity_type, cols),
     }
+
+
+# ── Filter options endpoint ───────────────────────────────────────────────────
+
+@router.get("/filter-options", summary="Lists for quick-filter dropdowns")
+def get_filter_options(
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    from sqlalchemy import distinct
+    from app.models.technician import Technician as TechModel
+    from app.models.customer import Customer
+    from app.models.elevator import Elevator
+
+    technicians = (
+        db.query(TechModel.name)
+        .filter(TechModel.name.isnot(None))
+        .order_by(TechModel.name)
+        .all()
+    )
+    cities = (
+        db.query(distinct(Elevator.city))
+        .filter(Elevator.city.isnot(None), Elevator.city != "")
+        .order_by(Elevator.city)
+        .all()
+    )
+    customers = (
+        db.query(Customer.id, Customer.name)
+        .filter(Customer.name.isnot(None))
+        .order_by(Customer.name)
+        .all()
+    )
+    return {
+        "technicians": [t.name for t in technicians if t.name],
+        "cities": [c[0] for c in cities if c[0]],
+        "customers": [{"id": str(c.id), "name": c.name} for c in customers],
+    }
+
+
+# ── AI chat endpoint ──────────────────────────────────────────────────────────
+
+class AIChatRequest(BaseModel):
+    question: str
+
+
+@router.post("/ai-chat", summary="Answer a natural-language question using Gemini + DB")
+async def ai_chat(
+    body: AIChatRequest,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    import os
+    from app.services.report_ai_agent import answer_question
+
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY not configured")
+
+    answer = await answer_question(body.question, db, api_key)
+    return {"answer": answer}
 
 
 # ── Query endpoint ────────────────────────────────────────────────────────────

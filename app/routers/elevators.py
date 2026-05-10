@@ -35,6 +35,7 @@ def sync_elevator_customers(
 def list_elevators(
     city: Optional[str] = Query(None, description="Filter by city (partial match)"),
     status: Optional[str] = Query(None, description="Filter by status: ACTIVE | INACTIVE | UNDER_REPAIR"),
+    customer_id: Optional[uuid.UUID] = Query(None, description="Filter by customer UUID"),
     min_risk: Optional[float] = Query(None, ge=0, le=100, description="Minimum risk score"),
     max_risk: Optional[float] = Query(None, ge=0, le=100, description="Maximum risk score"),
     skip: int = Query(0, ge=0),
@@ -43,7 +44,7 @@ def list_elevators(
     _: Technician = Depends(get_current_user),
 ):
     """List elevators with optional filters."""
-    return elevator_service.list_elevators(db, city, status, min_risk, max_risk, skip, limit)
+    return elevator_service.list_elevators(db, city, status, customer_id, min_risk, max_risk, skip, limit)
 
 
 @router.post(

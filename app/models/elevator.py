@@ -117,6 +117,14 @@ class Elevator(Base):
     inspector_email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     last_inspection_report_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # ── Extended technical specs ──────────────────────────────────────────────
+    motor_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    controller_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    door_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    pit_depth_cm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    headroom_cm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    safety_certificate_expiry: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+
     # ── Status / risk ─────────────────────────────────────────────────────────
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE", index=True)
     risk_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

@@ -111,6 +111,9 @@ def create_service_call(
     """
     is_recurring = _check_recurring(db, data.elevator_id, data.fault_type)
 
+    _sla_hours = {"CRITICAL": 4, "HIGH": 8, "MEDIUM": 24, "LOW": 72}
+    sla_deadline = datetime.now(timezone.utc) + timedelta(hours=_sla_hours.get(data.priority, 24))
+
     call = ServiceCall(
         elevator_id=data.elevator_id,
         reported_by=data.reported_by,
@@ -118,6 +121,7 @@ def create_service_call(
         priority=data.priority,
         fault_type=data.fault_type,
         is_recurring=is_recurring,
+        sla_deadline=sla_deadline,
     )
     db.add(call)
     db.flush()  # Get the ID before commit
@@ -197,29 +201,22 @@ def get_service_call(db: Session, call_id: uuid.UUID) -> Optional[ServiceCall]:
 def list_service_calls(
     db: Session,
     elevator_id: Optional[uuid.UUID] = None,
+    customer_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
     priority: Optional[str] = None,
     fault_type: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
 ) -> List[ServiceCall]:
-    """Return a filtered list of service calls.
-
-    Args:
-        db: Database session.
-        elevator_id: Filter by elevator.
-        status: Filter by status.
-        priority: Filter by priority.
-        fault_type: Filter by fault type.
-        skip: Pagination offset.
-        limit: Page size.
-
-    Returns:
-        List of ServiceCall objects.
-    """
+    """Return a filtered list of service calls."""
+    from app.models.elevator import Elevator
     query = db.query(ServiceCall)
     if elevator_id:
         query = query.filter(ServiceCall.elevator_id == elevator_id)
+    if customer_id:
+        query = query.join(Elevator, ServiceCall.elevator_id == Elevator.id).filter(
+            Elevator.customer_id == customer_id
+        )
     if status:
         query = query.filter(ServiceCall.status == status)
     if priority:

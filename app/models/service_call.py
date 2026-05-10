@@ -44,6 +44,9 @@ class ServiceCall(Base):
     # True when call arrived outside working hours and we're waiting for caller to approve surcharge
     after_hours_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # SLA deadline — computed at creation based on priority
+    sla_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
