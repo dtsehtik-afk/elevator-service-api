@@ -119,7 +119,7 @@ def get_entity_schema(
             "key": k,
             "label_he": v["label_he"],
             "type": v["type"],
-            "filterable": v.get("filter_attr") is not None,
+            "filterable": v.get("filter") is not None,
         }
         for k, v in schema["columns"].items()
     ]
