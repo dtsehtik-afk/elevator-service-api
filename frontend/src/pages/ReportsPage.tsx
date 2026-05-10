@@ -53,6 +53,7 @@ export default function ReportsPage() {
   const [activeView, setActiveView] = useState<string | null>(null)
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null)
 
   const { data: schemas } = useQuery({
     queryKey: ['report-schemas'],
@@ -174,6 +175,7 @@ export default function ReportsPage() {
   async function runAiQuery() {
     if (!aiQuestion.trim()) return
     setAiLoading(true)
+    setAiAnswer(null)
     try {
       const { data } = await client.post('/reports/ai-query', { question: aiQuestion })
       const p = data.ai_params ?? {}
@@ -183,6 +185,7 @@ export default function ReportsPage() {
       if (p.sort_by) setSortBy(p.sort_by)
       if (p.sort_dir) setSortDir(p.sort_dir)
       setResult(data)
+      setAiAnswer(data.answer || null)
       setPage(1)
     } catch (e: any) {
       notifications.show({ message: e?.response?.data?.detail ?? 'שגיאת AI', color: 'red' })
@@ -245,6 +248,17 @@ export default function ReportsPage() {
         </Group>
         <Text size="xs" c="dimmed" mt={4}>הבינה מתרגמת את השאלה לפילטרים ומריצה את הדוח אוטומטית.</Text>
       </Paper>
+
+      {/* AI narrative answer */}
+      {aiAnswer && (
+        <Paper withBorder radius="md" p="md" style={{ borderRight: '4px solid #7950f2', background: 'var(--mantine-color-violet-0)' }}>
+          <Group gap="xs" mb="xs">
+            <Text size="xs" fw={700} c="violet">🤖 תשובת הבינה המלאכותית</Text>
+            <Button size="xs" variant="subtle" color="gray" px={6} onClick={() => setAiAnswer(null)}>✕</Button>
+          </Group>
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{aiAnswer}</Text>
+        </Paper>
+      )}
 
       {/* Saved views bar */}
       {views && views.length > 0 && (

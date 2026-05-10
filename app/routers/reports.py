@@ -279,7 +279,31 @@ def ai_report_query(
         limit=200,
         include_custom_fields=False,
     )
-    return {**result, "ai_params": params}
+
+    # Pass data back to Gemini for a narrative Hebrew answer
+    answer = ""
+    try:
+        rows_preview = result.get("rows", [])[:40]
+        summary_prompt = (
+            f"אתה מנתח נתונים של מערכת ניהול מעליות. המשתמש שאל: '{question}'\n\n"
+            f"נמצאו {result.get('total', 0)} תוצאות. הנה הנתונים:\n"
+            f"{json.dumps(rows_preview, ensure_ascii=False)}\n\n"
+            f"כתוב תשובה מקצועית, תמציתית ומלאה בעברית בלבד. כלול מספרים, שמות וסטטיסטיקות רלוונטיות. "
+            f"אם אין תוצאות — ציין זאת בלבד. אל תתאר את מבנה הנתונים — ענה על השאלה ישירות."
+        )
+        ans_resp = httpx.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            f"?key={api_key}",
+            json={"contents": [{"role": "user", "parts": [{"text": summary_prompt}]}],
+                  "generationConfig": {"maxOutputTokens": 400}},
+            timeout=15,
+        )
+        ans_resp.raise_for_status()
+        answer = ans_resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception:
+        pass
+
+    return {**result, "answer": answer, "ai_params": params}
 
 
 # ── Saved Views CRUD ──────────────────────────────────────────────────────────
