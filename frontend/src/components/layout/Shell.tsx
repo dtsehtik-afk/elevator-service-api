@@ -1,13 +1,14 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   AppShell, Burger, Group, NavLink, Text, Avatar, Menu,
-  Divider, Box, rem, Button, Collapse,
+  Divider, Box, rem, Button, Collapse, Kbd, ActionIcon, Tooltip,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { useAuthStore } from '../../stores/authStore'
 import client from '../../api/client'
+import { GlobalSearch, useGlobalSearch } from '../GlobalSearch'
 
 interface NavItem {
   label: string
@@ -120,6 +121,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [opened, { toggle }] = useDisclosure()
   const navigate = useNavigate()
   const { userName, clear } = useAuthStore()
+  const search = useGlobalSearch()
 
   const { data: navConfig = {} } = useQuery<NavConfig>({
     queryKey: ['nav-config'],
@@ -136,6 +138,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <>
+    <GlobalSearch opened={search.opened} onClose={search.close} />
     <AppShell
       header={{ height: 60 }}
       navbar={{ width: 240, breakpoint: 'sm', collapsed: { mobile: !opened } }}
@@ -149,19 +153,40 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               ⚙️ אקורד מעליות ERP
             </Text>
           </Group>
-          <Menu shadow="md" width={180} position="bottom-end">
-            <Menu.Target>
-              <Group gap="xs" style={{ cursor: 'pointer' }}>
-                <Avatar size="sm" color="blue" radius="xl">
-                  {userName?.charAt(0) ?? 'A'}
-                </Avatar>
-                <Text size="sm" fw={500}>{userName ?? 'משתמש'}</Text>
-              </Group>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item onClick={logout} color="red">התנתק</Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
+          <Group gap="xs">
+            <Tooltip label={<Group gap={4}><Text size="xs">חיפוש גלובלי</Text><Kbd size="xs">Ctrl+K</Kbd></Group>} position="bottom">
+              <Button
+                variant="light"
+                color="gray"
+                size="xs"
+                leftSection={<span>🔍</span>}
+                onClick={search.open}
+                visibleFrom="sm"
+                style={{ borderRadius: 20, minWidth: 160 }}
+              >
+                <Group gap="xs" justify="space-between" style={{ flex: 1 }}>
+                  <Text size="xs" c="dimmed">חפש...</Text>
+                  <Kbd size="xs">⌘K</Kbd>
+                </Group>
+              </Button>
+            </Tooltip>
+            <ActionIcon variant="subtle" size="sm" onClick={search.open} hiddenFrom="sm">
+              <span>🔍</span>
+            </ActionIcon>
+            <Menu shadow="md" width={180} position="bottom-end">
+              <Menu.Target>
+                <Group gap="xs" style={{ cursor: 'pointer' }}>
+                  <Avatar size="sm" color="blue" radius="xl">
+                    {userName?.charAt(0) ?? 'A'}
+                  </Avatar>
+                  <Text size="sm" fw={500}>{userName ?? 'משתמש'}</Text>
+                </Group>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item onClick={logout} color="red">התנתק</Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
         </Group>
       </AppShell.Header>
 
@@ -188,5 +213,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
       <AppShell.Main style={{ overflowX: 'hidden' }}>{children}</AppShell.Main>
     </AppShell>
+    </>
   )
 }

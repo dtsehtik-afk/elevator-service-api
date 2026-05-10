@@ -30,6 +30,7 @@ import CustomFieldsPage from './pages/CustomFieldsPage'
 import RolesPage from './pages/RolesPage'
 import HRPage from './pages/HRPage'
 import ProjectsPage from './pages/ProjectsPage'
+import AdminConsolePage from './pages/AdminConsolePage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -45,6 +46,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/tech" element={<TechAppPage />} />
+        <Route path="/admin-console" element={<AdminConsolePage />} />
         <Route
           path="/*"
           element={

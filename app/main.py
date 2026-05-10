@@ -21,6 +21,7 @@ from app.routers import hr as hr_router
 from app.routers import ai as ai_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
+from app.routers import search as search_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -277,7 +278,7 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
-    "/reports", "/custom-fields", "/roles", "/hr", "/projects",
+    "/reports", "/custom-fields", "/roles", "/hr", "/projects", "/search",
 )
 
 
@@ -330,6 +331,7 @@ app.include_router(hr_router.router)
 app.include_router(ai_router.router)
 app.include_router(projects_router.router)
 app.include_router(admin_console_router.router)
+app.include_router(search_router.router)
 
 
 @app.get("/health", tags=["Health"])
