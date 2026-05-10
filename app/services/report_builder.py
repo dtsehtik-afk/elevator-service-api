@@ -148,8 +148,6 @@ def _build_schemas():
                 "issue_date":    {"label_he": "תאריך הנפקה","type": "date",  "filter": Invoice.issue_date,   "get": lambda o: _fmt(o.issue_date)},
                 "due_date":      {"label_he": "תאריך פירעון","type":"date",  "filter": Invoice.due_date,     "get": lambda o: _fmt(o.due_date)},
                 "paid_at":       {"label_he": "שולם בתאריך","type":"datetime","filter": Invoice.paid_at,     "get": lambda o: _fmt(o.paid_at)},
-                "invoice_type":  {"label_he": "סוג",       "type": "select", "filter": Invoice.invoice_type, "get": lambda o: o.invoice_type,
-                                  "options": ["TAX","RECEIPT","PROFORMA","CREDIT"]},
             },
             "filter_joins": {},
         },
