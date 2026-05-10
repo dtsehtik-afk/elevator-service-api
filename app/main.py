@@ -144,6 +144,26 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_hr_records_technician_id ON hr_records (technician_id)",
+                "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS elevator_id UUID REFERENCES elevators(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_contacts_elevator_id ON contacts (elevator_id)",
+                # Service call sequential numbering (S + 5 digits)
+                "CREATE SEQUENCE IF NOT EXISTS service_calls_call_number_seq",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS call_number BIGINT DEFAULT nextval('service_calls_call_number_seq')",
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_service_calls_call_number ON service_calls (call_number)",
+                # Maintenance times per year (2/4/6/12)
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS maintenance_times_per_year INTEGER DEFAULT 6",
+                # Backfill: set times_per_year=6 where NULL, derive from existing interval_days
+                """UPDATE elevators SET maintenance_times_per_year = CASE
+                    WHEN maintenance_interval_days IS NOT NULL AND maintenance_interval_days <= 35 THEN 12
+                    WHEN maintenance_interval_days IS NOT NULL AND maintenance_interval_days <= 70 THEN 6
+                    WHEN maintenance_interval_days IS NOT NULL AND maintenance_interval_days <= 100 THEN 4
+                    WHEN maintenance_interval_days IS NOT NULL THEN 2
+                    ELSE 6
+                END WHERE maintenance_times_per_year IS NULL""",
+                # Derive next_service_date for elevators that have last_service_date but no next
+                """UPDATE elevators SET next_service_date =
+                    (last_service_date + (FLOOR(365.0 / COALESCE(maintenance_times_per_year, 6)) || ' days')::INTERVAL)::DATE
+                    WHERE last_service_date IS NOT NULL AND next_service_date IS NULL""",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

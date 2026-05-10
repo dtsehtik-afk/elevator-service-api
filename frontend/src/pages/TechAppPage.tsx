@@ -3,7 +3,7 @@
  * Accessible at /tech — no admin shell, optimized for phone
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select } from '@mantine/core'
+import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select, Paper } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -74,6 +74,7 @@ interface ReportDeficiency {
   severity: string
   done?: boolean
   done_by?: string
+  action_notes?: string
 }
 
 interface InspReport {
@@ -160,8 +161,8 @@ async function fetchMapPins(techId: string): Promise<MapPin[]> {
   return data.pins ?? []
 }
 
-async function toggleDeficiency(reportId: string, idx: number, done: boolean) {
-  await client.patch(`/inspections/checklist/${reportId}`, [{ index: idx, done }])
+async function toggleDeficiency(reportId: string, idx: number, done: boolean, action_notes?: string) {
+  await client.patch(`/inspections/checklist/${reportId}`, [{ index: idx, done, action_notes }])
 }
 
 // ── Voice transcription hook ──────────────────────────────────────────────
@@ -322,13 +323,59 @@ const SEV_COLOR: Record<string, string> = { HIGH: 'red', MEDIUM: 'orange', LOW: 
 function ReportsTab() {
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [defModal, setDefModal] = useState<{ report: InspReport; idx: number; deficiency: ReportDeficiency } | null>(null)
+  const [actionNotes, setActionNotes] = useState('')
+  const [voiceActive, setVoiceActive] = useState(false)
+  const [aiRewriting, setAiRewriting] = useState(false)
   const { data: reports = [], isLoading } = useQuery({ queryKey: ['tech-reports'], queryFn: fetchMyReports })
 
   const checkMut = useMutation({
-    mutationFn: ({ reportId, idx, done }: { reportId: string; idx: number; done: boolean }) => toggleDeficiency(reportId, idx, done),
+    mutationFn: ({ reportId, idx, done, action_notes }: { reportId: string; idx: number; done: boolean; action_notes?: string }) =>
+      toggleDeficiency(reportId, idx, done, action_notes),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tech-reports'] }),
     onError: () => notifications.show({ message: 'שגיאה בעדכון', color: 'red' }),
   })
+
+  function onCheck(report: InspReport, idx: number, done: boolean) {
+    if (done) {
+      setDefModal({ report, idx, deficiency: (report.deficiencies ?? [])[idx] })
+      setActionNotes('')
+    } else {
+      checkMut.mutate({ reportId: report.id, idx, done: false })
+    }
+  }
+
+  function startVoice() {
+    const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
+    if (!SR) { notifications.show({ message: 'הדפדפן לא תומך בתמלול קולי', color: 'orange' }); return }
+    const r = new SR()
+    r.lang = 'he-IL'; r.continuous = false; r.interimResults = false
+    r.onstart = () => setVoiceActive(true)
+    r.onend = () => setVoiceActive(false)
+    r.onresult = (e: any) => setActionNotes(prev => (prev ? prev + ' ' : '') + e.results[0][0].transcript)
+    r.onerror = () => setVoiceActive(false)
+    r.start()
+  }
+
+  async function rewriteNote() {
+    if (!actionNotes.trim()) return
+    setAiRewriting(true)
+    try {
+      const { data } = await client.post('/inspections/rewrite-action-note', { text: actionNotes })
+      setActionNotes(data.text)
+    } catch {
+      notifications.show({ message: 'שגיאה בשכתוב', color: 'red' })
+    } finally {
+      setAiRewriting(false)
+    }
+  }
+
+  function saveAction() {
+    if (!defModal) return
+    checkMut.mutate({ reportId: defModal.report.id, idx: defModal.idx, done: true, action_notes: actionNotes.trim() || undefined })
+    setDefModal(null)
+    setActionNotes('')
+  }
 
   const open = reports.filter(r => r.report_status === 'OPEN' || r.report_status === 'PARTIAL')
 
@@ -336,39 +383,76 @@ function ReportsTab() {
   if (!open.length) return <Card withBorder p="xl" ta="center"><Text c="dimmed">אין דוחות פתוחים לטיפול</Text></Card>
 
   return (
-    <Stack gap="sm">
-      {open.map(r => (
-        <Card key={r.id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #fa5252' }}>
-          <Group justify="space-between" mb={4}>
-            <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
-            <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
-          </Group>
-          {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
-          <Button size="xs" variant="subtle" mt={6}
-            onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
-            {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
-          </Button>
-          <Collapse in={expanded === r.id}>
-            <Stack gap={6} mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
-              {(r.deficiencies || []).map((d, i) => (
-                <Checkbox key={i} checked={!!d.done}
-                  onChange={e => checkMut.mutate({ reportId: r.id, idx: i, done: e.target.checked })}
-                  label={
-                    <Group gap="xs">
-                      <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
-                      <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
-                        {d.description}
-                        {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
-                      </Text>
-                    </Group>
-                  }
-                />
-              ))}
-            </Stack>
-          </Collapse>
-        </Card>
-      ))}
-    </Stack>
+    <>
+      <Stack gap="sm">
+        {open.map(r => (
+          <Card key={r.id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #fa5252' }}>
+            <Group justify="space-between" mb={4}>
+              <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
+              <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
+            </Group>
+            {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
+            <Button size="xs" variant="subtle" mt={6}
+              onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+              {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
+            </Button>
+            <Collapse in={expanded === r.id}>
+              <Stack gap={6} mt="xs" p="xs" style={{ background: '#fff5f5', borderRadius: 8 }}>
+                {(r.deficiencies || []).map((d, i) => (
+                  <Checkbox key={i} checked={!!d.done}
+                    onChange={e => onCheck(r, i, e.target.checked)}
+                    label={
+                      <Group gap="xs">
+                        <Badge color={SEV_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
+                        <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
+                          {d.description}
+                          {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by}{d.action_notes ? ` — ${d.action_notes}` : ''})</Text>}
+                        </Text>
+                      </Group>
+                    }
+                  />
+                ))}
+              </Stack>
+            </Collapse>
+          </Card>
+        ))}
+      </Stack>
+
+      <Modal opened={!!defModal} onClose={() => { setDefModal(null); setActionNotes('') }}
+        title="📋 פירוט פעולה שבוצעה" dir="rtl" size="md">
+        {defModal && (
+          <Stack gap="md">
+            <Paper withBorder p="sm" radius="sm" style={{ background: '#fff5f5' }}>
+              <Badge color={SEV_COLOR[defModal.deficiency.severity] ?? 'gray'} size="sm" mb={4}>
+                {defModal.deficiency.severity}
+              </Badge>
+              <Text size="sm" fw={600}>{defModal.deficiency.description}</Text>
+            </Paper>
+            <Textarea
+              label="תיאור הפעולה שבוצעה"
+              placeholder="תאר מה בוצע לתיקון הליקוי... (ניתן להשתמש בקול)"
+              value={actionNotes}
+              onChange={e => setActionNotes(e.target.value)}
+              minRows={3}
+              autosize
+            />
+            <Group gap="xs">
+              <Button size="xs" variant="light" color={voiceActive ? 'red' : 'blue'} onClick={startVoice} loading={voiceActive}>
+                🎤 {voiceActive ? 'מקליט...' : 'הקלט קול'}
+              </Button>
+              <Button size="xs" variant="light" color="violet" onClick={rewriteNote} loading={aiRewriting} disabled={!actionNotes.trim()}>
+                ✨ שכתב בעברית מקצועית
+              </Button>
+            </Group>
+            <Text size="xs" c="dimmed">ניתן לדבר בעברית, רוסית, ערבית או אנגלית — הבינה תתרגם ותשכתב לעברית.</Text>
+            <Group justify="flex-end" gap="sm">
+              <Button variant="subtle" onClick={() => { setDefModal(null); setActionNotes('') }}>ביטול</Button>
+              <Button color="teal" onClick={saveAction} loading={checkMut.isPending}>✅ סמן כטופל ושמור</Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+    </>
   )
 }
 

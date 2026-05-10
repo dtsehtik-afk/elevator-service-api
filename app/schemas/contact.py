@@ -13,6 +13,7 @@ class ContactCreate(BaseModel):
     email: Optional[str] = None
     role: str = Field("OTHER", pattern="^(VAAD|RESIDENT|MANAGEMENT|DIALER|OTHER)$")
     notes: Optional[str] = None
+    elevator_id: Optional[uuid.UUID] = None
     building_id: Optional[uuid.UUID] = None
     management_company_id: Optional[uuid.UUID] = None
     auto_added: bool = False
@@ -24,6 +25,7 @@ class ContactUpdate(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = Field(None, pattern="^(VAAD|RESIDENT|MANAGEMENT|DIALER|OTHER)$")
     notes: Optional[str] = None
+    elevator_id: Optional[uuid.UUID] = None
     building_id: Optional[uuid.UUID] = None
     management_company_id: Optional[uuid.UUID] = None
 
@@ -35,6 +37,7 @@ class ContactResponse(BaseModel):
     email: Optional[str] = None
     role: str
     notes: Optional[str] = None
+    elevator_id: Optional[uuid.UUID] = None
     building_id: Optional[uuid.UUID] = None
     management_company_id: Optional[uuid.UUID] = None
     auto_added: bool = False

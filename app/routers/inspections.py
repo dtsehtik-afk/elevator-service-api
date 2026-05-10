@@ -213,8 +213,12 @@ def update_checklist(
             entry = {**checklist[idx], "done": done}
             if done:
                 entry["done_by"] = current_user.name
+                action_notes = (upd.get("action_notes") or "").strip()
+                if action_notes:
+                    entry["action_notes"] = action_notes
             else:
                 entry.pop("done_by", None)
+                entry.pop("action_notes", None)
             checklist[idx] = entry
 
     report.deficiencies = checklist
@@ -223,6 +227,41 @@ def update_checklist(
     report.report_status = "CLOSED" if all_done else ("PARTIAL" if any_done else "OPEN")
     db.commit()
     return {"ok": True, "report_status": report.report_status}
+
+
+@router.post("/rewrite-action-note", summary="Rewrite a raw action note to professional Hebrew via Gemini")
+def rewrite_action_note(
+    body: dict = Body(...),
+    _=Depends(get_current_user),
+):
+    """Takes raw text (any language) and returns professional Hebrew rewrite."""
+    text = (body.get("text") or "").strip()
+    if not text:
+        return {"text": text}
+    import os, httpx
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return {"text": text}
+    prompt = (
+        "אתה טכנאי מעליות מקצועי. קיבלת תיאור גולמי של פעולה שבוצעה לתיקון ליקוי בדוח ביקורת."
+        " שכתב את הטקסט לעברית מקצועית, תמציתית ורשמית — כאילו נכתב בדוח טכני."
+        " אם הטקסט בשפה אחרת (רוסית, ערבית, אנגלית) — תרגם לעברית."
+        " החזר רק את הטקסט המשוכתב בלבד, ללא הסברים נוספים.\n\nטקסט מקורי: " + text
+    )
+    try:
+        resp = httpx.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            f"?key={api_key}",
+            json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                  "generationConfig": {"maxOutputTokens": 300}},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        rewritten = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return {"text": rewritten}
+    except Exception as exc:
+        logger.warning("Gemini action note rewrite failed: %s", exc)
+        return {"text": text}
 
 
 @router.post("/{report_id}/confirm", summary="Confirm elevator match for a pending inspection report")

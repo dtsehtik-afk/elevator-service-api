@@ -37,14 +37,14 @@ def list_elevators(
     status: Optional[str] = Query(None, description="Filter by status: ACTIVE | INACTIVE | UNDER_REPAIR"),
     min_risk: Optional[float] = Query(None, ge=0, le=100, description="Minimum risk score"),
     max_risk: Optional[float] = Query(None, ge=0, le=100, description="Maximum risk score"),
+    search: Optional[str] = Query(None, description="Free-text search: address, city, or building name"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=2000),
-    search: Optional[str] = Query(None, description="Free text search by address or city"),
     db: Session = Depends(get_db),
     _: Technician = Depends(get_current_user),
 ):
     """List elevators with optional filters."""
-    return elevator_service.list_elevators(db, city, status, min_risk, max_risk, skip, limit, search)
+    return elevator_service.list_elevators(db, city, status, min_risk, max_risk, search, skip, limit)
 
 
 @router.post(
