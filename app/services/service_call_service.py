@@ -263,6 +263,33 @@ def update_service_call(
         )
         db.add(audit)
 
+        # When a MAINTENANCE call is resolved/closed, advance elevator's next service date
+        if data.status in ("RESOLVED", "CLOSED") and call.fault_type == "MAINTENANCE":
+            _advance_next_service_date(db, call.elevator_id)
+
     db.commit()
     db.refresh(call)
     return call
+
+
+def _next_working_day(d: "date_type") -> "date_type":
+    """Advance date past Saturday (Israeli day off)."""
+    from datetime import date as date_type
+    while d.weekday() == 5:  # 5 = Saturday
+        d += timedelta(days=1)
+    return d
+
+
+def _advance_next_service_date(db: Session, elevator_id: uuid.UUID) -> None:
+    """After a MAINTENANCE service call is completed, compute and store the next service date."""
+    from datetime import date as _date
+    from app.models.elevator import Elevator
+    elev = db.query(Elevator).filter(Elevator.id == elevator_id).first()
+    if not elev:
+        return
+    times_per_year = elev.maintenance_times_per_year or 6
+    interval_days = round(365 / times_per_year)
+    base = _date.today()
+    next_date = _next_working_day(base + timedelta(days=interval_days))
+    elev.last_service_date = base
+    elev.next_service_date = next_date

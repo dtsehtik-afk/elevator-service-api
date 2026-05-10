@@ -1698,15 +1698,18 @@ def _scan_drive_inspections():
                 content = drive_service.get_download_bytes(fid)
                 if not content:
                     continue
-                result = process_inspection_report(db, content, mime, fname, source="drive")
+                result = process_inspection_report(
+                    db, content, mime, fname, source="drive",
+                    existing_drive_file_id=fid,
+                )
+                if result.get("status") == "duplicate":
+                    logger.info("Drive scan skipped duplicate: %s", fname)
+                    continue
                 if result.get("report_id"):
-                    # Patch the drive_file_id onto the already-saved report
-                    # (process_inspection_report uploads and saves — but from Drive scan
-                    #  the file is already in Drive, so overwrite drive_file_id)
                     report = db.query(InspectionReport).filter(
                         InspectionReport.id == result["report_id"]
                     ).first()
-                    if report:
+                    if report and report.drive_file_id != fid:
                         report.drive_file_id = fid
                         report.file_path = None
                         db.commit()
