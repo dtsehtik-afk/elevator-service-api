@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import {
   Stack, Title, Group, Select, Badge, Text, Button, Paper, TextInput,
   Modal, Textarea, Pagination, Table, ScrollArea, Loader, Center,
@@ -12,7 +12,7 @@ import { listElevators, updateElevator } from '../api/elevators'
 import client from '../api/client'
 import LocationPickerModal from '../components/LocationPickerModal'
 import { listTechnicians } from '../api/technicians'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import {
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -55,9 +55,11 @@ function StatusBadge({ status }: { status: string }) {
 export default function CallsPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const userName = useAuthStore(s => s.userName)
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
+  const [elevatorFilter, setElevatorFilter] = useState<string | null>(searchParams.get('elevator_id'))
   const [page, setPage] = useState(1)
   const [newOpened, { open: openNew, close: closeNew }] = useDisclosure()
   const [updateOpened, { open: openUpdate, close: closeUpdate }] = useDisclosure()
@@ -120,14 +122,29 @@ export default function CallsPage() {
     label: `${e.internal_number ? `#${e.internal_number} — ` : ''}${e.address}, ${e.city}`,
   }))
 
+  // Auto-open a specific call when navigating from elevator page (?open=callId)
+  useEffect(() => {
+    const openId = searchParams.get('open')
+    if (openId && (calls as any[]).length > 0) {
+      const call = (calls as any[]).find(c => c.id === openId)
+      if (call) {
+        setDetailCall(call)
+        openDetail()
+        // Remove the param from URL so refresh doesn't re-open
+        setSearchParams(prev => { prev.delete('open'); return prev }, { replace: true })
+      }
+    }
+  }, [calls, searchParams])
+
   const filtered = useMemo(() => {
     return calls.filter(c => {
       if (c.fault_type === 'MAINTENANCE') return false
       const matchStatus = !statusFilter || c.status === statusFilter
       const matchPriority = !priorityFilter || c.priority === priorityFilter
-      return matchStatus && matchPriority
+      const matchElevator = !elevatorFilter || c.elevator_id === elevatorFilter
+      return matchStatus && matchPriority && matchElevator
     })
-  }, [calls, statusFilter, priorityFilter])
+  }, [calls, statusFilter, priorityFilter, elevatorFilter])
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 

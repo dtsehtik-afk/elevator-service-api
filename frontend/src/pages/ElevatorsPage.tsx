@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, TextInput, Select, Badge, Text, Button,
-  Paper, Table, Loader, Center, Pagination, Modal, NumberInput, ScrollArea,
+  Paper, Table, Loader, Center, Pagination, Modal, NumberInput, ScrollArea, Text,
   Popover, Checkbox, ActionIcon, Tooltip, Accordion, SegmentedControl,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
@@ -64,7 +64,10 @@ export default function ElevatorsPage() {
   const [newElev, setNewElev] = useState({
     address: '', city: '', floor_count: 1,
     model: '', manufacturer: '', serial_number: '', building_name: '',
-    contact_phone: '', status: 'ACTIVE',
+    contact_phone: '', intercom_phone: '', entry_code: '',
+    internal_number: '', labor_file_number: '',
+    service_type: '' as string,
+    notes: '', status: 'ACTIVE',
   })
 
   const { data: elevators = [], isLoading } = useQuery({
@@ -110,7 +113,7 @@ export default function ElevatorsPage() {
       qc.invalidateQueries({ queryKey: ['elevators'] })
       notifications.show({ message: 'מעלית נוספה בהצלחה', color: 'green' })
       close()
-      setNewElev({ address: '', city: '', floor_count: 1, model: '', manufacturer: '', serial_number: '', building_name: '', contact_phone: '', status: 'ACTIVE' })
+      setNewElev({ address: '', city: '', floor_count: 1, model: '', manufacturer: '', serial_number: '', building_name: '', contact_phone: '', intercom_phone: '', entry_code: '', internal_number: '', labor_file_number: '', service_type: '', notes: '', status: 'ACTIVE' })
     },
     onError: () => notifications.show({ message: 'שגיאה בהוספת מעלית', color: 'red' }),
   })
@@ -370,29 +373,70 @@ export default function ElevatorsPage() {
       )}
 
       {/* ── Add elevator modal ── */}
-      <Modal opened={opened} onClose={close} title="הוסף מעלית חדשה" size="lg">
-        <Stack gap="sm">
-          <TextInput label="כתובת" required value={newElev.address} onChange={e => setNewElev(s => ({ ...s, address: e.target.value }))} />
-          <Group grow>
-            <TextInput label="עיר" required value={newElev.city} onChange={e => setNewElev(s => ({ ...s, city: e.target.value }))} />
-            <TextInput label="שם בניין" value={newElev.building_name} onChange={e => setNewElev(s => ({ ...s, building_name: e.target.value }))} />
-          </Group>
-          <Group grow>
-            <TextInput label="טלפון איש קשר" dir="ltr" placeholder="05XXXXXXXX"
-              value={newElev.contact_phone}
-              onChange={e => setNewElev(s => ({ ...s, contact_phone: e.target.value }))} />
-            <TextInput label="מספר סידורי" value={newElev.serial_number} onChange={e => setNewElev(s => ({ ...s, serial_number: e.target.value }))} />
-          </Group>
-          <Group grow>
+      <Modal opened={opened} onClose={close} title="הוסף מעלית חדשה" size="xl" dir="rtl">
+        <ScrollArea h={500}>
+          <Stack gap="sm" px="xs">
+
+            {/* מיקום */}
+            <Text fw={600} size="sm" c="dimmed">📍 מיקום</Text>
+            <TextInput label="כתובת" required value={newElev.address} onChange={e => setNewElev(s => ({ ...s, address: e.target.value }))} />
+            <Group grow>
+              <TextInput label="עיר" required value={newElev.city} onChange={e => setNewElev(s => ({ ...s, city: e.target.value }))} />
+              <TextInput label="שם בניין / כינוי" value={newElev.building_name} onChange={e => setNewElev(s => ({ ...s, building_name: e.target.value }))} />
+            </Group>
+
+            {/* זיהוי */}
+            <Text fw={600} size="sm" c="dimmed" mt="xs">🏷️ זיהוי</Text>
+            <Group grow>
+              <TextInput label="מס׳ פנימי (מס״ד)" value={newElev.internal_number} onChange={e => setNewElev(s => ({ ...s, internal_number: e.target.value }))} />
+              <TextInput label="מספר סידורי" value={newElev.serial_number} onChange={e => setNewElev(s => ({ ...s, serial_number: e.target.value }))} />
+            </Group>
+            <TextInput label="מספר תיק משרד העבודה" value={newElev.labor_file_number} onChange={e => setNewElev(s => ({ ...s, labor_file_number: e.target.value }))} />
+
+            {/* ציוד */}
+            <Text fw={600} size="sm" c="dimmed" mt="xs">⚙️ ציוד</Text>
+            <Group grow>
+              <TextInput label="יצרן" value={newElev.manufacturer} onChange={e => setNewElev(s => ({ ...s, manufacturer: e.target.value }))} />
+              <TextInput label="דגם" value={newElev.model} onChange={e => setNewElev(s => ({ ...s, model: e.target.value }))} />
+            </Group>
             <NumberInput label="מספר קומות" required min={1} max={200} value={newElev.floor_count} onChange={v => setNewElev(s => ({ ...s, floor_count: Number(v) }))} />
-            <TextInput label="יצרן" value={newElev.manufacturer} onChange={e => setNewElev(s => ({ ...s, manufacturer: e.target.value }))} />
-          </Group>
-          <TextInput label="דגם" value={newElev.model} onChange={e => setNewElev(s => ({ ...s, model: e.target.value }))} />
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={close}>ביטול</Button>
-            <Button loading={createMutation.isPending} onClick={() => createMutation.mutate(newElev as any)}>הוסף</Button>
-          </Group>
-        </Stack>
+
+            {/* גישה */}
+            <Text fw={600} size="sm" c="dimmed" mt="xs">🔑 גישה ותקשורת</Text>
+            <Group grow>
+              <TextInput label="טלפון איש קשר" dir="ltr" placeholder="05XXXXXXXX" value={newElev.contact_phone} onChange={e => setNewElev(s => ({ ...s, contact_phone: e.target.value }))} />
+              <TextInput label="טלפון חייגן" dir="ltr" placeholder="05XXXXXXXX" value={newElev.intercom_phone} onChange={e => setNewElev(s => ({ ...s, intercom_phone: e.target.value }))} />
+            </Group>
+            <TextInput label="קוד כניסה לבניין" value={newElev.entry_code} onChange={e => setNewElev(s => ({ ...s, entry_code: e.target.value }))} />
+
+            {/* שירות */}
+            <Text fw={600} size="sm" c="dimmed" mt="xs">🔧 שירות</Text>
+            <Group grow>
+              <Select
+                label="סוג שירות"
+                clearable
+                data={[{ value: 'REGULAR', label: 'רגיל' }, { value: 'COMPREHENSIVE', label: 'מקיף' }]}
+                value={newElev.service_type || null}
+                onChange={v => setNewElev(s => ({ ...s, service_type: v ?? '' }))}
+              />
+              <Select
+                label="סטטוס"
+                data={[{ value: 'ACTIVE', label: 'פעילה' }, { value: 'INACTIVE', label: 'לא פעילה' }, { value: 'UNDER_REPAIR', label: 'בתיקון' }]}
+                value={newElev.status}
+                onChange={v => setNewElev(s => ({ ...s, status: v ?? 'ACTIVE' }))}
+              />
+            </Group>
+
+            {/* הערות */}
+            <Text fw={600} size="sm" c="dimmed" mt="xs">📝 הערות</Text>
+            <TextInput label="הערות" value={newElev.notes} onChange={e => setNewElev(s => ({ ...s, notes: e.target.value }))} />
+
+          </Stack>
+        </ScrollArea>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={close}>ביטול</Button>
+          <Button loading={createMutation.isPending} onClick={() => createMutation.mutate(newElev as any)}>הוסף מעלית</Button>
+        </Group>
       </Modal>
     </Stack>
   )

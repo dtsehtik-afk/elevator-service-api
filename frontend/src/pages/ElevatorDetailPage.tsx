@@ -1099,34 +1099,45 @@ export default function ElevatorDetailPage() {
 
         {/* ── CALLS ── */}
         <Tabs.Panel value="calls" pt="md">
-          <Paper withBorder radius="md">
-            {(calls as any[]).length === 0 ? (
-              <Center h={200}><Text c="dimmed">אין קריאות שירות למעלית זו</Text></Center>
-            ) : (
-              <Table>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>עדיפות</Table.Th>
-                    <Table.Th>תיאור</Table.Th>
-                    <Table.Th>סוג תקלה</Table.Th>
-                    <Table.Th>סטטוס</Table.Th>
-                    <Table.Th>תאריך</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {(calls as any[]).map((call: any) => (
-                    <Table.Tr key={call.id}>
-                      <Table.Td><Badge color={PRIORITY_COLORS[call.priority]} size="sm">{PRIORITY_LABELS[call.priority]}</Badge></Table.Td>
-                      <Table.Td><Text size="sm" lineClamp={2}>{call.description}</Text></Table.Td>
-                      <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[call.fault_type]}</Text></Table.Td>
-                      <Table.Td><Badge color={CALL_STATUS_COLORS[call.status]} variant="light" size="sm">{CALL_STATUS_LABELS[call.status]}</Badge></Table.Td>
-                      <Table.Td><Text size="xs" c="dimmed">{formatDateTime(call.created_at)}</Text></Table.Td>
+          <Stack gap="sm">
+            <Group justify="flex-end">
+              <Button size="xs" variant="light" onClick={() => navigate(`/calls?elevator_id=${id}`)}>
+                📋 ראה הכל בדף קריאות
+              </Button>
+            </Group>
+            <Paper withBorder radius="md">
+              {(calls as any[]).length === 0 ? (
+                <Center h={200}><Text c="dimmed">אין קריאות שירות למעלית זו</Text></Center>
+              ) : (
+                <Table highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>עדיפות</Table.Th>
+                      <Table.Th>תיאור</Table.Th>
+                      <Table.Th>סוג תקלה</Table.Th>
+                      <Table.Th>סטטוס</Table.Th>
+                      <Table.Th>תאריך</Table.Th>
                     </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            )}
-          </Paper>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {(calls as any[]).map((call: any) => (
+                      <Table.Tr
+                        key={call.id}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => navigate(`/calls?elevator_id=${id}&open=${call.id}`)}
+                      >
+                        <Table.Td><Badge color={PRIORITY_COLORS[call.priority]} size="sm">{PRIORITY_LABELS[call.priority]}</Badge></Table.Td>
+                        <Table.Td><Text size="sm" lineClamp={2}>{call.description}</Text></Table.Td>
+                        <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[call.fault_type]}</Text></Table.Td>
+                        <Table.Td><Badge color={CALL_STATUS_COLORS[call.status]} variant="light" size="sm">{CALL_STATUS_LABELS[call.status]}</Badge></Table.Td>
+                        <Table.Td><Text size="xs" c="dimmed">{formatDateTime(call.created_at)}</Text></Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              )}
+            </Paper>
+          </Stack>
         </Tabs.Panel>
 
         {/* ── GROUP ── */}
