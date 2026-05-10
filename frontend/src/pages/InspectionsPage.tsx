@@ -16,6 +16,7 @@ interface Deficiency {
   severity: string
   done?: boolean
   done_by?: string
+  action_notes?: string
 }
 
 interface InspectionReport {
@@ -101,6 +102,10 @@ export default function InspectionsPage() {
   const [addDefFor, setAddDefFor] = useState<string | null>(null)
   const [newDefDesc, setNewDefDesc] = useState('')
   const [newDefSeverity, setNewDefSeverity] = useState('MEDIUM')
+  const [defActionModal, setDefActionModal] = useState<{ report: InspectionReport; idx: number; deficiency: Deficiency } | null>(null)
+  const [actionNotes, setActionNotes] = useState('')
+  const [voiceActive, setVoiceActive] = useState(false)
+  const [aiRewriting, setAiRewriting] = useState(false)
   const justSelectedRef = useRef(false)
 
   const { data: reports = [], isLoading } = useQuery({
@@ -168,7 +173,7 @@ export default function InspectionsPage() {
   })
 
   const checklistMutation = useMutation({
-    mutationFn: ({ reportId, updates }: { reportId: string; updates: { index: number; done: boolean }[] }) =>
+    mutationFn: ({ reportId, updates }: { reportId: string; updates: { index: number; done: boolean; action_notes?: string }[] }) =>
       client.patch(`/inspections/checklist/${reportId}`, updates),
     onSuccess: (res, { reportId }) => {
       qc.invalidateQueries({ queryKey: ['inspections'] })
@@ -241,7 +246,47 @@ export default function InspectionsPage() {
   }
 
   function toggleDeficiency(report: InspectionReport, idx: number, done: boolean) {
-    checklistMutation.mutate({ reportId: report.id, updates: [{ index: idx, done }] })
+    if (done) {
+      setDefActionModal({ report, idx, deficiency: (report.deficiencies ?? [])[idx] })
+      setActionNotes('')
+    } else {
+      checklistMutation.mutate({ reportId: report.id, updates: [{ index: idx, done: false }] })
+    }
+  }
+
+  function startVoice() {
+    const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
+    if (!SR) { notifications.show({ message: 'הדפדפן לא תומך בתמלול קולי', color: 'orange' }); return }
+    const r = new SR()
+    r.lang = 'he-IL'; r.continuous = false; r.interimResults = false
+    r.onstart = () => setVoiceActive(true)
+    r.onend = () => setVoiceActive(false)
+    r.onresult = (e: any) => setActionNotes(prev => (prev ? prev + ' ' : '') + e.results[0][0].transcript)
+    r.onerror = () => setVoiceActive(false)
+    r.start()
+  }
+
+  async function rewriteActionNote() {
+    if (!actionNotes.trim()) return
+    setAiRewriting(true)
+    try {
+      const { data } = await client.post('/inspections/rewrite-action-note', { text: actionNotes })
+      setActionNotes(data.text)
+    } catch {
+      notifications.show({ message: 'שגיאה בשכתוב', color: 'red' })
+    } finally {
+      setAiRewriting(false)
+    }
+  }
+
+  function saveDefAction() {
+    if (!defActionModal) return
+    checklistMutation.mutate({
+      reportId: defActionModal.report.id,
+      updates: [{ index: defActionModal.idx, done: true, action_notes: actionNotes.trim() || undefined }],
+    })
+    setDefActionModal(null)
+    setActionNotes('')
   }
 
   return (
@@ -403,7 +448,7 @@ export default function InspectionsPage() {
                               <Badge color={SEVERITY_COLOR[d.severity] ?? 'gray'} size="xs">{d.severity}</Badge>
                               <Text size="sm" td={d.done ? 'line-through' : undefined} c={d.done ? 'dimmed' : undefined}>
                                 {d.description}
-                                {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by})</Text>}
+                                {d.done && d.done_by && <Text span size="xs" c="teal"> ({d.done_by}{d.action_notes ? ` — ${d.action_notes}` : ''})</Text>}
                               </Text>
                             </Group>
                           }
@@ -567,6 +612,62 @@ export default function InspectionsPage() {
                 </Stack>
               </Paper>
             )}
+          </Stack>
+        )}
+      </Modal>
+
+      {/* Deficiency action modal — opens when checking a deficiency */}
+      <Modal
+        opened={!!defActionModal}
+        onClose={() => { setDefActionModal(null); setActionNotes('') }}
+        title="📋 פירוט פעולה שבוצעה לתיקון ליקוי"
+        dir="rtl"
+        size="md"
+      >
+        {defActionModal && (
+          <Stack gap="md">
+            <Paper withBorder p="sm" radius="sm" bg="red.0">
+              <Badge color={SEVERITY_COLOR[defActionModal.deficiency.severity] ?? 'gray'} size="sm" mb={4}>
+                {defActionModal.deficiency.severity}
+              </Badge>
+              <Text size="sm" fw={600}>{defActionModal.deficiency.description}</Text>
+            </Paper>
+            <Textarea
+              label="תיאור הפעולה שבוצעה"
+              placeholder="תאר מה בוצע לתיקון הליקוי הזה... (ניתן להשתמש בקול)"
+              value={actionNotes}
+              onChange={e => setActionNotes(e.target.value)}
+              minRows={3}
+              autosize
+            />
+            <Group gap="xs">
+              <Button
+                size="xs"
+                variant="light"
+                color={voiceActive ? 'red' : 'blue'}
+                onClick={startVoice}
+                loading={voiceActive}
+              >
+                🎤 {voiceActive ? 'מקליט...' : 'הקלט קול'}
+              </Button>
+              <Button
+                size="xs"
+                variant="light"
+                color="violet"
+                onClick={rewriteActionNote}
+                loading={aiRewriting}
+                disabled={!actionNotes.trim()}
+              >
+                ✨ שכתב בעברית מקצועית
+              </Button>
+            </Group>
+            <Text size="xs" c="dimmed">ניתן להקליט בעברית, רוסית, ערבית או אנגלית — הבינה תתרגם ותשכתב לעברית מקצועית.</Text>
+            <Group justify="flex-end" gap="sm">
+              <Button variant="subtle" onClick={() => { setDefActionModal(null); setActionNotes('') }}>ביטול</Button>
+              <Button color="teal" onClick={saveDefAction} loading={checklistMutation.isPending}>
+                ✅ סמן כטופל ושמור
+              </Button>
+            </Group>
           </Stack>
         )}
       </Modal>

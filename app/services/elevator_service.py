@@ -177,11 +177,22 @@ def list_elevators(
     customer_id: Optional[uuid.UUID] = None,
     min_risk: Optional[float] = None,
     max_risk: Optional[float] = None,
+    search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
 ) -> List[Elevator]:
     """Return a filtered, paginated list of elevators."""
+    from sqlalchemy import or_
     query = db.query(Elevator)
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Elevator.address.ilike(pattern),
+                Elevator.city.ilike(pattern),
+                Elevator.building_name.ilike(pattern),
+            )
+        )
     if city:
         query = query.filter(Elevator.city.ilike(f"%{city}%"))
     if status:

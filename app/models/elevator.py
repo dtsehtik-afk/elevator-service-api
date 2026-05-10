@@ -91,8 +91,10 @@ class Elevator(Base):
     service_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     # Legacy: ANNUAL_6 | ANNUAL_12 (kept for scheduler compatibility)
     service_contract: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    # Maintenance interval in days (30, 60, or custom)
+    # Maintenance interval in days (30, 60, or custom) — kept for legacy reads
     maintenance_interval_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Number of preventive maintenance visits per year: 2 | 4 | 6 | 12
+    maintenance_times_per_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     contract_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     contract_renewal: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     contract_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
@@ -161,4 +163,7 @@ class Elevator(Base):
     )
     customer: Mapped[Optional["Customer"]] = relationship(  # noqa: F821
         "Customer", back_populates="elevators", foreign_keys="Elevator.customer_id"
+    )
+    contacts: Mapped[list["Contact"]] = relationship(  # noqa: F821
+        "Contact", back_populates="elevator", foreign_keys="Contact.elevator_id"
     )

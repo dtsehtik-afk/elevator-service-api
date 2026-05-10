@@ -1,0 +1,31 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["./frontend/node_modules/vite/bin/vite.js", "./frontend"],
+      "autoPort": true
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "import os,uvicorn; uvicorn.run('app.main:app', host='0.0.0.0', port=int(os.environ.get('PORT',8000)), reload=True)"],
+      "autoPort": true
+    },
+    {
+      "name": "control-plane",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["./control-plane/frontend/node_modules/vite/bin/vite.js", "./control-plane/frontend"],
+      "port": 5174,
+      "autoPort": false
+    },
+    {
+      "name": "docker-compose",
+      "runtimeExecutable": "docker-compose",
+      "runtimeArgs": ["up"],
+      "port": 8000,
+      "autoPort": false
+    }
+  ]
+}

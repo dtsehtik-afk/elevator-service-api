@@ -85,10 +85,14 @@ def process_inspection_report(
     mime_type: str,
     file_name: str = "",
     source: str = "upload",
+    existing_drive_file_id: Optional[str] = None,
 ) -> dict:
     """
     Process a single inspection report file.
     Returns result dict with: status, report_id, elevator_id, call_id, message
+
+    existing_drive_file_id: pass when the file is already in Drive (e.g. from Drive scanner)
+    to skip a redundant re-upload.
     """
     from app.config import get_settings
     from app.models.elevator import Elevator
@@ -112,13 +116,44 @@ def process_inspection_report(
 
     from datetime import datetime as _dt
     year_folder = str(_dt.now().year)
-    drive_file_id = drive_service.upload_file(file_bytes, file_name or saved_name, mime_type, subfolder=year_folder)
+    if existing_drive_file_id:
+        drive_file_id = existing_drive_file_id
+    else:
+        drive_file_id = drive_service.upload_file(file_bytes, file_name or saved_name, mime_type, subfolder=year_folder)
 
     parsed = _call_gemini_vision(file_bytes, mime_type, settings.gemini_api_key)
     if not parsed:
         return {"status": "error", "message": "Failed to parse inspection report with Gemini"}
 
     logger.info("Inspection parsed from %s: %s", file_name, parsed)
+
+    # ── Duplicate guard ───────────────────────────────────────────────────────
+    # If another report with the same labor_file_number + inspection_date already
+    # exists (created within the last 30 days), treat this as a duplicate and
+    # return the existing report rather than creating a new one.
+    _raw_lfn = (parsed.get("labor_file_number") or "").strip()
+    _raw_idate = parsed.get("inspection_date")
+    if _raw_lfn and _raw_idate:
+        try:
+            from datetime import timedelta as _td
+            _cutoff = _dt.now().date() - _td(days=30)
+            _dup = (
+                db.query(InspectionReport)
+                .filter(
+                    InspectionReport.labor_file_number == _raw_lfn,
+                    InspectionReport.inspection_date == datetime.strptime(_raw_idate, "%Y-%m-%d").date(),
+                    InspectionReport.created_at >= _dt.combine(_cutoff, _dt.min.time()),
+                )
+                .first()
+            )
+            if _dup:
+                logger.info(
+                    "Duplicate inspection report skipped (labor_file=%s, date=%s, existing id=%s)",
+                    _raw_lfn, _raw_idate, _dup.id,
+                )
+                return {"status": "duplicate", "report_id": str(_dup.id), "message": "Duplicate report skipped"}
+        except Exception:
+            pass  # If dedup check fails, proceed to create the report normally
 
     street = (parsed.get("street") or "").strip()
     city = (parsed.get("city") or "").strip()

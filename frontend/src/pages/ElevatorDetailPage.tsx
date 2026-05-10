@@ -840,8 +840,8 @@ export default function ElevatorDetailPage() {
                     value={form.service_type ?? null}
                     onChange={v => {
                       set('service_type', v)
-                      if (v === 'COMPREHENSIVE') { set('service_contract', 'ANNUAL_12'); set('maintenance_interval_days', 30) }
-                      else if (v === 'REGULAR') { set('service_contract', 'ANNUAL_6'); set('maintenance_interval_days', 60) }
+                      if (v === 'COMPREHENSIVE') { set('service_contract', 'ANNUAL_12'); set('maintenance_times_per_year', 12) }
+                      else if (v === 'REGULAR') { set('service_contract', 'ANNUAL_6'); set('maintenance_times_per_year', 6) }
                     }}
                     clearable
                   />
@@ -857,9 +857,23 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
-                  <NumberInput label="אינטרוול טיפול (ימים)" min={1} value={form.maintenance_interval_days ?? ''} onChange={v => set('maintenance_interval_days', v || null)} />
+                  <Select
+                    label="תדירות טיפול מונע"
+                    data={[
+                      { value: '12', label: '12 פעמים בשנה (חודשי)' },
+                      { value: '6', label: '6 פעמים בשנה (כל 2 חודשים)' },
+                      { value: '4', label: '4 פעמים בשנה (רבעוני)' },
+                      { value: '2', label: '2 פעמים בשנה (חצי שנתי)' },
+                    ]}
+                    value={String(form.maintenance_times_per_year ?? 6)}
+                    onChange={v => set('maintenance_times_per_year', v ? Number(v) : 6)}
+                  />
                 ) : (
-                  <Field label="אינטרוול טיפול" value={elevator.maintenance_interval_days ? `${elevator.maintenance_interval_days} יום` : null} />
+                  <Field label="תדירות טיפול מונע" value={
+                    elevator.maintenance_times_per_year
+                      ? `${elevator.maintenance_times_per_year}× בשנה`
+                      : '6× בשנה'
+                  } />
                 )}
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>

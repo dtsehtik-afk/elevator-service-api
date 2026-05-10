@@ -1,7 +1,7 @@
 # Lift Agent — System Knowledge Base
 
 This file is read automatically at the start of every Claude session.
-**Update this file whenever a significant change is made to the system.**
+**Update this file at the END of every session with all changes made.**
 
 ---
 
@@ -20,20 +20,25 @@ APK: built via GitHub Actions, server URL points to `https://lift-agent.com`
 ## Repository & Branch
 
 - Repo: `dtsehtik-afk/elevator-service-api`
-- Active dev branch: `claude/technician-request-assignment-NofCx`
+- Active dev branch: `claude/mystifying-mcnulty-a91ece`
 - **NEVER push to main without explicit permission**
-- After every commit: `git push -u origin claude/technician-request-assignment-NofCx`
+- After every commit: `git push -u origin claude/mystifying-mcnulty-a91ece`
 
 ---
 
 ## Server
 
-- Host: `elevator-server` (Google Cloud VM)
+- Host: `elevator-server` (Google Cloud VM, Google Cloud)
 - Connect: `ssh dtsehtik@lift-agent.com`
 - Stack: Docker Compose
 - Services: `app` (FastAPI uvicorn), `db` (PostgreSQL 16), `nginx`, `certbot`, `ngrok`
-- Deploy: `sudo docker compose up -d --build app`
+- **Deploy command** (saved as `~/deploy.sh` on server):
+  ```bash
+  cd ~/elevator-service-api && git fetch origin claude/fix-elevator-assignment-error-aUvEz && git reset --hard origin/claude/fix-elevator-assignment-error-aUvEz && sudo docker compose up -d --build app
+  ```
 - Logs: `sudo docker compose logs app -f`
+- **IMPORTANT**: Never edit files directly on the server. Always commit here → push → run `~/deploy.sh`
+- **IMPORTANT**: `npm run build` was changed from `tsc && vite build` to `vite build` to prevent OOM during Docker build (TypeScript type-checking consumed all server RAM)
 
 ---
 
@@ -49,6 +54,7 @@ APK: built via GitHub Actions, server URL points to `https://lift-agent.com`
 | AI — Email parsing | Gemini 2.0 Flash (primary) |
 | AI — Assignment | Gemini 2.0 Flash (primary), falls back to regex |
 | AI — Chat agent | Gemini (WhatsApp chatbot for technicians/managers) |
+| AI — Reports | Gemini 2.0 Flash — natural language → filter params → narrative answer |
 | Voice transcription | OpenAI Whisper |
 | Maps | Google Maps API |
 | Email polling | IMAP Gmail (denis@akordelevator.com is the mailbox) |
@@ -96,27 +102,38 @@ inside this repo. Manages all tenants from a super-admin dashboard.
 ## Data Models
 
 ### Core
-- **Elevator** — physical elevator unit (address, city, floor_count, latitude, longitude, serial_number)
-- **ServiceCall** — a repair/rescue request (fault_type, status, priority, after_hours_pending)
+- **Elevator** — physical elevator unit
+  - Fields: address, city, floor_count, latitude, longitude, serial_number, labor_file_number
+  - Service: service_type (REGULAR/COMPREHENSIVE), service_contract (ANNUAL_6/ANNUAL_12)
+  - Maintenance: `maintenance_times_per_year` (2/4/6/12, default=6), `maintenance_interval_days` (legacy), `last_service_date`, `next_service_date`
+  - Inspection: last_inspection_date, next_inspection_date, inspector_name
+  - CRM: customer_id (FK → Customer), management_company_id
+- **ServiceCall** — a repair/rescue request
+  - Fields: fault_type, status, priority, after_hours_pending, call_number (BIGINT, S+5 digits format)
+  - call_number auto-assigned via PostgreSQL sequence `service_calls_call_number_seq`
 - **Technician** — field technician (phone, whatsapp_number, role, is_available, current_latitude/longitude)
 - **Assignment** — links ServiceCall ↔ Technician (status: PENDING_CONFIRMATION → ACCEPTED/REJECTED)
 - **ManagementCompany** — building management company (caller_phones: TEXT[])
+- **Contact** — contact directory. Has `elevator_id` FK (scoped per elevator, not per building)
 
 ### Supporting
 - **MaintenanceSchedule** — planned quarterly/annual maintenance per elevator
-- **InspectionReport** — safety inspection with checklist (deficiencies JSON)
+- **InspectionReport** — safety inspection with checklist (deficiencies JSON with `done`, `action_notes` fields)
+  - Fields: drive_file_id, labor_file_number, match_status (AUTO_MATCHED/PENDING_REVIEW/UNMATCHED)
+  - report_status: NA / OPEN / PARTIAL / CLOSED
 - **Building** — building record linked to elevators
-- **Contact** — contact directory
 - **WhatsAppMessage** — message log
-- **ServiceCallEmailScan** — dedup table for processed email message IDs
-- **InspectionEmailScan** — dedup table for inspection emails
-- **SystemSettings** — key-value store (working hours, config)
+- **ServiceCallEmailScan** — dedup table for processed service-call email message IDs
+- **InspectionEmailScan** — dedup table for inspection report email message IDs
+- **SystemSettings** — key-value store (working hours, field label overrides)
+- **SavedView** — user-saved report views (columns, filters, sort)
+- **Customer**, **Contract**, **Invoice**, **Lead**, **Part** — CRM/ERP models
 
 ### fault_type enum
 `STUCK | DOOR | ELECTRICAL | MECHANICAL | SOFTWARE | RESCUE | MAINTENANCE | OTHER`
 
 ### ServiceCall.status
-`OPEN → ASSIGNED → IN_PROGRESS → RESOLVED → CLOSED`
+`OPEN → ASSIGNED → IN_PROGRESS → RESOLVED → CLOSED | MONITORING`
 
 ---
 
@@ -131,16 +148,17 @@ inside this repo. Manages all tenants from a super-admin dashboard.
 | `technicians` | `/technicians` | CRUD + location POST |
 | `technician_app` | `/technician-app` | Mobile app endpoints |
 | `maintenance` | `/maintenance` | Scheduled maintenance |
-| `inspections` | `/inspection-reports` | Reports + checklist |
+| `inspections` | `/inspection-reports` | Reports + checklist + `POST /rewrite-action-note` |
 | `management_companies` | `/management-companies` | CRUD + elevator assignment |
-| `webhooks` | `/webhooks` | WhatsApp + phone call webhooks |
+| `webhooks` | `/webhooks` | WhatsApp + phone call webhooks + pending unmatched calls |
 | `settings` | `/settings` | Working hours (GET/POST) |
 | `analytics` | `/analytics` | Stats |
 | `buildings` | `/buildings` | Building CRUD |
-| `contacts` | `/contacts` | Contact directory |
+| `contacts` | `/contacts` | Contact directory (elevator_id filter supported) |
 | `conversations` | `/conversations` | WhatsApp conversation history |
 | `data_import` | `/import` | Excel/PDF import |
 | `schedule` | `/schedule` | Schedule management |
+| `reports` | `/reports` | Dynamic report builder + saved views + AI query |
 
 ---
 
@@ -148,14 +166,18 @@ inside this repo. Manages all tenants from a super-admin dashboard.
 
 | Service | Purpose |
 |---|---|
-| `email_poller.py` | IMAP Gmail polling — pulls UNSEEN emails every 60s, marks as read after processing. Gemini parses content. denis@akordelevator.com is the inbox. |
+| `email_poller.py` | IMAP Gmail polling — pulls UNSEEN emails every 60s, marks as read after processing. Gemini parses content. |
 | `ai_assignment_agent.py` | Assigns technician to service call using AI. Sends WhatsApp confirmation request (1=accept, 2=reject). |
 | `whatsapp_service.py` | All WhatsApp messaging via Green API. notify_rescue_emergency, assign_with_confirmation, after_hours messages. |
 | `working_hours.py` | In-memory working hours schedule. `is_working_hours()` checks if current time is within schedule. Hot-reloadable via settings endpoint. |
-| `scheduler.py` | APScheduler jobs: email polling (60s), assignment timeout check (60s), inspection email (1h), Drive scan (15min), nightly maintenance (00:05), morning monitoring (08:00). |
-| `inspection_email_poller.py` | Polls separate Gmail for inspection report emails (hourly). |
+| `scheduler.py` | APScheduler jobs (see table below). All maintenance jobs restricted to Sun–Fri (no Saturday). |
+| `inspection_email_poller.py` | Polls separate Gmail for inspection report emails (hourly). Deduplicates by message_id. |
+| `inspection_service.py` | Processes inspection PDFs via Gemini Vision. Deduplicates by labor_file_number+inspection_date. |
 | `drive_service.py` | Google Drive integration for inspection report PDFs. |
 | `call_parser.py` | Parses incoming phone call data into structured fields. |
+| `report_builder.py` | Dynamic multi-entity query engine. Schema cached in `_SCHEMAS` global. All column defs use `"filter"` key (not `"filter_attr"`). |
+| `service_call_service.py` | When MAINTENANCE call resolved/closed → auto-advances elevator.next_service_date by interval. |
+| `maintenance_service.py` | mark_overdue_maintenances, create/update/list MaintenanceSchedule records. |
 
 ---
 
@@ -167,6 +189,42 @@ inside this repo. Manages all tenants from a super-admin dashboard.
 4. **Caller replies 1**: dispatch technician. Caller replies 2: defer.
 5. **Technician replies 1**: accept → status ASSIGNED. Replies 2: reject → try next technician.
 6. **RESCUE calls**: always dispatch immediately, blast ALL technicians.
+7. **Unmatched calls** (no elevator found): saved to `incoming_call_logs` with match_status=UNMATCHED/PARTIAL → visible in PendingCallsPage → dispatcher can add new elevator or match to existing.
+
+---
+
+## Inspection Report Flow
+
+1. **Email poller** (`inspection_email_poller.py`) or **Drive scanner** (`_scan_drive_inspections`) picks up PDF
+2. `process_inspection_report()` in `inspection_service.py`:
+   - Uploads to Google Drive (or uses existing drive_file_id if called from Drive scanner)
+   - Calls Gemini Vision to extract: street, city, labor_file_number, inspection_date, deficiencies
+   - **Dedup check**: if same labor_file_number + inspection_date exists within 30 days → skip
+   - Matches to elevator: labor_file_number (tier 0) → address fuzzy match ≥90% (tier 1) → 30–90% (PENDING_REVIEW) → UNMATCHED
+   - Creates InspectionReport record, notifies dispatcher via WhatsApp
+3. **Deficiencies** stored as JSON array: `[{description, severity, done, action_notes}]`
+4. Technician checks deficiency → modal opens → enters action description → optional AI rewrite to professional Hebrew via `POST /inspection-reports/rewrite-action-note`
+
+---
+
+## Reports Module (`/app/routers/reports.py` + `/app/services/report_builder.py`)
+
+### Endpoints
+- `GET /reports/schema` — all entity schemas (columns, filterable flags)
+- `GET /reports/schema/{entity_type}` — single entity schema
+- `POST /reports/query` — run dynamic query with filters/sort/pagination
+- `GET /reports/export` — export to Excel (.xlsx)
+- `POST /reports/ai-query` — natural language Hebrew → Gemini → filter params → execute → narrative answer
+- `GET /reports/views` — list saved views
+- `POST /reports/views` — create saved view
+- `PUT /reports/views/{id}` — update saved view
+- `DELETE /reports/views/{id}` — delete saved view
+
+### Supported Entity Types
+`service_calls`, `elevators`, `customers`, `invoices`, `inventory`, `maintenance`, `contracts`, `leads`, `inspections`
+
+### Known Pitfall
+Column defs in `report_builder.py` use `"filter"` key. The `filterable` flag in schema endpoints must check `v.get("filter") is not None` — **NOT** `v.get("filter_attr")`. This bug was fixed in both `get_all_schemas` and `get_entity_schema`.
 
 ---
 
@@ -174,11 +232,14 @@ inside this repo. Manages all tenants from a super-admin dashboard.
 
 | Page | Route | Notes |
 |---|---|---|
-| `CallsPage` | `/calls` | Service calls list + detail. Has "עדכן מיקום" button (LocationPickerModal). |
-| `ElevatorDetailPage` | `/elevators/:id` | Elevator details + location picker + Waze link. |
+| `CallsPage` | `/calls` | Service calls list + detail. # column shows S00042 format. LocationPickerModal. |
+| `ElevatorDetailPage` | `/elevators/:id` | Elevator details + location picker + Waze link. Maintenance frequency dropdown (2/4/6/12× per year). |
 | `MaintenancePage` | `/maintenance` | Scheduled maintenance + OPEN MAINTENANCE calls with urgency blink. |
+| `InspectionsPage` | `/inspections` | Inspection reports list + deficiency checklist. Checking deficiency opens action modal (voice + AI rewrite). |
+| `TechAppPage` | `/tech/*` | Mobile technician interface. ReportsTab has same deficiency action modal. |
+| `ReportsPage` | `/reports` | Dynamic report builder. AI query panel (violet box). Saved views. |
+| `PendingCallsPage` | `/pending-calls` | Unmatched calls awaiting manual elevator assignment. Search with loading + error states. |
 | `SettingsPage` | `/settings` | Working hours editor (admin only). |
-| `TechnicianApp` | `/tech/*` | Mobile technician interface. |
 
 ### LocationPickerModal
 Lazy-loads Leaflet from CDN. Click-to-pin, draggable marker, GPS button.
@@ -188,29 +249,52 @@ Used in ElevatorDetailPage and CallsPage.
 
 ## Scheduled Jobs (APScheduler)
 
-| Job | Interval | Purpose |
-|---|---|---|
-| `_poll_email_calls` | 60s | Pull UNSEEN service-call emails from Gmail |
-| `_check_pending_assignment_timeouts` | 60s | Auto-cancel timed-out assignment confirmations |
-| `_poll_inspection_emails` | 1h | Pull inspection report emails |
-| `_scan_drive_inspections` | 15min | Scan Google Drive for new inspection PDFs |
-| `_run_nightly_maintenance` | 00:05 daily | Create scheduled maintenance calls |
-| `_check_monitoring_calls` | 08:00 daily | Morning monitoring check |
-| `_check_inspection_deficiency_escalation` | 6h | Escalate unresolved inspection deficiencies |
+| Job | Schedule | Day restriction | Purpose |
+|---|---|---|---|
+| `_poll_email_calls` | every 60s | — | Pull UNSEEN service-call emails from Gmail |
+| `_check_pending_assignment_timeouts` | every 60s | — | Auto-cancel timed-out assignment confirmations |
+| `_poll_inspection_emails` | every 1h | — | Pull inspection report emails |
+| `_scan_drive_inspections` | every 15min | — | Scan Google Drive for new inspection PDFs |
+| `_run_nightly_maintenance` | 00:05 daily | Sun–Fri only | Create scheduled maintenance calls |
+| `_send_morning_maintenance_alerts` | 07:35 daily | Sun–Fri only | WhatsApp alerts for upcoming/overdue maintenance |
+| `_check_monitoring_calls` | 08:00 daily | — | Morning monitoring check |
+| `_check_inspection_deficiency_escalation` | every 6h | — | Escalate unresolved inspection deficiencies |
+
+---
+
+## Maintenance System
+
+- `Elevator.maintenance_times_per_year` — visits per year: **2 / 4 / 6 / 12** (default: **6**)
+- `Elevator.next_service_date` — computed from `last_service_date + (365 / times_per_year)` days
+- Next service date always skips Saturday (Israeli day off): `while date.weekday() == 5: date += 1 day`
+- When MAINTENANCE ServiceCall is RESOLVED or CLOSED → `_advance_next_service_date()` auto-sets next date
+- Migration backfills `maintenance_times_per_year` from existing `maintenance_interval_days` values
+- `maintenance_interval_days` kept for legacy reads; UI uses `maintenance_times_per_year` dropdown
+
+---
+
+## DB Migrations (in `app/main.py` lifespan)
+
+All wrapped in `if engine.dialect.name == "postgresql":`. Key migrations:
+- `elevator_id` FK on contacts table
+- `call_number` BIGINT with sequence `service_calls_call_number_seq`
+- `maintenance_times_per_year` INTEGER DEFAULT 6 on elevators
+- Backfill: derive `next_service_date` from `last_service_date` for elevators missing it
 
 ---
 
 ## Important Constraints
 
-- **"חשוב מאד שלא תבצע שום שינוי בקוד שעובד כרגע"** — never touch working code unless fixing a bug in it
+- **Never touch working code unless fixing a bug in it**
 - SQLite for tests, PostgreSQL for production — all models use `sqlalchemy.types.Uuid` (not `postgresql.UUID`) and `JSON` (not `postgresql.JSONB`)
 - Rate limiter must be disabled in tests: `app.state.limiter.enabled = False`
 - PostgreSQL migrations wrapped in `if engine.dialect.name == "postgresql":` in lifespan
 - 66 tests, all passing — run with `pytest tests/`
+- `npm run build` = `vite build` only (no `tsc`) to prevent OOM on server
 
 ---
 
-## Recently Completed Features
+## Known Issues / Watch Out For
 
 - Maintenance page: MAINTENANCE fault_type calls with urgency blink (LOW=green, MEDIUM=orange, HIGH/CRITICAL=flashing red)
 - Location picker: Leaflet map modal in elevator detail + calls page
@@ -218,3 +302,50 @@ Used in ElevatorDetailPage and CallsPage.
 - Working hours settings UI: editable per-day schedule in admin panel
 - Email poller fixed: UNSEEN-only, no date restriction, OVERQUOTA handling
 - lift-agent-admin control plane: super-admin dashboard for managing tenants
+- ERP מלא: customers, quotes, contracts, invoices, inventory, leads, CRM
+- Report Builder: custom fields, saved views, role permissions, date range filter, Excel/PDF export
+- AI דוחות: POST /reports/ai-query — שאלה חופשית בעברית → Gemini → פילטרים → תוצאות + תשובה נרטיבית
+- Nav config: הסתרה/שינוי שמות פריטי תפריט מהגדרות
+- `report_builder.py` schema defs must match actual model columns — any mismatch causes `AttributeError` and crashes ALL report endpoints (the `_SCHEMAS` cache won't recover)
+- When adding columns to report_builder, always verify the column exists in the model first
+- Drive scanner (`_scan_drive_inspections`) passes `existing_drive_file_id` to `process_inspection_report` to avoid re-uploading files already in Drive
+- Inspection dedup: checks `labor_file_number + inspection_date` within 30 days before creating new record
+- Contacts are scoped per `elevator_id` (not building), preventing cross-elevator contamination
+- Service call `call_number` displayed as `S00042` (S + 5-digit zero-padded) in UI
+
+---
+
+## Known Bugs Fixed (10/05/2026)
+
+### report_builder.py — שגיאות schemas
+- `Invoice.invoice_type` — לא קיים במודל, הוסר
+- `Part.unit_cost` → `cost_price`, `Part.unit_price` → `sell_price`, הוסר `location`
+- `Contract.monthly_value` → `monthly_price`, `Contract.auto_renew` → `auto_invoice`
+- 3 עמודות עם `label` במקום `label_he`: `resolution_notes`, `last_service_date`, `next_service_date`
+- הוספו עמודות `technician_name` ו-`customer_name` לקריאות שירות בדוחות
+- **כלל:** לפני deploy, לאמת schemas: `python3 -c "from app.services.report_builder import _build_schemas; _build_schemas(); print('OK')"`
+
+### PendingCallsPage — חיפוש מעלית
+- `GET /elevators/` עם slash בסוף → SPA middleware מחזיר HTML במקום JSON
+- **תיקון:** תמיד `/elevators` ללא trailing slash
+- הוסף `search` param ל-backend (`ilike` על address + city + building_name)
+- הוסף loading spinner + error handling ל-modal
+
+### webhooks.py — שיוך קריאה ממתינה למעלית
+- `log.call_type = 'אחר'` (3 תווים) נכשל ב-`ServiceCallCreate.description min_length=5`
+- **תיקון:** preserve call_type אם ≥5 תווים, אחרת `"קריאת שירות: {call_type}"` או `"קריאת שירות"`
+- validation על fault_type ו-priority לפני יצירת ServiceCallCreate
+- reported_by: שם אם ≥2 תווים, אחרת טלפון
+
+### git pull על השרת
+- שגיאה "divergent branches" — פתרון: `git config --global pull.rebase false` (פעם אחת על השרת)
+- לעולם לא להשתמש ב-`git pull` סתם — אם בעיה: `git fetch origin && git reset --hard origin/$(git branch --show-current)`
+
+---
+
+## Session End Checklist
+
+At the end of every session:
+1. Commit and push all changes to `claude/mystifying-mcnulty-a91ece`
+2. Update this CLAUDE.md with any new features, bug fixes, or architectural changes
+3. Tell the user to run `~/deploy.sh` on the server

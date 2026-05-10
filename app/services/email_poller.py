@@ -752,8 +752,12 @@ def poll_emails(db) -> int:
 
                 # Detect rescue/emergency (people trapped)
                 _RESCUE_KEYWORDS = {"חילוץ", "לכודים", "לכוד", "כלואים", "כלוא", "תקועים", "נתקע"}
+                _NO_RESCUE_PHRASES = {"ללא לכודים", "ללא אנשים", "ללא נפגעים", "אין לכודים", "אין אנשים", "ללא כלואים", "ללא נוסעים"}
                 combined_text = f"{fields.get('call_type','')} {fields.get('description','')}".lower()
-                is_rescue = any(kw in combined_text for kw in _RESCUE_KEYWORDS)
+                is_rescue = (
+                    any(kw in combined_text for kw in _RESCUE_KEYWORDS)
+                    and not any(p in combined_text for p in _NO_RESCUE_PHRASES)
+                )
                 fault_type = "RESCUE" if is_rescue else fields["fault_type"]
 
                 # Duplicate detection: same elevator + same fault type + open call today

@@ -14,6 +14,7 @@ import { listElevators, updateElevator } from '../api/elevators'
 import client from '../api/client'
 import LocationPickerModal from '../components/LocationPickerModal'
 import { listTechnicians } from '../api/technicians'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import {
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -69,6 +70,7 @@ function SlaBadge({ deadline, status }: { deadline: string | null; status: strin
 
 export default function CallsPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const userName = useAuthStore(s => s.userName)
   const [searchParams] = useSearchParams()
   const [statusFilter, setStatusFilter] = useState<string | null>(searchParams.get('status'))
@@ -345,6 +347,7 @@ export default function CallsPage() {
             <Table highlightOnHover style={{ cursor: 'pointer' }}>
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th>#</Table.Th>
                   <Table.Th>עדיפות</Table.Th>
                   <Table.Th>תיאור</Table.Th>
                   <Table.Th>סוג תקלה</Table.Th>
@@ -368,6 +371,11 @@ export default function CallsPage() {
                       onClick={() => openDetailModal(c)}
                       style={isRescue && !['RESOLVED','CLOSED'].includes(c.status) ? rescueStyle : undefined}
                     >
+                      <Table.Td>
+                        <Text size="xs" c="dimmed" ff="monospace">
+                          {c.call_number ? `S${String(c.call_number).padStart(5, '0')}` : '—'}
+                        </Text>
+                      </Table.Td>
                       <Table.Td>
                         <Group gap={4}>
                           {isRescue && <Text size="sm">🚨</Text>}
@@ -440,7 +448,10 @@ export default function CallsPage() {
                 {'elevator_address' in detail && (
                   <Group gap="xs">
                     <Text size="sm" c="dimmed" w={100}>📍 כתובת</Text>
-                    <Text size="sm" fw={600}>{detail.elevator_address}, {detail.elevator_city}</Text>
+                    <Text
+                      size="sm" fw={600} style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                      onClick={() => { closeDetail(); navigate(`/elevators/${detail.elevator_id}`) }}
+                    >{detail.elevator_address}, {detail.elevator_city}</Text>
                     {detail.elevator_serial && <Text size="xs" c="dimmed">#{detail.elevator_serial}</Text>}
                     <Button
                       size="xs" variant="subtle" color="teal" px={6}
@@ -456,6 +467,12 @@ export default function CallsPage() {
                   <Text size="sm" c="dimmed" w={100}>👤 דווח ע"י</Text>
                   <Text size="sm">{detail.reported_by}</Text>
                 </Group>
+                {detail.call_number && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>🔢 מס' קריאה</Text>
+                    <Text size="sm" ff="monospace" fw={600}>S{String(detail.call_number).padStart(5, '0')}</Text>
+                  </Group>
+                )}
                 <Group gap="xs">
                   <Text size="sm" c="dimmed" w={100}>📅 נפתחה</Text>
                   <Text size="sm">{formatDateTime(detail.created_at)}</Text>

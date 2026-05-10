@@ -62,7 +62,7 @@ async function matchElevator(logId: string, elevatorId: string) {
 }
 
 async function searchElevators(q: string): Promise<ElevatorOption[]> {
-  const { data } = await client.get('/elevators/', { params: { search: q, limit: 10 } })
+  const { data } = await client.get('/elevators', { params: { search: q, limit: 10 } })
   return data
 }
 
@@ -77,6 +77,8 @@ export default function PendingCallsPage() {
   const [matchModalLog, setMatchModalLog] = useState<PendingCall | null>(null)
   const [elevSearch, setElevSearch] = useState('')
   const [elevResults, setElevResults] = useState<ElevatorOption[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
 
   const { data: pending = [], isLoading } = useQuery({
     queryKey: ['pending-unmatched'],
@@ -107,9 +109,18 @@ export default function PendingCallsPage() {
 
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
+    setSearchError(null)
     if (q.length < 2) { setElevResults([]); return }
-    const results = await searchElevators(q)
-    setElevResults(results)
+    setSearchLoading(true)
+    try {
+      const results = await searchElevators(q)
+      setElevResults(Array.isArray(results) ? results : [])
+    } catch (e: any) {
+      setSearchError(e?.response?.data?.detail ?? 'שגיאה בחיפוש מעליות')
+      setElevResults([])
+    } finally {
+      setSearchLoading(false)
+    }
   }
 
   return (
@@ -175,7 +186,7 @@ export default function PendingCallsPage() {
               </Button>
               <Button
                 size="sm" color="blue" variant="light" flex={1}
-                onClick={() => { setMatchModalLog(call); setElevSearch(''); setElevResults([]) }}
+                onClick={() => { setMatchModalLog(call); setElevSearch(''); setElevResults([]); setSearchError(null) }}
               >
                 🔗 שייך למעלית קיימת
               </Button>
@@ -213,7 +224,9 @@ export default function PendingCallsPage() {
             value={elevSearch}
             onChange={e => handleElevSearch(e.target.value)}
             autoFocus
+            rightSection={searchLoading ? <Loader size="xs" /> : null}
           />
+          {searchError && <Text c="red" size="sm">{searchError}</Text>}
           {elevResults.map(e => (
             <Card key={e.id} withBorder p="sm" style={{ cursor: 'pointer' }}
               onClick={() => {
@@ -224,7 +237,7 @@ export default function PendingCallsPage() {
               <Text size="sm" c="dimmed">{e.city}{e.building_name ? ` — ${e.building_name}` : ''}</Text>
             </Card>
           ))}
-          {elevSearch.length >= 2 && elevResults.length === 0 && (
+          {!searchLoading && elevSearch.length >= 2 && elevResults.length === 0 && !searchError && (
             <Text c="dimmed" ta="center" size="sm">לא נמצאו תוצאות</Text>
           )}
         </Stack>
