@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Grid, Paper, Text, Title, Stack, Group, Badge, Table, Loader, Center,
   ThemeIcon, RingProgress, ScrollArea, Alert, Divider, Progress, Tooltip,
-  ActionIcon,
+  ActionIcon, Box,
 } from '@mantine/core'
 import { DonutChart, BarChart } from '@mantine/charts'
 import { useQuery } from '@tanstack/react-query'
@@ -59,6 +59,107 @@ function useWeather() {
 }
 
 // ── Small components ───────────────────────────────────────────────────────────
+
+function LiveStatusBar({
+  criticalCount, openCount, availableTechs, totalTechs, lastUpdated,
+}: {
+  criticalCount: number; openCount: number; availableTechs: number; totalTechs: number; lastUpdated: string
+}) {
+  const isCritical = criticalCount > 0
+  const bg = isCritical
+    ? 'linear-gradient(90deg, #c92a2a 0%, #e03131 50%, #c92a2a 100%)'
+    : 'linear-gradient(90deg, #087f5b 0%, #099268 50%, #087f5b 100%)'
+
+  return (
+    <Box
+      style={{
+        background: bg,
+        borderRadius: 10,
+        padding: '10px 20px',
+        animation: isCritical ? 'pulse-red 2s infinite' : undefined,
+      }}
+    >
+      <style>{`
+        @keyframes pulse-red {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.88; }
+        }
+      `}</style>
+      <Group justify="space-between" wrap="nowrap">
+        <Group gap="xl" wrap="nowrap">
+          <Group gap="xs">
+            <Text size="lg">{isCritical ? '🚨' : '✅'}</Text>
+            <Box>
+              <Text size="xs" c="rgba(255,255,255,0.7)" fw={600} tt="uppercase">
+                {isCritical ? 'מצב חירום' : 'מצב תקין'}
+              </Text>
+              <Text size="sm" c="white" fw={700}>
+                {isCritical ? `${criticalCount} קריאות קריטיות פתוחות` : 'אין קריאות קריטיות'}
+              </Text>
+            </Box>
+          </Group>
+          <Divider orientation="vertical" color="rgba(255,255,255,0.3)" />
+          <Box>
+            <Text size="xs" c="rgba(255,255,255,0.7)">קריאות פתוחות</Text>
+            <Text size="sm" c="white" fw={700}>{openCount}</Text>
+          </Box>
+          <Divider orientation="vertical" color="rgba(255,255,255,0.3)" />
+          <Box>
+            <Text size="xs" c="rgba(255,255,255,0.7)">טכנאים זמינים</Text>
+            <Text size="sm" c="white" fw={700}>{availableTechs}/{totalTechs}</Text>
+          </Box>
+        </Group>
+        <Text size="xs" c="rgba(255,255,255,0.6)">עודכן: {lastUpdated}</Text>
+      </Group>
+    </Box>
+  )
+}
+
+function PriorityCallCard({
+  call, onClick, faultLabels,
+}: {
+  call: any; onClick: () => void; faultLabels: Record<string, string>
+}) {
+  const isCritical = call.priority === 'CRITICAL'
+  const minutesAgo = Math.round((Date.now() - new Date(call.created_at).getTime()) / 60000)
+  const timeLabel = minutesAgo < 60
+    ? `לפני ${minutesAgo} דק'`
+    : minutesAgo < 1440
+    ? `לפני ${Math.round(minutesAgo / 60)} ש'`
+    : `לפני ${Math.round(minutesAgo / 1440)} י'`
+
+  return (
+    <Paper
+      withBorder p="sm" radius="md"
+      style={{
+        cursor: 'pointer',
+        borderColor: isCritical ? '#fa5252' : '#fd7e14',
+        borderWidth: 2,
+        background: isCritical ? '#fff5f5' : '#fff8f0',
+        animation: isCritical ? 'pulse-border 2s infinite' : undefined,
+      }}
+      onClick={onClick}
+    >
+      <style>{`
+        @keyframes pulse-border {
+          0%, 100% { border-color: #fa5252; }
+          50% { border-color: #ff8787; }
+        }
+      `}</style>
+      <Group justify="space-between" mb={4} wrap="nowrap">
+        <Badge color={isCritical ? 'red' : 'orange'} size="sm" variant="filled">
+          {isCritical ? '🚨 קריטי' : '⚠️ גבוה'}
+        </Badge>
+        <Text size="xs" c="dimmed">{timeLabel}</Text>
+      </Group>
+      <Text size="sm" fw={600} lineClamp={2}>{call.description}</Text>
+      <Group gap="xs" mt={4}>
+        <Badge size="xs" variant="light" color="gray">{faultLabels[call.fault_type] ?? call.fault_type}</Badge>
+        {call.call_number && <Text size="xs" c="dimmed">#{String(call.call_number).padStart(5, '0')}</Text>}
+      </Group>
+    </Paper>
+  )
+}
 
 function KpiCard({
   label, value, sub, icon, color, onClick,
@@ -135,6 +236,11 @@ function urgencyLabel(daysUntil: number): string {
 export default function DashboardPage() {
   const navigate = useNavigate()
   const weather = useWeather()
+  const [now, setNow] = useState(dayjs())
+  useEffect(() => {
+    const t = setInterval(() => setNow(dayjs()), 30000)
+    return () => clearInterval(t)
+  }, [])
 
   const { data: elevators = [] } = useQuery({
     queryKey: ['elevators'], queryFn: () => listElevators({ limit: 2000 } as any),
@@ -150,10 +256,22 @@ export default function DashboardPage() {
   })
 
   // ── Derived data ──────────────────────────────────────────────────────────────
-  const now = dayjs()
+
+  const faultLabels: Record<string, string> = {
+    MECHANICAL: 'מכאני', ELECTRICAL: 'חשמלי', SOFTWARE: 'תוכנה',
+    STUCK: 'תקועה', DOOR: 'דלת', OTHER: 'אחר',
+  }
 
   const openCalls = calls.filter(c => ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(c.status))
   const criticalCalls = calls.filter(c => c.priority === 'CRITICAL' && !['RESOLVED', 'CLOSED'].includes(c.status))
+  const priorityQueue = calls
+    .filter(c => ['CRITICAL', 'HIGH'].includes(c.priority) && !['RESOLVED', 'CLOSED'].includes(c.status))
+    .sort((a, b) => {
+      if (a.priority === 'CRITICAL' && b.priority !== 'CRITICAL') return -1
+      if (b.priority === 'CRITICAL' && a.priority !== 'CRITICAL') return 1
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    })
+    .slice(0, 6)
   const activeTechs = technicians.filter(t => t.is_active)
   const availableTechs = activeTechs.filter(t => t.is_available)
   const onCallTech = technicians.find(t => t.is_on_call && t.is_active)
@@ -186,10 +304,6 @@ export default function DashboardPage() {
   }))
 
   // Calls by fault type (bar chart) — last 50 non-closed
-  const faultLabels: Record<string, string> = {
-    MECHANICAL: 'מכאני', ELECTRICAL: 'חשמלי', SOFTWARE: 'תוכנה',
-    STUCK: 'תקועה', DOOR: 'דלת', OTHER: 'אחר',
-  }
   const callsByFault = Object.entries(
     calls.filter(c => c.status !== 'CLOSED').reduce<Record<string, number>>((acc, c) => {
       acc[c.fault_type] = (acc[c.fault_type] ?? 0) + 1
@@ -207,9 +321,20 @@ export default function DashboardPage() {
   return (
     <Stack gap="lg">
       <Group justify="space-between" align="center">
-        <Title order={2}>דשבורד</Title>
-        <Text size="sm" c="dimmed">{now.format('dddd, DD/MM/YYYY HH:mm')}</Text>
+        <Title order={2}>Mission Control 🛗</Title>
+        <Group gap="xs">
+          <Text size="sm" c="dimmed">{now.format('dddd, DD/MM/YYYY HH:mm')}</Text>
+        </Group>
       </Group>
+
+      {/* Live Status Bar */}
+      <LiveStatusBar
+        criticalCount={criticalCalls.length}
+        openCount={openCalls.length}
+        availableTechs={availableTechs.length}
+        totalTechs={activeTechs.length}
+        lastUpdated={now.format('HH:mm')}
+      />
 
       {/* Row 1 — KPI cards + weather */}
       <Grid>
@@ -289,6 +414,27 @@ export default function DashboardPage() {
             </Grid.Col>
           )}
         </Grid>
+      )}
+
+      {/* Priority Queue — CRITICAL + HIGH open calls */}
+      {priorityQueue.length > 0 && (
+        <Box>
+          <Group mb="sm" gap="xs">
+            <Text fw={700} size="sm" tt="uppercase" c="red">🚨 תור עדיפויות</Text>
+            <Badge color="red" size="sm">{priorityQueue.length}</Badge>
+          </Group>
+          <Grid>
+            {priorityQueue.map(call => (
+              <Grid.Col key={call.id} span={{ base: 12, sm: 6, md: 4 }}>
+                <PriorityCallCard
+                  call={call}
+                  faultLabels={faultLabels}
+                  onClick={() => navigate(`/calls`)}
+                />
+              </Grid.Col>
+            ))}
+          </Grid>
+        </Box>
       )}
 
       {/* Row 3 — Open calls + Technician status */}

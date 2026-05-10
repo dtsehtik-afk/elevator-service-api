@@ -4,6 +4,7 @@ import {
   Title, Table, Badge, Button, Group, Select, Modal, Stack, Text,
   Paper, TextInput, NumberInput, Textarea, Switch, Checkbox,
 } from '@mantine/core'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
 import { contractsApi } from '../api/contracts'
 import { customersApi } from '../api/customers'
@@ -147,7 +148,9 @@ export default function ContractsPage() {
               data={[{ value: 'MONTHLY', label: 'חודשי' }, { value: 'QUARTERLY', label: 'רבעוני' }, { value: 'ANNUAL', label: 'שנתי' }]} />
           )}
           <Textarea label="הערות" value={form.notes}
-            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            rightSection={<AIRefineButton value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />}
+            rightSectionPointerEvents="all" />
           <Button onClick={handleCreate} disabled={!form.customer_id}>צור חוזה</Button>
         </Stack>
       </Modal>

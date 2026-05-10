@@ -5,6 +5,7 @@ import {
   NumberInput, Select, Tabs, Table, Loader, Center, ActionIcon, Alert,
   Checkbox, Textarea, Anchor, Modal, Divider,
 } from '@mantine/core'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { useAuthStore } from '../stores/authStore'
 import { DateInput } from '@mantine/dates'
 import { FileInput } from '@mantine/core'
@@ -705,7 +706,7 @@ export default function ElevatorDetailPage() {
               )}
               <Grid.Col span={12}>
                 {editing ? (
-                  <Textarea label="הערות" value={form.notes ?? ''} onChange={e => set('notes', e.target.value || null)} minRows={2} />
+                  <Textarea label="הערות" value={form.notes ?? ''} onChange={e => set('notes', e.target.value || null)} minRows={2} rightSection={<AIRefineButton value={form.notes ?? ''} onChange={v => set('notes', v || null)} />} rightSectionPointerEvents="all" />
                 ) : elevator.notes ? (
                   <Field label="הערות" value={elevator.notes} />
                 ) : null}

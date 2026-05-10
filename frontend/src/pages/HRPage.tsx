@@ -4,6 +4,7 @@ import {
   TextInput, Select, NumberInput, Textarea, Grid, SimpleGrid,
   Loader, Center, Tabs, Card, RingProgress,
 } from '@mantine/core'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -254,6 +255,8 @@ export default function HRPage() {
                 value={form.notes ?? ''}
                 onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                 rows={3}
+                rightSection={<AIRefineButton value={form.notes ?? ''} onChange={v => setForm(p => ({ ...p, notes: v }))} />}
+                rightSectionPointerEvents="all"
               />
             </Grid.Col>
           </Grid>

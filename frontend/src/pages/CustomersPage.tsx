@@ -4,6 +4,7 @@ import {
   Title, Table, Badge, Button, Group, TextInput, Select, Modal,
   Stack, Text, ActionIcon, Tooltip, Paper, SimpleGrid, Card, NumberInput, Textarea,
 } from '@mantine/core'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
 import { customersApi } from '../api/customers'
 import type { Customer } from '../types'
@@ -177,7 +178,7 @@ export default function CustomersPage() {
             <TextInput label="ח.פ / עוסק מורשה" value={form.vat_number} onChange={e => setForm(f => ({ ...f, vat_number: e.target.value }))} />
           </Group>
           <NumberInput label="ימי תשלום" value={form.payment_terms} onChange={v => setForm(f => ({ ...f, payment_terms: Number(v) || 30 }))} min={0} />
-          <Textarea label="הערות" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <Textarea label="הערות" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rightSection={<AIRefineButton value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />} rightSectionPointerEvents="all" />
           <Button onClick={handleCreate} disabled={!form.name}>צור לקוח</Button>
         </Stack>
       </Modal>

@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select, Paper } from '@mantine/core'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -677,6 +678,8 @@ function TechMain() {
                   value={resolveNotes}
                   onChange={e => setResolveNotes(e.target.value)}
                   autoFocus
+                  rightSection={<AIRefineButton value={resolveNotes} onChange={setResolveNotes} />}
+                  rightSectionPointerEvents="all"
                 />
                 <Group justify="flex-end" mt="sm">
                   <Button variant="default" onClick={() => setResolveOpen(false)}>ביטול</Button>

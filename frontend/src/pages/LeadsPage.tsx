@@ -3,6 +3,7 @@ import {
   Title, Group, Button, Text, Badge, Card, Stack, SimpleGrid,
   Modal, TextInput, Select, NumberInput, Textarea, Paper, Table,
 } from '@mantine/core'
+import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
 import { leadsApi } from '../api/leads'
 import type { Lead } from '../types'
@@ -162,7 +163,7 @@ export default function LeadsPage() {
               onChange={v => setForm(f => ({ ...f, estimated_value: Number(v) || 0 }))} />
             <TextInput label="אחראי" value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))} />
           </Group>
-          <Textarea label="הערות" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <Textarea label="הערות" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rightSection={<AIRefineButton value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />} rightSectionPointerEvents="all" />
           <Button onClick={handleCreate} disabled={!form.name}>צור ליד</Button>
         </Stack>
       </Modal>
