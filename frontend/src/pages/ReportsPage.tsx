@@ -51,6 +51,9 @@ export default function ReportsPage() {
   const [saveModalOpen, { open: openSaveModal, close: closeSaveModal }] = useDisclosure(false)
   const [viewName, setViewName] = useState('')
   const [activeView, setActiveView] = useState<string | null>(null)
+  const [aiQuestion, setAiQuestion] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null)
 
   const { data: schemas } = useQuery({
     queryKey: ['report-schemas'],
@@ -169,6 +172,28 @@ export default function ReportsPage() {
     if (activeView === id) setActiveView(null)
   }
 
+  async function runAiQuery() {
+    if (!aiQuestion.trim()) return
+    setAiLoading(true)
+    setAiAnswer(null)
+    try {
+      const { data } = await client.post('/reports/ai-query', { question: aiQuestion })
+      const p = data.ai_params ?? {}
+      if (p.entity_type) setEntityType(p.entity_type)
+      if (p.columns?.length) setSelectedCols(p.columns)
+      if (p.filters?.length) setFilters(p.filters)
+      if (p.sort_by) setSortBy(p.sort_by)
+      if (p.sort_dir) setSortDir(p.sort_dir)
+      setResult(data)
+      setAiAnswer(data.answer || null)
+      setPage(1)
+    } catch (e: any) {
+      notifications.show({ message: e?.response?.data?.detail ?? 'שגיאת AI', color: 'red' })
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   const totalPages = result ? Math.ceil(result.total / PAGE_SIZE) : 0
   const filterable = currentSchema?.columns.filter(c => c.filterable) ?? []
 
@@ -198,6 +223,42 @@ export default function ReportsPage() {
           />
         </Group>
       </Paper>
+
+      {/* AI natural language query */}
+      <Paper withBorder radius="md" p="md" style={{ borderRight: '4px solid #7950f2' }}>
+        <Text fw={600} size="sm" mb="xs">🤖 שאילתה חופשית בעברית</Text>
+        <Group gap="xs" align="flex-end">
+          <TextInput
+            style={{ flex: 1 }}
+            placeholder='לדוגמה: "כל הקריאות שתומר סגר ב-3 ימים האחרונים" או "כמה תקלות היו במעלית X בשבוע"'
+            value={aiQuestion}
+            onChange={e => setAiQuestion(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && runAiQuery()}
+            size="sm"
+          />
+          <Button
+            variant="filled"
+            color="violet"
+            loading={aiLoading}
+            disabled={!aiQuestion.trim()}
+            onClick={runAiQuery}
+          >
+            הרץ
+          </Button>
+        </Group>
+        <Text size="xs" c="dimmed" mt={4}>הבינה מתרגמת את השאלה לפילטרים ומריצה את הדוח אוטומטית.</Text>
+      </Paper>
+
+      {/* AI narrative answer */}
+      {aiAnswer && (
+        <Paper withBorder radius="md" p="md" style={{ borderRight: '4px solid #7950f2', background: 'var(--mantine-color-violet-0)' }}>
+          <Group gap="xs" mb="xs">
+            <Text size="xs" fw={700} c="violet">🤖 תשובת הבינה המלאכותית</Text>
+            <Button size="xs" variant="subtle" color="gray" px={6} onClick={() => setAiAnswer(null)}>✕</Button>
+          </Group>
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{aiAnswer}</Text>
+        </Paper>
+      )}
 
       {/* Saved views bar */}
       {views && views.length > 0 && (
