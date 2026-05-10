@@ -1548,7 +1548,7 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
         reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
-        description=log.call_type or "קריאת שירות",
+        description=(log.call_type if log.call_type and len(log.call_type) >= 5 else "קריאת שירות"),
         priority=log.priority or "MEDIUM",
         fault_type=log.fault_type or "OTHER",
     )
