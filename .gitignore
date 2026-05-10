@@ -4,7 +4,8 @@
 .env.example
 
 # Claude
-.claude/
+# .claude/ — allow commands to be tracked
+!.claude/commands/
 
 # Vite cache
 .vite/
@@ -41,3 +42,4 @@ Thumbs.db
 # Logs
 *.log
 nginx/certbot/
+.claude/settings.local.json

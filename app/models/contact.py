@@ -1,4 +1,4 @@
-"""Contact model — a person linked to a building (vaad, resident, management)."""
+"""Contact model — a person linked to an elevator, building, or management company."""
 
 import uuid
 from datetime import datetime
@@ -16,6 +16,9 @@ class Contact(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
+    elevator_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("elevators.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     building_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("buildings.id", ondelete="CASCADE"), nullable=True, index=True
     )
@@ -33,6 +36,9 @@ class Contact(Base):
     auto_added: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    elevator: Mapped[Optional["Elevator"]] = relationship(  # noqa: F821
+        "Elevator", back_populates="contacts", foreign_keys=[elevator_id]
+    )
     building: Mapped[Optional["Building"]] = relationship(  # noqa: F821
         "Building", back_populates="contacts"
     )

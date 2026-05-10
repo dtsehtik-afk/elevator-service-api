@@ -313,6 +313,19 @@ def notify_dispatcher(text: str) -> bool:
 
 # ── Customer testing redirect ─────────────────────────────────────────────────
 # All outgoing customer messages go here until production routing is enabled
+def notify_sales_managers(db, text: str) -> None:
+    """Send WhatsApp to all active SALES_MANAGER users."""
+    from app.models.technician import Technician
+    managers = db.query(Technician).filter(
+        Technician.role == "SALES_MANAGER",
+        Technician.is_active == True,
+    ).all()
+    for m in managers:
+        phone = m.whatsapp_number or m.phone
+        if phone:
+            _send_message(phone, text)
+
+
 _CUSTOMER_TEST_PHONE = "0527474013"
 
 

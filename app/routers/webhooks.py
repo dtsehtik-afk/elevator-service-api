@@ -194,23 +194,48 @@ async def receive_call(
             db, call_data, "webhook@system"
         )
     elif match.match_status in ("PARTIAL", "UNMATCHED"):
-        # Elevator not found with enough confidence — notify dispatcher to handle manually
-        closest_address = match.elevator.address if match.elevator else None
-        closest_city = match.elevator.city if match.elevator else None
-        try:
-            whatsapp_service.notify_dispatcher_elevator_not_found(
-                street=parsed.street,
-                house_number=parsed.house_number,
-                city=parsed.city,
-                fault_type=parsed.fault_type,
-                caller_name=parsed.name,
-                caller_phone=parsed.phone,
-                score=match.score,
-                closest_address=closest_address,
-                closest_city=closest_city,
-            )
-        except Exception as exc:
-            logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
+        fault_is_specific = parsed.fault_type in ("STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "RESCUE")
+        if fault_is_specific:
+            # Specific fault with unknown address → dispatcher alert + pending queue
+            closest_address = match.elevator.address if match.elevator else None
+            closest_city = match.elevator.city if match.elevator else None
+            try:
+                whatsapp_service.notify_dispatcher_elevator_not_found(
+                    street=parsed.street,
+                    house_number=parsed.house_number,
+                    city=parsed.city,
+                    fault_type=parsed.fault_type,
+                    caller_name=parsed.name,
+                    caller_phone=parsed.phone,
+                    score=match.score,
+                    closest_address=closest_address,
+                    closest_city=closest_city,
+                )
+            except Exception as exc:
+                logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
+        else:
+            # No specific fault + unknown address → potential lead, notify sales manager
+            try:
+                from app.models.lead import Lead
+                address_str = " ".join(filter(None, [parsed.street, parsed.house_number, parsed.city]))
+                lead = Lead(
+                    name=parsed.name or parsed.phone or "ליד נכנס",
+                    phone=parsed.phone or None,
+                    source="PHONE",
+                    status="NEW",
+                    notes=f"קריאה נכנסת ללא זיהוי מעלית\nכתובת: {address_str}\nתיאור: {parsed.call_type or parsed.description or ''}",
+                )
+                db.add(lead)
+                db.commit()
+                whatsapp_service.notify_sales_managers(
+                    db,
+                    f"🆕 *ליד חדש נכנס*\n"
+                    f"📞 {parsed.name or ''} {parsed.phone or ''}\n"
+                    f"📍 {address_str}\n"
+                    f"💬 {parsed.call_type or parsed.description or 'ללא תיאור'}",
+                )
+            except Exception as exc:
+                logger.error("Failed to create lead from unmatched call: %s", exc)
 
     # 5. AI assignment — with after-hours caller confirmation for non-RESCUE calls
     assignment = None
@@ -1545,14 +1570,37 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
             elevator.caller_phones = phones
 
     # Create service call
-    call_data = ServiceCallCreate(
-        elevator_id=elevator.id,
-        reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
-        description=log.call_type or "קריאת שירות",
-        priority=log.priority or "MEDIUM",
-        fault_type=log.fault_type or "OTHER",
+    call_type = (log.call_type or "").strip()
+    description = call_type if len(call_type) >= 5 else (f"קריאת שירות: {call_type}" if call_type else "קריאת שירות")
+    raw_name = (log.caller_name or "").strip()
+    reported_by = raw_name if len(raw_name) >= 2 else (log.caller_phone or "מוקד טלפוני")
+    valid_fault_types = {"MECHANICAL", "ELECTRICAL", "SOFTWARE", "STUCK", "DOOR", "RESCUE", "OTHER"}
+    fault_type = log.fault_type if log.fault_type in valid_fault_types else "OTHER"
+    valid_priorities = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
+    priority = log.priority if log.priority in valid_priorities else "MEDIUM"
+
+    logger.info(
+        "match-elevator log_id=%s elevator_id=%s reported_by=%r description=%r fault_type=%r priority=%r",
+        log_id, elevator_id, reported_by, description, fault_type, priority,
     )
-    service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+
+    try:
+        call_data = ServiceCallCreate(
+            elevator_id=elevator.id,
+            reported_by=reported_by,
+            description=description,
+            priority=priority,
+            fault_type=fault_type,
+        )
+        service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
+    except Exception as exc:
+        logger.error("match-elevator ServiceCallCreate failed log_id=%s: %s", log_id, exc, exc_info=True)
+        raise HTTPException(status_code=400, detail=f"שגיאה ביצירת קריאת שירות: {exc}")
+
+    # Backdate the service call to the original incoming-call time, not the assignment time
+    if log.created_at:
+        service_call.created_at = log.created_at
+        db.commit()
 
     # Update log
     log.elevator_id = elevator.id

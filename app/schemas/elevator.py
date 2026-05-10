@@ -54,6 +54,7 @@ class ElevatorUpdate(BaseModel):
     service_type: Optional[str] = Field(None, pattern="^(REGULAR|COMPREHENSIVE)$")
     service_contract: Optional[str] = Field(None, pattern="^(ANNUAL_6|ANNUAL_12)$")
     maintenance_interval_days: Optional[int] = Field(None, ge=1)
+    maintenance_times_per_year: Optional[int] = Field(None, ge=1, le=52)
     contract_start: Optional[date] = None
     contract_renewal: Optional[date] = None
     contract_end: Optional[date] = None
@@ -125,6 +126,7 @@ class ElevatorResponse(BaseModel):
     service_type: Optional[str] = None
     service_contract: Optional[str] = None
     maintenance_interval_days: Optional[int] = None
+    maintenance_times_per_year: Optional[int] = None
     contract_start: Optional[date] = None
     contract_renewal: Optional[date] = None
     contract_end: Optional[date] = None

@@ -29,6 +29,7 @@ export interface Elevator {
   service_type: 'REGULAR' | 'COMPREHENSIVE' | null
   service_contract: 'ANNUAL_6' | 'ANNUAL_12' | null
   maintenance_interval_days: number | null
+  maintenance_times_per_year: number | null
   contract_start: string | null
   contract_renewal: string | null
   contract_end: string | null
@@ -60,6 +61,7 @@ export interface Elevator {
 
 export interface ServiceCall {
   id: string
+  call_number: number | null
   elevator_id: string
   reported_by: string
   description: string
