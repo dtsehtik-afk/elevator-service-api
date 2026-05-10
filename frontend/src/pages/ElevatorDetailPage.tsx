@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Grid, TextInput,
   NumberInput, Select, Tabs, Table, Loader, Center, ActionIcon, Alert,
-  Checkbox, Textarea, Anchor, Modal, Divider,
+  Checkbox, Textarea, Anchor, Modal, Divider, Timeline, ScrollArea, Box,
 } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
 import { useAuthStore } from '../stores/authStore'
@@ -130,6 +130,166 @@ function InspectionHistory({ elevatorId }: { elevatorId: string }) {
   )
 }
 
+const FAULT_LABELS: Record<string, string> = {
+  STUCK: 'תקועה', DOOR: 'דלת', ELECTRICAL: 'חשמלי', MECHANICAL: 'מכאני',
+  SOFTWARE: 'תוכנה', RESCUE: 'חילוץ', MAINTENANCE: 'תחזוקה', OTHER: 'אחר',
+}
+const MAINT_STATUS_LABEL: Record<string, string> = {
+  SCHEDULED: 'מתוכנן', COMPLETED: 'בוצע', OVERDUE: 'בפיגור', CANCELLED: 'בוטל',
+}
+const MAINT_STATUS_COLOR: Record<string, string> = {
+  SCHEDULED: 'blue', COMPLETED: 'green', OVERDUE: 'red', CANCELLED: 'gray',
+}
+
+type LogEntry = {
+  date: string
+  type: 'call' | 'maintenance' | 'inspection'
+  raw: any
+}
+
+function ElevatorLog({
+  calls, maintenance, inspections, elevatorId,
+}: {
+  calls: any[]; maintenance: any[]; inspections: any[]; elevatorId: string
+}) {
+  const navigate = useNavigate()
+
+  const entries: LogEntry[] = [
+    ...calls.map(c => ({ date: c.created_at, type: 'call' as const, raw: c })),
+    ...maintenance.map(m => ({ date: m.scheduled_date || m.created_at, type: 'maintenance' as const, raw: m })),
+    ...inspections.map(i => ({ date: i.inspection_date || i.created_at, type: 'inspection' as const, raw: i })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+  const handleExport = () => {
+    const token = localStorage.getItem('token') || ''
+    const base = (window as any).__API_BASE__ || '/api'
+    // Export service calls for this elevator via reports
+    navigate(`/reports`)
+  }
+
+  if (entries.length === 0) {
+    return (
+      <Paper withBorder p="xl" radius="md">
+        <Center><Text c="dimmed">אין רשומות ביומן</Text></Center>
+      </Paper>
+    )
+  }
+
+  return (
+    <Stack gap="md">
+      <Group justify="space-between">
+        <Text fw={700} size="sm" c="dimmed">
+          {entries.length} רשומות · קריאות {calls.length} · תחזוקה {maintenance.length} · בודק {inspections.length}
+        </Text>
+        <Button size="xs" variant="light" color="blue" onClick={() => navigate(`/reports`)}>
+          📊 ייצוא לאקסל
+        </Button>
+      </Group>
+
+      <ScrollArea h={600}>
+        <Timeline bulletSize={28} lineWidth={2}>
+          {entries.map((entry, idx) => {
+            if (entry.type === 'call') {
+              const c = entry.raw
+              const color = c.priority === 'CRITICAL' ? 'red' : c.priority === 'HIGH' ? 'orange' : c.priority === 'MEDIUM' ? 'yellow' : 'gray'
+              return (
+                <Timeline.Item
+                  key={`call-${c.id}`}
+                  bullet={<Text size="xs">🔧</Text>}
+                  title={
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="sm" fw={600} lineClamp={1}>{c.description}</Text>
+                      <Badge size="xs" color={color}>{PRIORITY_LABELS[c.priority]}</Badge>
+                      <Badge size="xs" color={CALL_STATUS_COLORS[c.status]} variant="light">{CALL_STATUS_LABELS[c.status]}</Badge>
+                    </Group>
+                  }
+                >
+                  <Stack gap={2}>
+                    <Group gap="xs">
+                      <Badge size="xs" variant="dot" color="gray">{FAULT_LABELS[c.fault_type] ?? c.fault_type}</Badge>
+                      {c.call_number && <Text size="xs" c="dimmed">#{String(c.call_number).padStart(5, '0')}</Text>}
+                    </Group>
+                    {c.resolution_notes && (
+                      <Text size="xs" c="dimmed" lineClamp={2}>✅ {c.resolution_notes}</Text>
+                    )}
+                    <Text size="xs" c="dimmed">{new Date(c.created_at).toLocaleString('he-IL')}</Text>
+                  </Stack>
+                </Timeline.Item>
+              )
+            }
+
+            if (entry.type === 'maintenance') {
+              const m = entry.raw
+              return (
+                <Timeline.Item
+                  key={`maint-${m.id}`}
+                  bullet={<Text size="xs">📅</Text>}
+                  title={
+                    <Group gap="xs">
+                      <Text size="sm" fw={600}>תחזוקה מתוכננת</Text>
+                      <Badge size="xs" color={MAINT_STATUS_COLOR[m.status] ?? 'gray'}>
+                        {MAINT_STATUS_LABEL[m.status] ?? m.status}
+                      </Badge>
+                    </Group>
+                  }
+                >
+                  <Stack gap={2}>
+                    {m.technician_name && <Text size="xs" c="dimmed">טכנאי: {m.technician_name}</Text>}
+                    {m.notes && <Text size="xs" c="dimmed" lineClamp={2}>{m.notes}</Text>}
+                    <Text size="xs" c="dimmed">
+                      {m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString('he-IL') : '—'}
+                    </Text>
+                  </Stack>
+                </Timeline.Item>
+              )
+            }
+
+            if (entry.type === 'inspection') {
+              const r = entry.raw
+              const result = r.result === 'PASS' ? 'תקין' : r.result === 'FAIL' ? 'ליקויים' : 'לא ידוע'
+              const resultColor = r.result === 'PASS' ? 'green' : r.result === 'FAIL' ? 'red' : 'gray'
+              return (
+                <Timeline.Item
+                  key={`insp-${r.id}`}
+                  bullet={<Text size="xs">🔍</Text>}
+                  title={
+                    <Group gap="xs">
+                      <Text size="sm" fw={600}>דוח בודק</Text>
+                      <Badge size="xs" color={resultColor}>{result}</Badge>
+                      {r.report_status && r.report_status !== 'NA' && (
+                        <Badge size="xs" color={REPORT_STATUS_COLOR[r.report_status]} variant="light">
+                          {REPORT_STATUS_LABEL[r.report_status]}
+                        </Badge>
+                      )}
+                    </Group>
+                  }
+                >
+                  <Stack gap={2}>
+                    {r.inspector_name && <Text size="xs" c="dimmed">בודק: {r.inspector_name}</Text>}
+                    {r.deficiency_count > 0 && (
+                      <Text size="xs" c="red">{r.deficiency_count} ליקויים</Text>
+                    )}
+                    {r.file_url && (
+                      <Anchor size="xs" onClick={() => openReportFile(r.file_url)} style={{ cursor: 'pointer' }}>
+                        📄 פתח דוח
+                      </Anchor>
+                    )}
+                    <Text size="xs" c="dimmed">
+                      {r.inspection_date ? new Date(r.inspection_date).toLocaleDateString('he-IL') : '—'}
+                    </Text>
+                  </Stack>
+                </Timeline.Item>
+              )
+            }
+
+            return null
+          })}
+        </Timeline>
+      </ScrollArea>
+    </Stack>
+  )
+}
+
 export default function ElevatorDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -175,6 +335,18 @@ export default function ElevatorDetailPage() {
   const { data: calls = [] } = useQuery({
     queryKey: ['elevator-calls', id],
     queryFn: () => getElevatorCalls(id!),
+    enabled: !!id,
+  })
+
+  const { data: maintenanceLogs = [] } = useQuery({
+    queryKey: ['elevator-maintenance', id],
+    queryFn: async () => (await client.get(`/maintenance?elevator_id=${id}&limit=200`)).data,
+    enabled: !!id,
+  })
+
+  const { data: inspectionLogs = [] } = useQuery({
+    queryKey: ['elevator-inspections', id],
+    queryFn: async () => (await client.get(`/inspections?elevator_id=${id}&limit=200`)).data,
     enabled: !!id,
   })
 
@@ -586,6 +758,7 @@ export default function ElevatorDetailPage() {
           <Tabs.Tab value="contract">חוזה</Tabs.Tab>
           <Tabs.Tab value="inspection">דוחות בודק</Tabs.Tab>
           <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>
+          <Tabs.Tab value="log">📋 יומן מעלית</Tabs.Tab>
           {elevator.building_id && (
             <Tabs.Tab value="group">קבוצה {siblings.length > 0 && `(${siblings.length + 1})`}</Tabs.Tab>
           )}
@@ -1190,6 +1363,16 @@ export default function ElevatorDetailPage() {
               </Table>
             )}
           </Paper>
+        </Tabs.Panel>
+
+        {/* ── LOG ── */}
+        <Tabs.Panel value="log" pt="md">
+          <ElevatorLog
+            calls={calls as any[]}
+            maintenance={maintenanceLogs}
+            inspections={inspectionLogs}
+            elevatorId={id!}
+          />
         </Tabs.Panel>
 
         {/* ── GROUP ── */}
