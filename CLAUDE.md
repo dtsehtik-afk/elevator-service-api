@@ -20,9 +20,9 @@ APK: built via GitHub Actions, server URL points to `https://lift-agent.com`
 ## Repository & Branch
 
 - Repo: `dtsehtik-afk/elevator-service-api`
-- Active dev branch: `claude/technician-request-assignment-NofCx`
+- Active dev branch: `claude/mystifying-mcnulty-a91ece`
 - **NEVER push to main without explicit permission**
-- After every commit: `git push -u origin claude/technician-request-assignment-NofCx`
+- After every commit: `git push -u origin claude/mystifying-mcnulty-a91ece`
 
 ---
 
@@ -218,3 +218,32 @@ Used in ElevatorDetailPage and CallsPage.
 - Working hours settings UI: editable per-day schedule in admin panel
 - Email poller fixed: UNSEEN-only, no date restriction, OVERQUOTA handling
 - lift-agent-admin control plane: super-admin dashboard for managing tenants
+- ERP מלא: customers, quotes, contracts, invoices, inventory, leads, CRM
+- Report Builder: custom fields, saved views, role permissions, date range filter, Excel/PDF export
+- AI דוחות: POST /reports/ai-query — שאלה חופשית בעברית → Gemini → פילטרים → תוצאות + תשובה נרטיבית
+- Nav config: הסתרה/שינוי שמות פריטי תפריט מהגדרות
+
+---
+
+## Known Bugs Fixed (10/05/2026)
+
+### report_builder.py — שגיאות schemas
+- `Invoice.invoice_type` — לא קיים במודל, הוסר
+- `Part.unit_cost` → `cost_price`, `Part.unit_price` → `sell_price`, הוסר `location`
+- `Contract.monthly_value` → `monthly_price`, `Contract.auto_renew` → `auto_invoice`
+- 3 עמודות עם `label` במקום `label_he`: `resolution_notes`, `last_service_date`, `next_service_date`
+- **כלל:** לפני deploy, לאמת schemas: `python3 -c "from app.services.report_builder import _build_schemas; _build_schemas(); print('OK')"`
+
+### PendingCallsPage — חיפוש מעלית
+- `GET /elevators/` עם slash בסוף → SPA middleware מחזיר HTML במקום JSON
+- **תיקון:** תמיד `/elevators` ללא trailing slash
+- הוסף `search` param ל-backend (`ilike` על address + city)
+- הוסף loading spinner + error handling ל-modal
+
+### webhooks.py — שיוך קריאה ממתינה למעלית
+- `log.call_type = 'אחר'` (3 תווים) נכשל ב-`ServiceCallCreate.description min_length=5`
+- **תיקון:** fallback ל-`"קריאת שירות"` אם call_type קצר מ-5 תווים
+
+### git pull על השרת
+- שגיאה "divergent branches" — פתרון: `git config --global pull.rebase false` (פעם אחת על השרת)
+- לעולם לא להשתמש ב-`git pull` סתם — אם בעיה: `git fetch origin && git reset --hard origin/$(git branch --show-current)`
