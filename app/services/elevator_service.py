@@ -178,22 +178,15 @@ def list_elevators(
     max_risk: Optional[float] = None,
     skip: int = 0,
     limit: int = 50,
+    search: Optional[str] = None,
 ) -> List[Elevator]:
-    """Return a filtered, paginated list of elevators.
-
-    Args:
-        db: Database session.
-        city: Filter by city (case-insensitive partial match).
-        status: Filter by status (ACTIVE/INACTIVE/UNDER_REPAIR).
-        min_risk: Minimum risk_score filter.
-        max_risk: Maximum risk_score filter.
-        skip: Pagination offset.
-        limit: Page size (max 200).
-
-    Returns:
-        List of Elevator objects.
-    """
+    """Return a filtered, paginated list of elevators."""
     query = db.query(Elevator)
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            Elevator.address.ilike(term) | Elevator.city.ilike(term)
+        )
     if city:
         query = query.filter(Elevator.city.ilike(f"%{city}%"))
     if status:
