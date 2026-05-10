@@ -45,6 +45,7 @@ export const DEFAULT_NAV_ITEMS: NavItem[] = [
     ],
   },
   { label: 'דוחות', path: '/reports', icon: '📈' },
+  { label: 'פרויקטים', path: '/projects', icon: '🏗️' },
   { label: 'HR', path: '/hr', icon: '👥' },
   {
     label: 'הגדרות', path: '/settings', icon: '⚙️',
