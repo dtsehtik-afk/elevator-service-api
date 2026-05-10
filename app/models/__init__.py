@@ -23,6 +23,7 @@ from app.models.saved_view import SavedView
 from app.models.custom_field import CustomField, CustomFieldValue
 from app.models.hr_record import HRRecord
 from app.models.project import Project, ProjectTask
+from app.models.admin_log import AdminLog
 
 __all__ = [
     "Building",
@@ -54,4 +55,5 @@ __all__ = [
     "HRRecord",
     "Project",
     "ProjectTask",
+    "AdminLog",
 ]

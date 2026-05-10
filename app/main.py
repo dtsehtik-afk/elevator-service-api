@@ -1,5 +1,6 @@
 """Application entry point — FastAPI app factory with middleware and routers."""
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from app.routers import reports as reports_router, custom_fields as custom_field
 from app.routers import hr as hr_router
 from app.routers import ai as ai_router
 from app.routers import projects as projects_router
+from app.routers import admin_console as admin_console_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -175,6 +177,42 @@ async def lifespan(app: FastAPI):
                 """UPDATE elevators SET next_service_date =
                     (last_service_date + (FLOOR(365.0 / COALESCE(maintenance_times_per_year, 6)) || ' days')::INTERVAL)::DATE
                     WHERE last_service_date IS NOT NULL AND next_service_date IS NULL""",
+                # Admin Console: structured event log
+                """CREATE TABLE IF NOT EXISTS admin_logs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    level VARCHAR(20) NOT NULL DEFAULT 'ERROR',
+                    source VARCHAR(200),
+                    message TEXT NOT NULL,
+                    stack_trace TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_admin_logs_created_at ON admin_logs (created_at DESC)",
+                "CREATE INDEX IF NOT EXISTS ix_admin_logs_level ON admin_logs (level)",
+                # Projects module
+                """CREATE TABLE IF NOT EXISTS projects (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name VARCHAR(200) NOT NULL,
+                    site VARCHAR(200),
+                    status VARCHAR(30) NOT NULL DEFAULT 'PLANNING',
+                    start_date DATE,
+                    end_date DATE,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                """CREATE TABLE IF NOT EXISTS project_tasks (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    name VARCHAR(200) NOT NULL,
+                    assignee VARCHAR(100),
+                    start_date DATE,
+                    end_date DATE,
+                    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_project_tasks_project_id ON project_tasks (project_id)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -190,6 +228,14 @@ async def lifespan(app: FastAPI):
                 _logging.getLogger(__name__).info(f"Synced {_synced} elevators → customers")
         finally:
             _db.close()
+    except Exception:
+        pass
+    # Attach DB log handler so Python WARNING+ logs are persisted to admin_logs
+    try:
+        from app.services.admin_log_service import DBLogHandler
+        _db_handler = DBLogHandler()
+        _db_handler.setLevel(logging.WARNING)
+        logging.getLogger().addHandler(_db_handler)
     except Exception:
         pass
     from app.services.scheduler import start_scheduler, stop_scheduler
@@ -283,6 +329,7 @@ app.include_router(custom_fields_router.router)
 app.include_router(hr_router.router)
 app.include_router(ai_router.router)
 app.include_router(projects_router.router)
+app.include_router(admin_console_router.router)
 
 
 @app.get("/health", tags=["Health"])
