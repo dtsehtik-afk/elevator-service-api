@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Grid, Paper, Text, Title, Stack, Group, Badge, Table, Loader, Center,
   ThemeIcon, RingProgress, ScrollArea, Alert, Divider, Progress, Tooltip,
-  ActionIcon, Box,
+  ActionIcon, Box, SimpleGrid,
 } from '@mantine/core'
 import { DonutChart, BarChart } from '@mantine/charts'
 import { useQuery } from '@tanstack/react-query'
@@ -12,6 +12,7 @@ import { listElevators } from '../api/elevators'
 import { listCalls } from '../api/calls'
 import { listMaintenance } from '../api/maintenance'
 import { listTechnicians } from '../api/technicians'
+import client from '../api/client'
 import {
   CALL_STATUS_COLORS, CALL_STATUS_LABELS, PRIORITY_COLORS, PRIORITY_LABELS,
 } from '../utils/constants'
@@ -255,6 +256,18 @@ export default function DashboardPage() {
     queryKey: ['technicians'], queryFn: () => listTechnicians(),
   })
 
+  const { data: financialSummary } = useQuery({
+    queryKey: ['financial-summary'],
+    queryFn: () => client.get('/analytics/financial-summary').then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: safetySummary } = useQuery({
+    queryKey: ['safety-summary'],
+    queryFn: () => client.get('/analytics/safety-summary').then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+  })
+
   // ── Derived data ──────────────────────────────────────────────────────────────
 
   const faultLabels: Record<string, string> = {
@@ -317,6 +330,23 @@ export default function DashboardPage() {
     return acc
   }, {})
   const topCities = Object.entries(cityCount).sort((a, b) => b[1] - a[1]).slice(0, 5)
+
+  // Building heat map — top 10 buildings/addresses by open call count
+  const elevatorById = Object.fromEntries(elevators.map(e => [e.id, e]))
+  const buildingCallCount = calls
+    .filter(c => ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(c.status))
+    .reduce<Record<string, { label: string; city: string; count: number; elevatorId: string }>>((acc, c) => {
+      const elev = elevatorById[c.elevator_id]
+      if (!elev) return acc
+      const key = elev.building_name || elev.address
+      if (!key) return acc
+      if (!acc[key]) acc[key] = { label: key, city: elev.city ?? '', count: 0, elevatorId: elev.id }
+      acc[key].count++
+      return acc
+    }, {})
+  const buildingHeatmap = Object.values(buildingCallCount)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
 
   return (
     <Stack gap="lg">
@@ -700,6 +730,142 @@ export default function DashboardPage() {
           </Paper>
         </Grid.Col>
       </Grid>
+
+      {/* Row 6 — Financial + Safety KPIs */}
+      <Grid>
+        <Grid.Col span={12}>
+          <Text fw={700} size="sm" tt="uppercase" c="dimmed" mb="xs">💰 מצב כספי ובטיחות</Text>
+        </Grid.Col>
+
+        {/* Financial */}
+        <Grid.Col span={{ base: 12, md: 6 }}>
+          <Paper withBorder p="md" radius="md" style={{ cursor: 'pointer' }} onClick={() => navigate('/reports?entity=invoices')}>
+            <Group justify="space-between" mb="sm">
+              <Title order={5}>חוב פתוח — חשבוניות</Title>
+              <Badge color="orange" variant="light">
+                {financialSummary ? `${financialSummary.invoice_count} חשבוניות` : '…'}
+              </Badge>
+            </Group>
+            {financialSummary ? (
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" fw={700} c="orange">סה״כ חוב פתוח</Text>
+                  <Text size="lg" fw={800} c="orange">₪{financialSummary.total_outstanding.toLocaleString()}</Text>
+                </Group>
+                <Divider />
+                {[
+                  { label: '0–30 יום', value: financialSummary.aging_0_30, color: 'yellow' },
+                  { label: '31–60 יום', value: financialSummary.aging_31_60, color: 'orange' },
+                  { label: '61+ יום', value: financialSummary.aging_61_plus, color: 'red' },
+                ].map(b => (
+                  <Group key={b.label} justify="space-between">
+                    <Group gap="xs">
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: `var(--mantine-color-${b.color}-5)` }} />
+                      <Text size="xs" c="dimmed">{b.label}</Text>
+                    </Group>
+                    <Text size="xs" fw={600} c={b.value > 0 ? b.color : 'dimmed'}>
+                      ₪{b.value.toLocaleString()}
+                    </Text>
+                  </Group>
+                ))}
+              </Stack>
+            ) : <Center h={80}><Loader size="sm" /></Center>}
+          </Paper>
+        </Grid.Col>
+
+        {/* Safety */}
+        <Grid.Col span={{ base: 12, md: 6 }}>
+          <Paper withBorder p="md" radius="md">
+            <Group justify="space-between" mb="sm">
+              <Title order={5}>🔴 הרשימה האדומה — בטיחות</Title>
+              {safetySummary && (safetySummary.overdue_inspections > 0 || safetySummary.open_deficiency_reports > 0) && (
+                <Badge color="red" variant="filled">דורש טיפול</Badge>
+              )}
+            </Group>
+            {safetySummary ? (
+              <SimpleGrid cols={2} spacing="sm">
+                {[
+                  {
+                    label: 'בדיקות פגות תוקף',
+                    value: safetySummary.overdue_inspections,
+                    color: safetySummary.overdue_inspections > 0 ? 'red' : 'green',
+                    icon: '🚨',
+                    nav: '/inspections',
+                  },
+                  {
+                    label: 'בדיקות בחודש הקרוב',
+                    value: safetySummary.due_in_30_days,
+                    color: safetySummary.due_in_30_days > 0 ? 'orange' : 'green',
+                    icon: '📅',
+                    nav: '/inspections',
+                  },
+                  {
+                    label: 'ליקויים פתוחים',
+                    value: safetySummary.open_deficiency_reports,
+                    color: safetySummary.open_deficiency_reports > 0 ? 'red' : 'green',
+                    icon: '⚠️',
+                    nav: '/inspections',
+                  },
+                  {
+                    label: 'ללא תאריך בדיקה',
+                    value: safetySummary.no_inspection_date,
+                    color: safetySummary.no_inspection_date > 0 ? 'orange' : 'green',
+                    icon: '❓',
+                    nav: '/elevators',
+                  },
+                ].map(item => (
+                  <Paper
+                    key={item.label} withBorder p="sm" radius="md"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(item.nav)}
+                  >
+                    <Group gap="xs" mb={4}>
+                      <Text size="sm">{item.icon}</Text>
+                      <Text size="xs" c="dimmed" lineClamp={1}>{item.label}</Text>
+                    </Group>
+                    <Text fw={800} size="xl" c={item.value > 0 ? item.color : 'green'}>
+                      {item.value}
+                    </Text>
+                  </Paper>
+                ))}
+              </SimpleGrid>
+            ) : <Center h={80}><Loader size="sm" /></Center>}
+          </Paper>
+        </Grid.Col>
+      </Grid>
+
+      {/* Row 7 — Building heat map */}
+      {buildingHeatmap.length > 0 && (
+        <Paper withBorder p="md" radius="md">
+          <Group justify="space-between" mb="sm">
+            <Title order={4}>🔥 מפת חום — בניינים עם הכי הרבה קריאות פתוחות</Title>
+            <Badge variant="light" color="red">{buildingHeatmap.length} בניינים</Badge>
+          </Group>
+          <Stack gap={6}>
+            {buildingHeatmap.map((b, i) => (
+              <div key={b.label} style={{ cursor: 'pointer' }} onClick={() => navigate('/calls')}>
+                <Group justify="space-between" mb={2}>
+                  <Group gap="xs">
+                    <Badge size="xs" color={i < 3 ? 'red' : i < 6 ? 'orange' : 'yellow'} variant="filled" circle>
+                      {i + 1}
+                    </Badge>
+                    <Text size="sm" fw={500}>{b.label}</Text>
+                    {b.city && <Text size="xs" c="dimmed">— {b.city}</Text>}
+                  </Group>
+                  <Badge size="sm" color={i < 3 ? 'red' : i < 6 ? 'orange' : 'yellow'}>
+                    {b.count} קריאות
+                  </Badge>
+                </Group>
+                <Progress
+                  value={buildingHeatmap[0].count > 0 ? (b.count / buildingHeatmap[0].count) * 100 : 0}
+                  size="sm" radius="xl"
+                  color={i < 3 ? 'red' : i < 6 ? 'orange' : 'yellow'}
+                />
+              </div>
+            ))}
+          </Stack>
+        </Paper>
+      )}
     </Stack>
   )
 }

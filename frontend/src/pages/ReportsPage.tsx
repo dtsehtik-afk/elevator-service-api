@@ -129,6 +129,29 @@ export default function ReportsPage() {
   const [chatLoading, setChatLoading] = useState(false)
   const chatBottomRef = useRef<HTMLDivElement>(null)
 
+  // AI summary
+  const [aiSummary, setAiSummary] = useState<string | null>(null)
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false)
+
+  async function runAiSummary() {
+    if (!result || result.rows.length === 0) return
+    setAiSummaryLoading(true)
+    setAiSummary(null)
+    try {
+      const { data } = await client.post('/reports/ai-summary', {
+        entity_type: entityType,
+        columns: selectedCols,
+        rows: result.rows,
+        total: result.total,
+      })
+      setAiSummary(data.summary)
+    } catch {
+      setAiSummary('שגיאה בקבלת הסיכום. נסה שוב.')
+    } finally {
+      setAiSummaryLoading(false)
+    }
+  }
+
   const { data: schemas } = useQuery({
     queryKey: ['report-schemas'],
     queryFn: reportsApi.getAllSchemas,
@@ -304,6 +327,48 @@ export default function ReportsPage() {
   const totalPages = result ? Math.ceil(result.total / PAGE_SIZE) : 0
   const filterable = currentSchema?.columns.filter(c => c.filterable) ?? []
 
+  const SMART_TEMPLATES = [
+    {
+      id: 'ops',
+      label: '🔧 דוח תפעול',
+      desc: 'קריאות פתוחות + חריגות SLA',
+      entity: 'service_calls',
+      cols: ['call_number', 'created_at', 'address', 'city', 'status', 'priority', 'fault_type', 'technician_name', 'sla_deadline'],
+      filters: [{ field: 'status', op: 'neq', value: 'CLOSED' }, { field: 'status', op: 'neq', value: 'RESOLVED' }],
+      sort: 'priority', dir: 'asc' as const,
+    },
+    {
+      id: 'finance',
+      label: '💰 דוח כספי',
+      desc: 'חשבוניות לא שולמו',
+      entity: 'invoices',
+      cols: ['number', 'customer_name', 'total', 'amount_paid', 'status', 'due_date', 'issue_date'],
+      filters: [{ field: 'status', op: 'neq', value: 'PAID' }, { field: 'status', op: 'neq', value: 'CANCELLED' }],
+      sort: 'due_date', dir: 'asc' as const,
+    },
+    {
+      id: 'safety',
+      label: '🔴 דוח בטיחות',
+      desc: 'ליקויים פתוחים + בדיקות',
+      entity: 'inspections',
+      cols: ['inspection_date', 'raw_address', 'raw_city', 'labor_file_number', 'report_status', 'match_status', 'inspector_name'],
+      filters: [{ field: 'report_status', op: 'neq', value: 'CLOSED' }, { field: 'report_status', op: 'neq', value: 'NA' }],
+      sort: 'inspection_date', dir: 'asc' as const,
+    },
+  ]
+
+  function applyTemplate(tpl: typeof SMART_TEMPLATES[0]) {
+    setEntityType(tpl.entity)
+    setSelectedCols(tpl.cols)
+    setFilters(tpl.filters)
+    setQuickFilters({})
+    setSortBy(tpl.sort)
+    setSortDir(tpl.dir)
+    setResult(null)
+    setPage(1)
+    setAiSummary(null)
+  }
+
   // Status options for quick filter
   const statusField = ENTITY_STATUS_FIELD[entityType]
   const statusOptions = currentSchema?.columns.find(c => c.key === statusField)?.options ?? []
@@ -321,6 +386,16 @@ export default function ReportsPage() {
           <Button variant="light" color="grape" leftSection="🤖" onClick={openChat}>
             שאל AI
           </Button>
+          {result && result.rows.length > 0 && (
+            <Button
+              variant="light" color="violet"
+              leftSection="✨"
+              onClick={runAiSummary}
+              loading={aiSummaryLoading}
+            >
+              סכם עם AI
+            </Button>
+          )}
           <Button variant="light" onClick={() => runReport()} loading={loading}>
             הרץ דוח
           </Button>
@@ -329,6 +404,34 @@ export default function ReportsPage() {
           </Button>
         </Group>
       </Group>
+
+      {/* Smart templates */}
+      <Paper withBorder radius="md" p="sm">
+        <Group gap="xs" wrap="wrap">
+          <Text size="sm" fw={600} c="dimmed">תבניות חכמות:</Text>
+          {SMART_TEMPLATES.map(tpl => (
+            <Tooltip key={tpl.id} label={tpl.desc} position="bottom">
+              <Button size="xs" variant="default" onClick={() => applyTemplate(tpl)}>
+                {tpl.label}
+              </Button>
+            </Tooltip>
+          ))}
+        </Group>
+      </Paper>
+
+      {/* AI Summary result */}
+      {aiSummary && (
+        <Paper withBorder radius="md" p="md" style={{ background: 'var(--mantine-color-violet-0)', borderColor: 'var(--mantine-color-violet-3)' }}>
+          <Group justify="space-between" mb="xs">
+            <Group gap="xs">
+              <Text size="sm">✨</Text>
+              <Text size="sm" fw={700} c="violet">סיכום מנהלים — AI</Text>
+            </Group>
+            <CloseButton size="xs" onClick={() => setAiSummary(null)} />
+          </Group>
+          <Text size="sm" style={{ lineHeight: 1.7 }}>{aiSummary}</Text>
+        </Paper>
+      )}
 
       {/* Entity type selector */}
       <Paper withBorder radius="md" p="md">

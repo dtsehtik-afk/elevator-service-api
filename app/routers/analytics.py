@@ -1,7 +1,7 @@
 """Router for analytics and reporting endpoints — ADMIN only."""
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -123,3 +123,77 @@ def export_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/financial-summary", summary="Outstanding debt and aging breakdown. ADMIN only.")
+def financial_summary(
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Return unpaid invoice totals grouped by aging bucket (0-30, 31-60, 61+ days overdue)."""
+    from app.models.invoice import Invoice
+    today = date.today()
+
+    unpaid = db.query(Invoice).filter(
+        Invoice.status.in_(["SENT", "PARTIAL", "OVERDUE"])
+    ).all()
+
+    def _overdue_days(inv: Invoice) -> int:
+        if inv.due_date is None:
+            return 0
+        return max(0, (today - inv.due_date).days)
+
+    def _balance(inv: Invoice) -> float:
+        return max(0.0, float(inv.total) - float(inv.amount_paid))
+
+    total = sum(_balance(i) for i in unpaid)
+    aging_30 = sum(_balance(i) for i in unpaid if _overdue_days(i) <= 30)
+    aging_60 = sum(_balance(i) for i in unpaid if 30 < _overdue_days(i) <= 60)
+    aging_90 = sum(_balance(i) for i in unpaid if _overdue_days(i) > 60)
+
+    return {
+        "total_outstanding": round(total, 2),
+        "aging_0_30": round(aging_30, 2),
+        "aging_31_60": round(aging_60, 2),
+        "aging_61_plus": round(aging_90, 2),
+        "invoice_count": len(unpaid),
+    }
+
+
+@router.get("/safety-summary", summary="Inspection and deficiency status. ADMIN only.")
+def safety_summary(
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Return upcoming inspections, overdue inspections, and open deficiency reports."""
+    from app.models.elevator import Elevator
+    from app.models.inspection_report import InspectionReport
+    today = date.today()
+    in_30 = today + timedelta(days=30)
+
+    due_soon = db.query(Elevator).filter(
+        Elevator.next_inspection_date.isnot(None),
+        Elevator.next_inspection_date > today,
+        Elevator.next_inspection_date <= in_30,
+    ).count()
+
+    overdue = db.query(Elevator).filter(
+        Elevator.next_inspection_date.isnot(None),
+        Elevator.next_inspection_date < today,
+    ).count()
+
+    open_reports = db.query(InspectionReport).filter(
+        InspectionReport.report_status.in_(["OPEN", "PARTIAL"])
+    ).count()
+
+    no_date = db.query(Elevator).filter(
+        Elevator.next_inspection_date.is_(None),
+        Elevator.status == "ACTIVE",
+    ).count()
+
+    return {
+        "due_in_30_days": due_soon,
+        "overdue_inspections": overdue,
+        "open_deficiency_reports": open_reports,
+        "no_inspection_date": no_date,
+    }

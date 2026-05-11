@@ -187,6 +187,59 @@ async def ai_chat(
     return {"answer": answer}
 
 
+# ── AI summary endpoint ───────────────────────────────────────────────────────
+
+class AISummaryRequest(BaseModel):
+    entity_type: str
+    columns: List[str]
+    rows: List[Dict[str, Any]]
+    total: int
+
+
+@router.post("/ai-summary", summary="Executive AI summary of current report results")
+async def ai_summary(
+    body: AISummaryRequest,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    import os, httpx
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY not configured")
+
+    _entity_he = {
+        "service_calls": "קריאות שירות", "elevators": "מעליות", "customers": "לקוחות",
+        "invoices": "חשבוניות", "maintenance": "תחזוקה", "contracts": "חוזים",
+        "leads": "לידים", "inspections": "דוחות בודק", "inventory": "מלאי",
+    }
+    entity_he = _entity_he.get(body.entity_type, body.entity_type)
+
+    rows_text = "\n".join(
+        ", ".join(f"{k}: {v}" for k, v in row.items() if v is not None)
+        for row in body.rows[:40]
+    )
+    prompt = (
+        f"אתה מנהל בכיר בחברת שירות מעליות. קיבלת דוח {entity_he} עם {body.total} רשומות.\n"
+        f"להלן הנתונים:\n{rows_text}\n\n"
+        "כתוב סיכום מנהלים ב-3 משפטים בעברית: תובנה עיקרית, מגמה/סיכון בולט, והמלצה לפעולה. "
+        "אל תחזור על הנתונים הגולמיים — נתח אותם."
+    )
+
+    async with httpx.AsyncClient(timeout=20.0) as http:
+        resp = await http.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                  "generationConfig": {"temperature": 0.3, "maxOutputTokens": 400}},
+            headers={"Content-Type": "application/json"},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=503, detail="שגיאה בתקשורת עם AI")
+
+    parts = resp.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])
+    summary = parts[0].get("text", "") if parts else ""
+    return {"summary": summary or "לא נוצר סיכום"}
+
+
 # ── Query endpoint ────────────────────────────────────────────────────────────
 
 @router.post("/query", summary="Run a dynamic report query")
