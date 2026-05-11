@@ -185,7 +185,7 @@ async def receive_call(
     if match.match_status == "MATCHED" and match.elevator:
         call_data = ServiceCallCreate(
             elevator_id=match.elevator.id,
-            reported_by=parsed.name or parsed.phone or "מוקד טלפוני",
+            reported_by=f"{parsed.name} | {parsed.phone}" if parsed.name and parsed.phone else (parsed.name or parsed.phone or "מוקד טלפוני"),
             description=parsed.description,
             priority=parsed.priority,
             fault_type=parsed.fault_type,
@@ -1518,7 +1518,7 @@ def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
     # Create service call
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
-        reported_by=log.caller_name or log.caller_phone or "מוקד טלפוני",
+        reported_by=f"{log.caller_name} | {log.caller_phone}" if log.caller_name and log.caller_phone else (log.caller_name or log.caller_phone or "מוקד טלפוני"),
         description=f"{log.call_type or ''} | מעלית חדשה — נוספה אוטומטית מקריאה נכנסת".strip(" |"),
         priority=log.priority or "MEDIUM",
         fault_type=log.fault_type or "OTHER",
@@ -1577,7 +1577,13 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
     call_type = (log.call_type or "").strip()
     description = call_type if len(call_type) >= 5 else (f"קריאת שירות: {call_type}" if call_type else "קריאת שירות")
     raw_name = (log.caller_name or "").strip()
-    reported_by = raw_name if len(raw_name) >= 2 else (log.caller_phone or "מוקד טלפוני")
+    raw_phone = (log.caller_phone or "").strip()
+    if raw_name and raw_phone:
+        reported_by = f"{raw_name} | {raw_phone}"
+    elif raw_name and len(raw_name) >= 2:
+        reported_by = raw_name
+    else:
+        reported_by = raw_phone or "מוקד טלפוני"
     valid_fault_types = {"MECHANICAL", "ELECTRICAL", "SOFTWARE", "STUCK", "DOOR", "RESCUE", "OTHER"}
     fault_type = log.fault_type if log.fault_type in valid_fault_types else "OTHER"
     valid_priorities = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}

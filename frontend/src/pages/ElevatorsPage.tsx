@@ -4,7 +4,9 @@ import {
   Stack, Title, Group, TextInput, Select, Badge, Text, Button,
   Paper, Table, Loader, Center, Pagination, Modal, NumberInput, ScrollArea,
   Popover, Checkbox, ActionIcon, Tooltip, Accordion, SegmentedControl,
+  Divider, Textarea, Grid,
 } from '@mantine/core'
+import { DateInput } from '@mantine/dates'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -62,10 +64,24 @@ export default function ElevatorsPage() {
   const [importingXl, setImportingXl] = useState(false)
   const [viewMode, setViewMode] = useState<'list' | 'groups'>('list')
 
-  const [newElev, setNewElev] = useState({
-    address: '', city: '', floor_count: 1,
-    model: '', manufacturer: '', serial_number: '', building_name: '',
-    contact_phone: '', status: 'ACTIVE',
+  const [newElev, setNewElev] = useState<Record<string, any>>({
+    // Basic
+    address: '', city: '', building_name: '', floor_count: 1,
+    internal_number: '', labor_file_number: '', serial_number: '',
+    status: 'ACTIVE',
+    // Contact
+    contact_phone: '', intercom_phone: '', entry_code: '',
+    // Specs
+    manufacturer: '', model: '',
+    motor_type: '', controller_model: '', door_type: '',
+    pit_depth_cm: '', headroom_cm: '',
+    // Service
+    service_type: '', maintenance_times_per_year: 6,
+    // Dates
+    contract_start: null, contract_end: null, warranty_end: null,
+    safety_certificate_expiry: null, next_inspection_date: null,
+    // Notes
+    notes: '',
   })
 
   const { data: elevators = [], isLoading } = useQuery({
@@ -111,7 +127,7 @@ export default function ElevatorsPage() {
       qc.invalidateQueries({ queryKey: ['elevators'] })
       notifications.show({ message: 'מעלית נוספה בהצלחה', color: 'green' })
       close()
-      setNewElev({ address: '', city: '', floor_count: 1, model: '', manufacturer: '', serial_number: '', building_name: '', contact_phone: '', status: 'ACTIVE' })
+      setNewElev({ address: '', city: '', building_name: '', floor_count: 1, internal_number: '', labor_file_number: '', serial_number: '', status: 'ACTIVE', contact_phone: '', intercom_phone: '', entry_code: '', manufacturer: '', model: '', motor_type: '', controller_model: '', door_type: '', pit_depth_cm: '', headroom_cm: '', service_type: '', maintenance_times_per_year: 6, contract_start: null, contract_end: null, warranty_end: null, safety_certificate_expiry: null, next_inspection_date: null, notes: '' })
     },
     onError: () => notifications.show({ message: 'שגיאה בהוספת מעלית', color: 'red' }),
   })
@@ -371,29 +387,151 @@ export default function ElevatorsPage() {
       )}
 
       {/* ── Add elevator modal ── */}
-      <Modal opened={opened} onClose={close} title="הוסף מעלית חדשה" size="lg">
-        <Stack gap="sm">
-          <TextInput label="כתובת" required value={newElev.address} onChange={e => setNewElev(s => ({ ...s, address: e.target.value }))} />
-          <Group grow>
-            <TextInput label="עיר" required value={newElev.city} onChange={e => setNewElev(s => ({ ...s, city: e.target.value }))} />
-            <TextInput label="שם בניין" value={newElev.building_name} onChange={e => setNewElev(s => ({ ...s, building_name: e.target.value }))} />
-          </Group>
-          <Group grow>
-            <TextInput label="טלפון איש קשר" dir="ltr" placeholder="05XXXXXXXX"
-              value={newElev.contact_phone}
-              onChange={e => setNewElev(s => ({ ...s, contact_phone: e.target.value }))} />
-            <TextInput label="מספר סידורי" value={newElev.serial_number} onChange={e => setNewElev(s => ({ ...s, serial_number: e.target.value }))} />
-          </Group>
-          <Group grow>
-            <NumberInput label="מספר קומות" required min={1} max={200} value={newElev.floor_count} onChange={v => setNewElev(s => ({ ...s, floor_count: Number(v) }))} />
-            <TextInput label="יצרן" value={newElev.manufacturer} onChange={e => setNewElev(s => ({ ...s, manufacturer: e.target.value }))} />
-          </Group>
-          <TextInput label="דגם" value={newElev.model} onChange={e => setNewElev(s => ({ ...s, model: e.target.value }))} />
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={close}>ביטול</Button>
-            <Button loading={createMutation.isPending} onClick={() => createMutation.mutate(newElev as any)}>הוסף</Button>
-          </Group>
-        </Stack>
+      <Modal opened={opened} onClose={close} title="הוסף מעלית חדשה" size="xl" dir="rtl">
+        <ScrollArea h={580} pr="xs">
+          <Stack gap="xs">
+
+            <Divider label="פרטי מיקום" labelPosition="right" />
+            <Grid>
+              <Grid.Col span={8}>
+                <TextInput label="כתובת" required value={newElev.address} onChange={e => setNewElev((s: any) => ({ ...s, address: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <TextInput label="עיר" required value={newElev.city} onChange={e => setNewElev((s: any) => ({ ...s, city: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={6}>
+                <TextInput label="שם/תיאור בניין" value={newElev.building_name} onChange={e => setNewElev((s: any) => ({ ...s, building_name: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <TextInput label="קוד כניסה" value={newElev.entry_code} onChange={e => setNewElev((s: any) => ({ ...s, entry_code: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <NumberInput label="קומות" required min={1} max={200} value={newElev.floor_count} onChange={v => setNewElev((s: any) => ({ ...s, floor_count: Number(v) }))} />
+              </Grid.Col>
+            </Grid>
+
+            <Divider label="מזהים" labelPosition="right" mt="xs" />
+            <Grid>
+              <Grid.Col span={4}>
+                <TextInput label="מס״ד (מזהה פנימי)" value={newElev.internal_number} onChange={e => setNewElev((s: any) => ({ ...s, internal_number: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <TextInput label="מספר תיק עבודה" value={newElev.labor_file_number} onChange={e => setNewElev((s: any) => ({ ...s, labor_file_number: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <TextInput label="מספר סידורי" value={newElev.serial_number} onChange={e => setNewElev((s: any) => ({ ...s, serial_number: e.target.value }))} />
+              </Grid.Col>
+            </Grid>
+
+            <Divider label="יצרן ומפרט" labelPosition="right" mt="xs" />
+            <Grid>
+              <Grid.Col span={4}>
+                <TextInput label="יצרן" value={newElev.manufacturer} onChange={e => setNewElev((s: any) => ({ ...s, manufacturer: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <TextInput label="דגם" value={newElev.model} onChange={e => setNewElev((s: any) => ({ ...s, model: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <TextInput label="סוג מנוע" value={newElev.motor_type} onChange={e => setNewElev((s: any) => ({ ...s, motor_type: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <TextInput label="דגם בקר" value={newElev.controller_model} onChange={e => setNewElev((s: any) => ({ ...s, controller_model: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <TextInput label="סוג דלת" value={newElev.door_type} onChange={e => setNewElev((s: any) => ({ ...s, door_type: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput label="עומק בור (ס״מ)" value={newElev.pit_depth_cm || ''} onChange={v => setNewElev((s: any) => ({ ...s, pit_depth_cm: v || null }))} min={0} />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput label='חדר מכונות (ס"מ)' value={newElev.headroom_cm || ''} onChange={v => setNewElev((s: any) => ({ ...s, headroom_cm: v || null }))} min={0} />
+              </Grid.Col>
+            </Grid>
+
+            <Divider label="שירות וחוזה" labelPosition="right" mt="xs" />
+            <Grid>
+              <Grid.Col span={4}>
+                <Select
+                  label="סוג שירות"
+                  data={[
+                    { value: 'REGULAR', label: 'רגיל' },
+                    { value: 'COMPREHENSIVE', label: 'מקיף' },
+                  ]}
+                  value={newElev.service_type || null}
+                  onChange={v => setNewElev((s: any) => ({ ...s, service_type: v || '' }))}
+                  clearable
+                />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <Select
+                  label="תדירות תחזוקה"
+                  data={['2', '4', '6', '12'].map(v => ({ value: v, label: `${v}× בשנה` }))}
+                  value={String(newElev.maintenance_times_per_year)}
+                  onChange={v => setNewElev((s: any) => ({ ...s, maintenance_times_per_year: Number(v) || 6 }))}
+                />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <Select
+                  label="סטטוס"
+                  data={[
+                    { value: 'ACTIVE', label: 'פעיל' },
+                    { value: 'INACTIVE', label: 'לא פעיל' },
+                    { value: 'UNDER_REPAIR', label: 'בתיקון' },
+                  ]}
+                  value={newElev.status}
+                  onChange={v => setNewElev((s: any) => ({ ...s, status: v || 'ACTIVE' }))}
+                />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <DateInput label="תחילת התקשרות" value={newElev.contract_start} onChange={d => setNewElev((s: any) => ({ ...s, contract_start: d }))} clearable locale="he" />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <DateInput label="סיום התקשרות" value={newElev.contract_end} onChange={d => setNewElev((s: any) => ({ ...s, contract_end: d }))} clearable locale="he" />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <DateInput label="תום אחריות" value={newElev.warranty_end} onChange={d => setNewElev((s: any) => ({ ...s, warranty_end: d }))} clearable locale="he" />
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <DateInput label="תוקף תעודת בטיחות" value={newElev.safety_certificate_expiry} onChange={d => setNewElev((s: any) => ({ ...s, safety_certificate_expiry: d }))} clearable locale="he" />
+              </Grid.Col>
+            </Grid>
+
+            <Divider label="טלפונים" labelPosition="right" mt="xs" />
+            <Grid>
+              <Grid.Col span={6}>
+                <TextInput label="טלפון איש קשר" dir="ltr" placeholder="05XXXXXXXX" value={newElev.contact_phone} onChange={e => setNewElev((s: any) => ({ ...s, contact_phone: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={6}>
+                <TextInput label="טלפון חייגן (אינטרקום)" dir="ltr" value={newElev.intercom_phone} onChange={e => setNewElev((s: any) => ({ ...s, intercom_phone: e.target.value }))} />
+              </Grid.Col>
+            </Grid>
+
+            <Divider label="הערות" labelPosition="right" mt="xs" />
+            <Textarea value={newElev.notes} onChange={e => setNewElev((s: any) => ({ ...s, notes: e.target.value }))} rows={2} placeholder="הערות חופשיות..." />
+
+          </Stack>
+        </ScrollArea>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={close}>ביטול</Button>
+          <Button
+            loading={createMutation.isPending}
+            disabled={!newElev.address || !newElev.city}
+            onClick={() => {
+              const payload: any = { ...newElev }
+              // Convert Date objects to ISO strings
+              for (const k of ['contract_start', 'contract_end', 'warranty_end', 'safety_certificate_expiry', 'next_inspection_date']) {
+                if (payload[k] instanceof Date) payload[k] = payload[k].toISOString().split('T')[0]
+              }
+              // Remove empty strings → null
+              for (const k of Object.keys(payload)) {
+                if (payload[k] === '') payload[k] = null
+              }
+              createMutation.mutate(payload)
+            }}
+          >
+            הוסף מעלית
+          </Button>
+        </Group>
       </Modal>
     </Stack>
   )
