@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { MantineProvider, createTheme, DirectionProvider } from '@mantine/core'
+import { MantineProvider, createTheme, DirectionProvider, localStorageColorSchemeManager } from '@mantine/core'
 import { Notifications } from '@mantine/notifications'
 import { ModalsProvider } from '@mantine/modals'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -11,6 +11,19 @@ import App from './App'
 
 document.documentElement.setAttribute('dir', 'rtl')
 document.documentElement.setAttribute('lang', 'he')
+
+// Apply saved display preferences before first render
+const FONT_SIZES: Record<string, string> = { small: '13px', normal: '15px', large: '17px' }
+const savedSize = localStorage.getItem('app-font-size')
+if (savedSize && FONT_SIZES[savedSize]) {
+  document.documentElement.style.fontSize = FONT_SIZES[savedSize]
+}
+const savedFont = localStorage.getItem('app-font-family')
+if (savedFont) {
+  document.documentElement.style.setProperty('--mantine-font-family', `${savedFont}, Arial, sans-serif`)
+}
+
+const colorSchemeManager = localStorageColorSchemeManager({ key: 'lift-color-scheme' })
 
 const theme = createTheme({
   fontFamily: 'Heebo, Arial, sans-serif',
@@ -30,7 +43,7 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <DirectionProvider initialDirection="rtl">
-      <MantineProvider theme={theme}>
+      <MantineProvider theme={theme} colorSchemeManager={colorSchemeManager}>
         <ModalsProvider>
           <Notifications position="top-right" />
           <QueryClientProvider client={queryClient}>

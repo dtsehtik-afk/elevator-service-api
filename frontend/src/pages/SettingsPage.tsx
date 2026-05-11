@@ -1,11 +1,19 @@
 import { useState } from 'react'
 import {
   Stack, Title, Paper, Table, Switch, TextInput, Button, Group, Text, Tabs,
+  SegmentedControl, SimpleGrid, Card, useMantineColorScheme,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
 import { DEFAULT_NAV_ITEMS } from '../components/layout/Shell'
+
+const FONT_SIZES: Record<string, string> = { small: '13px', normal: '15px', large: '17px' }
+const FONTS = [
+  { value: 'Heebo',     label: 'Heebo — עגול ונוח (ברירת מחדל)' },
+  { value: 'Assistant', label: 'Assistant — עסקי וקריא' },
+  { value: 'Rubik',     label: 'Rubik — מודרני ונקי' },
+]
 
 type CompanyInfo = { company_name: string; company_icon: string }
 
@@ -47,6 +55,22 @@ const ALL_NAV_ITEMS = flattenNav(DEFAULT_NAV_ITEMS)
 
 export default function SettingsPage() {
   const qc = useQueryClient()
+
+  const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const [fontSize, setFontSize] = useState(localStorage.getItem('app-font-size') ?? 'normal')
+  const [fontFamily, setFontFamily] = useState(localStorage.getItem('app-font-family') ?? 'Heebo')
+
+  function applyFontSize(size: string) {
+    document.documentElement.style.fontSize = FONT_SIZES[size] ?? '15px'
+    localStorage.setItem('app-font-size', size)
+    setFontSize(size)
+  }
+
+  function applyFontFamily(family: string) {
+    document.documentElement.style.setProperty('--mantine-font-family', `${family}, Arial, sans-serif`)
+    localStorage.setItem('app-font-family', family)
+    setFontFamily(family)
+  }
 
   // ── Working hours ──────────────────────────────────────────────────────────
   const { data: hoursData } = useQuery<Schedule>({
@@ -125,6 +149,7 @@ export default function SettingsPage() {
           <Tabs.Tab value="hours">🕐 שעות עבודה</Tabs.Tab>
           <Tabs.Tab value="nav">🗂️ עריכת תפריט</Tabs.Tab>
           <Tabs.Tab value="company">🏢 פרטי החברה</Tabs.Tab>
+          <Tabs.Tab value="display">🎨 תצוגה</Tabs.Tab>
         </Tabs.List>
 
         {/* Working hours */}
@@ -273,6 +298,68 @@ export default function SettingsPage() {
               </Group>
             </Stack>
           </Paper>
+        </Tabs.Panel>
+        {/* Display settings */}
+        <Tabs.Panel value="display">
+          <Stack gap="md" maw={520}>
+            <Paper withBorder radius="md" p="lg">
+              <Text fw={600} mb="xs">🌗 ערכת צבעים</Text>
+              <Text size="sm" c="dimmed" mb="md">בחר בין מצב בהיר, כהה, או לפי הגדרות המערכת שלך.</Text>
+              <SimpleGrid cols={3} spacing="sm">
+                {[
+                  { value: 'light', icon: '☀️', label: 'בהיר' },
+                  { value: 'dark',  icon: '🌙', label: 'כהה' },
+                  { value: 'auto',  icon: '💻', label: 'מערכת' },
+                ].map(opt => (
+                  <Card
+                    key={opt.value}
+                    withBorder
+                    radius="md"
+                    p="sm"
+                    style={{
+                      cursor: 'pointer',
+                      borderColor: colorScheme === opt.value ? 'var(--mantine-color-blue-5)' : undefined,
+                      borderWidth: colorScheme === opt.value ? 2 : 1,
+                      textAlign: 'center',
+                    }}
+                    onClick={() => setColorScheme(opt.value as any)}
+                  >
+                    <Text size="xl">{opt.icon}</Text>
+                    <Text size="sm" fw={colorScheme === opt.value ? 600 : 400}>{opt.label}</Text>
+                  </Card>
+                ))}
+              </SimpleGrid>
+            </Paper>
+
+            <Paper withBorder radius="md" p="lg">
+              <Text fw={600} mb="xs">🔡 גודל טקסט</Text>
+              <Text size="sm" c="dimmed" mb="md">משנה את גודל הגופן בכל המערכת.</Text>
+              <SegmentedControl
+                fullWidth
+                value={fontSize}
+                onChange={applyFontSize}
+                data={[
+                  { value: 'small',  label: 'קטן' },
+                  { value: 'normal', label: 'רגיל' },
+                  { value: 'large',  label: 'גדול' },
+                ]}
+              />
+            </Paper>
+
+            <Paper withBorder radius="md" p="lg">
+              <Text fw={600} mb="xs">🖋️ גופן</Text>
+              <Text size="sm" c="dimmed" mb="md">כל הגופנים תומכים בעברית ובלטינית.</Text>
+              <SegmentedControl
+                fullWidth
+                value={fontFamily}
+                onChange={applyFontFamily}
+                data={FONTS.map(f => ({ value: f.value, label: f.value }))}
+              />
+              <Text size="sm" c="dimmed" mt="sm" ta="center" style={{ fontFamily: `${fontFamily}, Arial, sans-serif` }}>
+                דוגמה: מעלית בניין מגורים — Elevator Maintenance System
+              </Text>
+            </Paper>
+          </Stack>
         </Tabs.Panel>
       </Tabs>
     </Stack>
