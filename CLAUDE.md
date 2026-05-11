@@ -240,6 +240,9 @@ Column defs in `report_builder.py` use `"filter"` key. The `filterable` flag in 
 | `ReportsPage` | `/reports` | Dynamic report builder. AI query panel (violet box). Saved views. |
 | `PendingCallsPage` | `/pending-calls` | Unmatched calls awaiting manual elevator assignment. Search with loading + error states. |
 | `SettingsPage` | `/settings` | Working hours editor (admin only). |
+| `WhatsAppAgentPage` | `/whatsapp-agent` | Conversation history viewer + system prompt editor + agent stats. |
+| `HRPage` | `/hr` | HR records per employee — employment type, salary, dates. |
+| `DashboardPage` | `/` | Mission Control — LiveStatusBar, KPI cards, priority queue, charts. |
 
 ### LocationPickerModal
 Lazy-loads Leaflet from CDN. Click-to-pin, draggable marker, GPS button.
@@ -315,6 +318,33 @@ All wrapped in `if engine.dialect.name == "postgresql":`. Key migrations:
 
 ---
 
+## Changes Made (11/05/2026)
+
+### Navigation Redesign — Shell.tsx
+- Replaced vertical sidebar with horizontal top bar + contextual side panels
+- Header: dark gradient background (`#1a1b2e → #16213e → #0f3460`)
+- Section tabs (9 total): דשבורד, שירות, כספים, קשרי לקוחות, פרויקטים, כח אדם, הגדרות, תמיכה, סוכן ווצאפ
+- Active tab highlighted in blue with bottom border (`#74c0fc`)
+- Side panel (220px) only appears for sections with sub-items; collapsed otherwise
+- Mobile: burger → expanded navbar with all sections listed
+- navConfig overrides applied to both header tabs and side-panel sub-items
+- `DEFAULT_NAV_ITEMS` export preserved for SettingsPage compatibility
+
+### WhatsApp Agent Management Page — `/whatsapp-agent`
+- New page `WhatsAppAgentPage.tsx` with 3 tabs:
+  - **שיחות**: filter by phone/name, chat bubble UI, voice transcription badge, cleanup unknown button
+  - **הגדרות**: system prompt editor (monospace RTL textarea), save/cancel with dirty indicator
+  - **סטטיסטיקות**: 8 metric cards (conversations, messages, voice, identified/unknown)
+- Backend: `GET/POST /settings/agent-config` in `settings.py` (stores in system_settings table as `wa_agent_config`)
+- Saving config immediately updates `chat_agent._SYSTEM_PROMPT` in memory (no restart needed)
+
+### Known Pitfall — settings table schema
+- `system_settings` table uses key/value TEXT columns (from first migration), NOT the SystemSettings ORM model schema (id/key/modules)
+- `_get_setting` / `_set_setting` helpers in `settings.py` use raw SQL → works correctly in production
+- On fresh DB: `create_all` creates table with ORM schema → settings router queries fail. Only affects fresh installs.
+
+---
+
 ## Known Bugs Fixed (10/05/2026)
 
 ### report_builder.py — שגיאות schemas
@@ -346,6 +376,6 @@ All wrapped in `if engine.dialect.name == "postgresql":`. Key migrations:
 ## Session End Checklist
 
 At the end of every session:
-1. Commit and push all changes to `claude/mystifying-mcnulty-a91ece`
+1. Commit and push all changes to `main`
 2. Update this CLAUDE.md with any new features, bug fixes, or architectural changes
 3. Tell the user to run `~/deploy.sh` on the server
