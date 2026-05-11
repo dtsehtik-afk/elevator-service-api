@@ -1,6 +1,8 @@
 """1-click tenant deployment via Hetzner Cloud API."""
 
 import uuid
+from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -167,6 +169,151 @@ def destroy_server(
         api_url=None,
         message="Server destroyed",
     )
+
+
+# ── Code update (git pull + rebuild) ─────────────────────────────────────────
+
+_UPDATE_CMD = (
+    "cd /opt/liftapp "
+    "&& git fetch origin main "
+    "&& git reset --hard origin/main "
+    "&& docker compose up -d --build app "
+    "&& echo '__DONE__'"
+)
+
+_SSH_OPTS = "-o StrictHostKeyChecking=no -o ConnectTimeout=15 -o BatchMode=yes"
+
+
+class BulkUpdateRequest(BaseModel):
+    tenant_ids: list[uuid.UUID]
+
+
+class UpdateStatus(BaseModel):
+    tenant_id: uuid.UUID
+    deploy_status: str
+    last_deploy_at: Optional[datetime]
+    deploy_output: Optional[str]
+
+
+@router.post("/{tenant_id}/update", response_model=UpdateStatus)
+def trigger_update(
+    tenant_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_superadmin),
+):
+    """Pull latest code and rebuild the app container on the tenant server."""
+    tenant = db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if not tenant.hetzner_server_ip:
+        raise HTTPException(status_code=422, detail="Tenant has no server IP")
+    if tenant.deploy_status == "UPDATING":
+        raise HTTPException(status_code=409, detail="Update already in progress")
+
+    tenant.deploy_status = "UPDATING"
+    tenant.deploy_output = None
+    db.commit()
+
+    background_tasks.add_task(_do_update, tenant_id=tenant_id)
+
+    return UpdateStatus(
+        tenant_id=tenant_id,
+        deploy_status="UPDATING",
+        last_deploy_at=tenant.last_deploy_at,
+        deploy_output=None,
+    )
+
+
+_bulk_update_router = APIRouter(prefix="/deploy", tags=["Deploy"])
+
+
+@_bulk_update_router.post("/bulk-update")
+def bulk_update(
+    body: BulkUpdateRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_superadmin),
+):
+    """Trigger code update for multiple tenants at once."""
+    started = []
+    skipped = []
+    for tid in body.tenant_ids:
+        tenant = db.get(Tenant, tid)
+        if not tenant or not tenant.hetzner_server_ip:
+            skipped.append(str(tid))
+            continue
+        if tenant.deploy_status == "UPDATING":
+            skipped.append(str(tid))
+            continue
+        tenant.deploy_status = "UPDATING"
+        tenant.deploy_output = None
+        started.append(str(tid))
+        background_tasks.add_task(_do_update, tenant_id=tid)
+    db.commit()
+    return {"started": started, "skipped": skipped}
+
+
+# ── Background update task ────────────────────────────────────────────────────
+
+
+def _do_update(tenant_id: uuid.UUID):
+    """SSH into the tenant server, pull latest code, rebuild the app container."""
+    import logging
+    import subprocess
+    from app.database import SessionLocal
+
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        tenant = db.get(Tenant, tenant_id)
+        if not tenant or not tenant.hetzner_server_ip:
+            return
+
+        ip = tenant.hetzner_server_ip
+        logger.info("Starting code update for tenant %s at %s", tenant.slug, ip)
+
+        result = subprocess.run(
+            f"ssh {_SSH_OPTS} root@{ip} '{_UPDATE_CMD}'",
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+
+        output = (result.stdout + result.stderr).strip()
+        # keep last 4 KB to avoid bloating the DB
+        if len(output) > 4096:
+            output = "...\n" + output[-4000:]
+
+        success = result.returncode == 0 and "__DONE__" in result.stdout
+
+        tenant.deploy_status = "SUCCESS" if success else "ERROR"
+        tenant.last_deploy_at = datetime.now(timezone.utc)
+        tenant.deploy_output = output
+        db.commit()
+        logger.info("Update %s for tenant %s", tenant.deploy_status, tenant.slug)
+
+    except subprocess.TimeoutExpired:
+        tenant = db.get(Tenant, tenant_id)
+        if tenant:
+            tenant.deploy_status = "ERROR"
+            tenant.deploy_output = "Timeout — SSH command exceeded 10 minutes"
+            tenant.last_deploy_at = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as exc:
+        logger.exception("Update failed for tenant %s: %s", tenant_id, exc)
+        try:
+            tenant = db.get(Tenant, tenant_id)
+            if tenant:
+                tenant.deploy_status = "ERROR"
+                tenant.deploy_output = str(exc)
+                tenant.last_deploy_at = datetime.now(timezone.utc)
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 
 # ── Background deploy task ────────────────────────────────────────────────────

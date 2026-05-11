@@ -15,6 +15,20 @@ async def lifespan(app: FastAPI):
     # Create tables
     Base.metadata.create_all(bind=engine)
 
+    # Add deploy columns if missing (idempotent)
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        for col, defn in [
+            ("deploy_status", "VARCHAR(20) NOT NULL DEFAULT 'IDLE'"),
+            ("last_deploy_at", "TIMESTAMP WITH TIME ZONE"),
+            ("deploy_output", "TEXT"),
+        ]:
+            try:
+                conn.execute(text(f"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS {col} {defn}"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
     # Start background monitor
     from app.services.monitor import start_monitor, stop_monitor
     start_monitor()
@@ -43,7 +57,7 @@ app.add_middleware(
 from app.routers.auth_router import router as auth_router
 from app.routers.tenants import router as tenants_router
 from app.routers.modules import router as modules_router
-from app.routers.deploy import router as deploy_router
+from app.routers.deploy import router as deploy_router, _bulk_update_router
 from app.routers.billing import router as billing_router
 from app.routers.monitoring import router as monitoring_router, overview_router
 
@@ -51,6 +65,7 @@ app.include_router(auth_router)
 app.include_router(tenants_router)
 app.include_router(modules_router)
 app.include_router(deploy_router)
+app.include_router(_bulk_update_router)
 app.include_router(billing_router)
 app.include_router(monitoring_router)
 app.include_router(overview_router)

@@ -44,6 +44,9 @@ export interface Tenant {
   last_stats: Record<string, unknown> | null
   created_at: string
   notes: string | null
+  deploy_status: 'IDLE' | 'UPDATING' | 'SUCCESS' | 'ERROR'
+  last_deploy_at: string | null
+  deploy_output: string | null
 }
 
 export interface TenantSnapshot {
@@ -92,6 +95,9 @@ export const deployTenant = (id: string, body: Record<string, string>) =>
 export const destroyServer = (id: string) => api.delete(`/tenants/${id}/deploy`).then((r) => r.data)
 export const fetchDeployStatus = (id: string) => api.get(`/tenants/${id}/deploy/status`).then((r) => r.data)
 export const provisionSSL = (id: string) => api.post(`/tenants/${id}/deploy/ssl`).then((r) => r.data)
+export const updateTenantCode = (id: string) => api.post(`/tenants/${id}/deploy/update`).then((r) => r.data)
+export const bulkUpdateTenants = (tenantIds: string[]) =>
+  api.post('/deploy/bulk-update', { tenant_ids: tenantIds }).then((r) => r.data)
 
 // ── Billing ───────────────────────────────────────────────────────────────────
 

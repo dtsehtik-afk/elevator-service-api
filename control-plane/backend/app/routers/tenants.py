@@ -55,6 +55,9 @@ class TenantOut(BaseModel):
     last_stats: dict | None
     created_at: datetime
     notes: str | None
+    deploy_status: str
+    last_deploy_at: datetime | None
+    deploy_output: str | None
 
     class Config:
         from_attributes = True

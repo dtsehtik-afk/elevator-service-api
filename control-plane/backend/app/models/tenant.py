@@ -51,6 +51,11 @@ class Tenant(Base):
     last_stats: Mapped[dict] = mapped_column(JSONB, nullable=True)
     is_healthy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Deploy tracking
+    deploy_status: Mapped[str] = mapped_column(String(20), nullable=False, default="IDLE")  # IDLE | UPDATING | SUCCESS | ERROR
+    last_deploy_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    deploy_output: Mapped[str] = mapped_column(Text, nullable=True)  # last N lines of SSH output
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
