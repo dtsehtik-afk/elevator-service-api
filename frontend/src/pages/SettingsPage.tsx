@@ -7,6 +7,8 @@ import { notifications } from '@mantine/notifications'
 import client from '../api/client'
 import { DEFAULT_NAV_ITEMS } from '../components/layout/Shell'
 
+type CompanyInfo = { company_name: string; company_icon: string }
+
 const DAYS = [
   { key: 'sun', label: 'ראשון' },
   { key: 'mon', label: 'שני' },
@@ -71,6 +73,24 @@ export default function SettingsPage() {
     onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
   })
 
+  // ── Company info ───────────────────────────────────────────────────────────
+  const { data: savedCompany } = useQuery<CompanyInfo>({
+    queryKey: ['company-info'],
+    queryFn: () => client.get('/settings/company-info').then(r => r.data),
+  })
+  const [companyForm, setCompanyForm] = useState<CompanyInfo | null>(null)
+  const effectiveCompany: CompanyInfo = companyForm ?? savedCompany ?? { company_name: 'אקורד מעליות', company_icon: '⚡' }
+
+  const saveCompany = useMutation({
+    mutationFn: (info: CompanyInfo) => client.put('/settings/company-info', info),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['company-info'] })
+      setCompanyForm(null)
+      notifications.show({ message: '✅ פרטי החברה עודכנו', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
+  })
+
   // ── Nav config ─────────────────────────────────────────────────────────────
   const { data: savedNav } = useQuery<NavConfig>({
     queryKey: ['nav-config'],
@@ -104,6 +124,7 @@ export default function SettingsPage() {
         <Tabs.List mb="md">
           <Tabs.Tab value="hours">🕐 שעות עבודה</Tabs.Tab>
           <Tabs.Tab value="nav">🗂️ עריכת תפריט</Tabs.Tab>
+          <Tabs.Tab value="company">🏢 פרטי החברה</Tabs.Tab>
         </Tabs.List>
 
         {/* Working hours */}
@@ -220,6 +241,37 @@ export default function SettingsPage() {
                 שמור תפריט
               </Button>
             </Group>
+          </Paper>
+        </Tabs.Panel>
+        {/* Company info */}
+        <Tabs.Panel value="company">
+          <Paper withBorder radius="md" p="lg" maw={480}>
+            <Text size="sm" c="dimmed" mb="md">
+              שם החברה יוצג בראש הדף ובדף ההתחברות. האייקון הוא תו/אמוג׳י בודד.
+            </Text>
+            <Stack gap="sm">
+              <TextInput
+                label="שם החברה"
+                value={effectiveCompany.company_name}
+                onChange={e => setCompanyForm(prev => ({ ...(prev ?? effectiveCompany), company_name: e.target.value }))}
+              />
+              <TextInput
+                label="אייקון"
+                placeholder="⚡"
+                value={effectiveCompany.company_icon}
+                w={120}
+                onChange={e => setCompanyForm(prev => ({ ...(prev ?? effectiveCompany), company_icon: e.target.value }))}
+              />
+              <Group justify="flex-end" mt="xs">
+                <Button
+                  loading={saveCompany.isPending}
+                  disabled={!companyForm}
+                  onClick={() => saveCompany.mutate(effectiveCompany)}
+                >
+                  שמור
+                </Button>
+              </Group>
+            </Stack>
           </Paper>
         </Tabs.Panel>
       </Tabs>

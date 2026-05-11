@@ -232,6 +232,26 @@ def save_nav_config(
     return {"ok": True}
 
 
+# ── Company info ─────────────────────────────────────────────────────────────
+
+@router.get("/company-info", summary="Get company name (public — no auth)")
+def get_company_info(db: Session = Depends(get_db)):
+    raw = _get_setting(db, "company_info")
+    if raw:
+        return json.loads(raw)
+    return {"company_name": "אקורד מעליות", "company_icon": "⚡"}
+
+
+@router.put("/company-info", summary="Save company name (admin only)")
+def save_company_info(
+    payload: Dict[str, str],
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    _set_setting(db, "company_info", json.dumps(payload))
+    return {"ok": True}
+
+
 # ── WhatsApp agent config ─────────────────────────────────────────────────────
 
 _DEFAULT_SYSTEM_PROMPT = """אתה עוזר לוגיסטיקה של חברת אקורד מעליות, זמין דרך ווצאפ לטכנאים ומנהלים.

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Center, Paper, Stack, Title, Text, TextInput, PasswordInput,
@@ -6,6 +6,7 @@ import {
 } from '@mantine/core'
 import { useAuthStore } from '../stores/authStore'
 import { login, forgotPassword, resetPassword } from '../api/auth'
+import client from '../api/client'
 
 type Screen = 'login' | 'forgot' | 'reset'
 
@@ -14,6 +15,15 @@ export default function LoginPage() {
   const setAuth = useAuthStore((s) => s.setAuth)
 
   const [screen, setScreen] = useState<Screen>('login')
+  const [companyName, setCompanyName] = useState('אקורד מעליות')
+  const [companyIcon, setCompanyIcon] = useState('⚙️')
+
+  useEffect(() => {
+    client.get('/settings/company-info').then(r => {
+      setCompanyName(r.data.company_name ?? 'אקורד מעליות')
+      setCompanyIcon(r.data.company_icon ?? '⚙️')
+    }).catch(() => {})
+  }, [])
 
   // Login state
   const [email, setEmail] = useState('')
@@ -91,8 +101,8 @@ export default function LoginPage() {
       <Paper shadow="md" p="xl" w={380} radius="md" withBorder>
         <Stack gap="lg">
           <Stack gap={4} align="center">
-            <Text size="3rem">⚙️</Text>
-            <Title order={2} ta="center">אקורד מעליות</Title>
+            <Text size="3rem">{companyIcon}</Text>
+            <Title order={2} ta="center">{companyName}</Title>
             <Text c="dimmed" size="sm" ta="center">מערכת ניהול שירות</Text>
           </Stack>
 

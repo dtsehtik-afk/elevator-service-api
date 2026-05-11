@@ -217,6 +217,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     staleTime: 5 * 60 * 1000,
   })
 
+  const { data: companyInfo } = useQuery<{ company_name: string; company_icon: string }>({
+    queryKey: ['company-info'],
+    queryFn: () => client.get('/settings/company-info').then(r => r.data),
+    staleTime: 10 * 60 * 1000,
+  })
+  const companyName = companyInfo?.company_name ?? 'אקורד מעליות'
+  const companyIcon = companyInfo?.company_icon ?? '⚡'
+
   const activeSection = getActiveSection(pathname)
   const hasPanel = (activeSection?.children.length ?? 0) > 0
 
@@ -236,13 +244,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     if (mobileNavOpen) toggleMobile()
   }
 
-  const headerBg = 'linear-gradient(135deg, #1a1b2e 0%, #16213e 50%, #0f3460 100%)'
-
   return (
     <>
       <GlobalSearch opened={search.opened} onClose={search.close} />
       <AppShell
-        header={{ height: 56 }}
+        header={{ height: 64 }}
         navbar={{
           width: hasPanel ? 220 : 0,
           breakpoint: 'sm',
@@ -251,8 +257,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         padding="md"
       >
         {/* ── Header ── */}
-        <AppShell.Header style={{ background: headerBg, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <Group h="100%" px="md" justify="space-between" wrap="nowrap">
+        <AppShell.Header style={{ background: 'var(--mantine-color-body)', borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+          <Group h="100%" px="lg" justify="space-between" wrap="nowrap">
 
             {/* Left: logo + mobile burger */}
             <Group gap="sm" wrap="nowrap">
@@ -261,15 +267,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 onClick={toggleMobile}
                 hiddenFrom="sm"
                 size="sm"
-                color="white"
               />
               <Text
-                fw={700}
-                size="md"
-                style={{ cursor: 'pointer', color: 'white', whiteSpace: 'nowrap' }}
+                fw={800}
+                size="lg"
+                style={{ cursor: 'pointer', color: 'var(--mantine-color-blue-7)', whiteSpace: 'nowrap', letterSpacing: '-0.3px' }}
                 onClick={() => navigate('/')}
               >
-                ⚡ אקורד מעליות
+                {companyIcon} {companyName}
               </Text>
             </Group>
 
@@ -280,7 +285,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               visibleFrom="sm"
               styles={{ scrollbar: { display: 'none' } }}
             >
-              <Group gap={1} wrap="nowrap" justify="center" px="xs">
+              <Group gap={2} wrap="nowrap" justify="center" px="md">
                 {SECTIONS.map(s => {
                   const ov = navConfig[s.path] ?? {}
                   if (ov.visible === false) return null
@@ -289,24 +294,23 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   return (
                     <Button
                       key={s.id}
-                      variant="subtle"
-                      size="xs"
+                      variant={isActive ? 'light' : 'subtle'}
+                      size="sm"
                       onClick={() => handleSectionClick(s)}
                       style={{
-                        color: isActive ? '#74c0fc' : 'rgba(255,255,255,0.75)',
-                        background: isActive ? 'rgba(116,192,252,0.12)' : 'transparent',
-                        borderRadius: 6,
-                        borderBottom: isActive ? '2px solid #74c0fc' : '2px solid transparent',
+                        color: isActive ? 'var(--mantine-color-blue-7)' : 'var(--mantine-color-dimmed)',
+                        borderBottom: isActive ? '2px solid var(--mantine-color-blue-5)' : '2px solid transparent',
+                        borderRadius: '6px 6px 0 0',
                         fontWeight: isActive ? 600 : 400,
                         whiteSpace: 'nowrap',
-                        padding: '4px 7px',
-                        height: 32,
-                        fontSize: 12,
+                        padding: '6px 10px',
+                        height: 40,
+                        fontSize: 13,
                         transition: 'all 0.15s',
                         minWidth: 0,
                       }}
                     >
-                      <span style={{ fontSize: 11, marginInlineEnd: 3 }}>{s.icon}</span>{label}
+                      <span style={{ fontSize: 13, marginInlineEnd: 4 }}>{s.icon}</span>{label}
                     </Button>
                   )
                 })}
@@ -314,41 +318,36 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </ScrollArea>
 
             {/* Right: search + user */}
-            <Group gap="xs" wrap="nowrap">
+            <Group gap="sm" wrap="nowrap">
               <Tooltip
                 label={<Group gap={4}><Text size="xs">חיפוש</Text><Kbd size="xs">Ctrl+K</Kbd></Group>}
                 position="bottom"
               >
                 <Button
-                  variant="subtle"
-                  size="xs"
+                  variant="default"
+                  size="sm"
                   leftSection={<span>🔍</span>}
                   onClick={search.open}
                   visibleFrom="sm"
-                  style={{
-                    color: 'rgba(255,255,255,0.7)',
-                    background: 'rgba(255,255,255,0.08)',
-                    borderRadius: 20,
-                    minWidth: 90,
-                  }}
+                  style={{ borderRadius: 20, minWidth: 110 }}
                 >
                   <Group gap="xs" justify="space-between" style={{ flex: 1 }}>
                     <Text size="xs" c="dimmed">חפש...</Text>
-                    <Kbd size="xs" style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: 'none' }}>⌘K</Kbd>
+                    <Kbd size="xs">⌘K</Kbd>
                   </Group>
                 </Button>
               </Tooltip>
-              <ActionIcon variant="subtle" size="sm" onClick={search.open} hiddenFrom="sm" color="white">
+              <ActionIcon variant="default" size="md" onClick={search.open} hiddenFrom="sm">
                 <span>🔍</span>
               </ActionIcon>
 
               <Menu shadow="md" width={180} position="bottom-end">
                 <Menu.Target>
                   <Group gap="xs" style={{ cursor: 'pointer' }} wrap="nowrap">
-                    <Avatar size="sm" color="blue" radius="xl" style={{ border: '2px solid rgba(255,255,255,0.3)' }}>
+                    <Avatar size="sm" color="blue" radius="xl">
                       {userName?.charAt(0) ?? 'A'}
                     </Avatar>
-                    <Text size="sm" fw={500} c="white" visibleFrom="sm">{userName ?? 'משתמש'}</Text>
+                    <Text size="sm" fw={500} visibleFrom="sm">{userName ?? 'משתמש'}</Text>
                   </Group>
                 </Menu.Target>
                 <Menu.Dropdown>
