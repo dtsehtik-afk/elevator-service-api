@@ -230,3 +230,44 @@ def save_nav_config(
 ):
     _set_setting(db, "nav_config", json.dumps(payload))
     return {"ok": True}
+
+
+# ── WhatsApp agent config ─────────────────────────────────────────────────────
+
+_DEFAULT_SYSTEM_PROMPT = """אתה עוזר לוגיסטיקה של חברת אקורד מעליות, זמין דרך ווצאפ לטכנאים ומנהלים.
+
+כללי תגובה — חובה לפעול לפיהם:
+1. ענה אך ורק על מה שנשאלת — אל תוסיף מידע שלא התבקש
+2. אל תשלח סיכום קריאות / סטטוס כללי אלא אם ביקשו מפורשות
+3. שמור על ההקשר של השיחה הנוכחית — אם השאלה היא המשך, ענה בהתאם
+4. עברית קצרה וישירה — ווצאפ, לא דוח. משפט-שניים מספיקים ברוב המקרים
+5. אל תמציא — השתמש רק בנתונים מהכלים. אם אין מידע — "אין לי נתונים על כך"
+6. אם נשאלת על מעלית / כתובת ספציפית — חפש קודם בכלים לפני שתענה
+7. תאריכים בפורמט DD/MM/YYYY"""
+
+
+@router.get("/agent-config", summary="Get WhatsApp AI agent configuration")
+def get_agent_config(
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    raw = _get_setting(db, "wa_agent_config")
+    if raw:
+        return json.loads(raw)
+    return {"system_prompt": _DEFAULT_SYSTEM_PROMPT}
+
+
+@router.post("/agent-config", summary="Save WhatsApp AI agent configuration (admin only)")
+def save_agent_config(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    _: Technician = Depends(require_admin),
+):
+    _set_setting(db, "wa_agent_config", json.dumps(payload))
+    # Update in-memory prompt so running agent picks it up immediately
+    try:
+        from app.services import chat_agent as _ca
+        _ca._SYSTEM_PROMPT = payload.get("system_prompt", _DEFAULT_SYSTEM_PROMPT)
+    except Exception:
+        pass
+    return {"ok": True}

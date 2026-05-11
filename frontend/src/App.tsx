@@ -31,6 +31,7 @@ import RolesPage from './pages/RolesPage'
 import HRPage from './pages/HRPage'
 import ProjectsPage from './pages/ProjectsPage'
 import AdminConsolePage from './pages/AdminConsolePage'
+import WhatsAppAgentPage from './pages/WhatsAppAgentPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -84,6 +85,7 @@ export default function App() {
                   <Route path="/roles" element={<RolesPage />} />
                   <Route path="/hr" element={<HRPage />} />
                   <Route path="/projects" element={<ProjectsPage />} />
+                  <Route path="/whatsapp-agent" element={<WhatsAppAgentPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Shell>
