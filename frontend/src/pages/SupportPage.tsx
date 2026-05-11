@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Stack, Title, Paper, Text, Group, Accordion, Textarea, TextInput,
-  Button, Badge, SimpleGrid, Card, ThemeIcon, Anchor, Divider, Box,
+  Button, Badge, SimpleGrid, Card, ThemeIcon, Anchor,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 
@@ -155,21 +155,6 @@ export default function SupportPage() {
               שלח פנייה
             </Button>
           </Stack>
-
-          <Divider my="md" />
-
-          <Box>
-            <Text size="xs" fw={600} mb="xs">⚙️ גישת מנהל מערכת</Text>
-            <Text size="xs" c="dimmed" mb="xs">לוגים ומידע טכני מפורט:</Text>
-            <Button
-              variant="light"
-              size="xs"
-              fullWidth
-              onClick={() => window.open('/admin-console', '_self')}
-            >
-              פתח Admin Console
-            </Button>
-          </Box>
         </Paper>
       </Group>
     </Stack>

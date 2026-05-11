@@ -3,9 +3,12 @@
 Authentication: X-Control-Plane-Key header must match CONTROL_PLANE_API_KEY env var.
 """
 
+import platform
+import time
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -131,3 +134,62 @@ def get_modules(db: Session = Depends(get_db)):
     """Return current module flags."""
     row = _get_or_create_settings(db)
     return ModulesResponse(modules=row.modules)
+
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+
+_startup_time_log = time.time()
+
+
+@router.get("/logs", dependencies=[Depends(_require_control_plane_key)])
+def list_logs(
+    level: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+):
+    from app.models.admin_log import AdminLog as AdminLogModel
+    from app.services import admin_log_service
+
+    logs = admin_log_service.list_logs(db, level=level, search=search, limit=limit)
+    counts: dict = {}
+    for lvl in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        counts[lvl] = db.query(AdminLogModel).filter(AdminLogModel.level == lvl).count()
+
+    db_ok = True
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+
+    return {
+        "logs": [
+            {
+                "id": str(log.id),
+                "level": log.level,
+                "source": log.source,
+                "message": log.message,
+                "stack_trace": log.stack_trace,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log in logs
+        ],
+        "counts": counts,
+        "health": {
+            "db_ok": db_ok,
+            "uptime_seconds": round(time.time() - _startup_time_log, 1),
+            "python_version": platform.python_version(),
+            "server_time": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+
+@router.delete("/logs", dependencies=[Depends(_require_control_plane_key)])
+def clear_logs(
+    level: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.services import admin_log_service
+
+    count = admin_log_service.clear_logs(db, level=level)
+    return {"deleted": count}

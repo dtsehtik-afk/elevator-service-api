@@ -30,7 +30,6 @@ import CustomFieldsPage from './pages/CustomFieldsPage'
 import RolesPage from './pages/RolesPage'
 import HRPage from './pages/HRPage'
 import ProjectsPage from './pages/ProjectsPage'
-import AdminConsolePage from './pages/AdminConsolePage'
 import WhatsAppAgentPage from './pages/WhatsAppAgentPage'
 import SupportPage from './pages/SupportPage'
 
@@ -48,7 +47,6 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/tech" element={<TechAppPage />} />
-        <Route path="/admin-console" element={<AdminConsolePage />} />
         <Route
           path="/*"
           element={

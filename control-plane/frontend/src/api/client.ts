@@ -107,3 +107,31 @@ export const fetchSnapshots = (id: string, limit = 48) =>
   api.get<TenantSnapshot[]>(`/tenants/${id}/monitoring`, { params: { limit } }).then((r) => r.data)
 export const pollNow = (id: string) => api.post<TenantSnapshot>(`/tenants/${id}/monitoring/poll`).then((r) => r.data)
 export const fetchHealthOverview = () => api.get<HealthOverviewItem[]>('/monitoring/overview').then((r) => r.data)
+
+// ── Console (admin log proxy) ─────────────────────────────────────────────────
+
+export interface ConsoleLog {
+  id: string
+  level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+  source: string | null
+  message: string
+  stack_trace: string | null
+  created_at: string
+}
+
+export interface ConsoleData {
+  logs: ConsoleLog[]
+  counts: Record<string, number>
+  health: {
+    db_ok: boolean
+    uptime_seconds: number
+    python_version: string
+    server_time: string
+  }
+}
+
+export const fetchConsole = (id: string, params?: { level?: string; search?: string; limit?: number }) =>
+  api.get<ConsoleData>(`/tenants/${id}/monitoring/console`, { params }).then((r) => r.data)
+
+export const clearConsoleLogs = (id: string, level?: string) =>
+  api.delete<{ deleted: number }>(`/tenants/${id}/monitoring/console/logs`, { params: level ? { level } : {} }).then((r) => r.data)

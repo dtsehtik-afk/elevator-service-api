@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Title, Tabs, Group, Badge, Text, Button, Stack, Paper, SimpleGrid,
   Switch, Loader, TextInput, PasswordInput, CopyButton, ActionIcon,
-  Tooltip, Alert, Code, Divider, Modal, ScrollArea,
+  Tooltip, Alert, Code, Divider, Modal, ScrollArea, Select, Table, Box, Center,
 } from '@mantine/core'
 import { DataTable } from 'mantine-datatable'
 import { notifications } from '@mantine/notifications'
@@ -14,6 +14,7 @@ import {
   fetchTenant, fetchModules, updateModules, syncModules,
   deployTenant, destroyServer, fetchSnapshots, pollNow, rotateKey,
   createSubscription, cancelSubscription, provisionSSL, updateTenant,
+  fetchConsole, clearConsoleLogs, type ConsoleLog,
 } from '../api/client'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
@@ -576,12 +577,68 @@ function BillingTab({ tenant, qc }: { tenant: any; qc: any }) {
 
 // ── Monitoring ────────────────────────────────────────────────────────────────
 
+const LOG_LEVEL_COLORS: Record<string, string> = {
+  DEBUG: 'gray', INFO: 'blue', WARNING: 'yellow', ERROR: 'red', CRITICAL: 'dark',
+}
+
+function StackTraceModal({ log, opened, onClose }: { log: ConsoleLog | null; opened: boolean; onClose: () => void }) {
+  if (!log) return null
+  return (
+    <Modal opened={opened} onClose={onClose} title={`${log.level} — ${log.source ?? ''}`} size="xl" dir="ltr">
+      <Stack gap="sm">
+        <Text size="sm" fw={600}>{log.message}</Text>
+        <Text size="xs" c="dimmed">{dayjs(log.created_at).format('DD/MM/YYYY HH:mm:ss')}</Text>
+        {log.stack_trace && (
+          <Box>
+            <Group justify="space-between" mb={4}>
+              <Text size="xs" fw={600} c="dimmed">Stack Trace</Text>
+              <CopyButton value={log.stack_trace}>
+                {({ copied, copy }) => (
+                  <Button size="xs" variant="subtle" onClick={copy}>{copied ? 'הועתק' : 'העתק'}</Button>
+                )}
+              </CopyButton>
+            </Group>
+            <ScrollArea h={400}>
+              <Code block style={{ fontSize: 11, whiteSpace: 'pre-wrap', direction: 'ltr' }}>
+                {log.stack_trace}
+              </Code>
+            </ScrollArea>
+          </Box>
+        )}
+      </Stack>
+    </Modal>
+  )
+}
+
 function MonitoringTab({ tenantId }: { tenantId: string }) {
   const qc = useQueryClient()
-  const { data: snapshots = [], isLoading } = useQuery({
+  const [levelFilter, setLevelFilter] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [selectedLog, setSelectedLog] = useState<ConsoleLog | null>(null)
+  const [stackOpen, setStackOpen] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+
+  const { data: console_, isLoading: consoleLoading, error: consoleError, refetch: refetchConsole } = useQuery({
+    queryKey: ['console', tenantId, levelFilter, search],
+    queryFn: () => fetchConsole(tenantId, { level: levelFilter ?? undefined, search: search || undefined, limit: 300 }),
+    refetchInterval: 30_000,
+    retry: false,
+  })
+
+  const { data: snapshots = [], isLoading: snapshotsLoading } = useQuery({
     queryKey: ['snapshots', tenantId],
     queryFn: () => fetchSnapshots(tenantId),
     refetchInterval: 60_000,
+    enabled: showHistory,
+  })
+
+  const clearMutation = useMutation({
+    mutationFn: (level?: string) => clearConsoleLogs(tenantId, level),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['console', tenantId] })
+      notifications.show({ message: `נמחקו ${data.deleted} לוגים`, color: 'orange' })
+    },
+    onError: (e: any) => notifications.show({ message: e.response?.data?.detail ?? 'שגיאה', color: 'red' }),
   })
 
   const pollMutation = useMutation({
@@ -589,49 +646,176 @@ function MonitoringTab({ tenantId }: { tenantId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['snapshots', tenantId] })
       qc.invalidateQueries({ queryKey: ['tenant', tenantId] })
+      refetchConsole()
       notifications.show({ message: 'Poll בוצע', color: 'blue' })
     },
     onError: (e: any) => notifications.show({ message: e.response?.data?.detail ?? 'שגיאה', color: 'red' }),
   })
 
+  const h = console_?.health
+
   return (
     <Stack>
-      <Group justify="space-between">
-        <Text fw={600}>היסטוריית בריאות (48 polls אחרונים)</Text>
-        <Button variant="subtle" size="xs" onClick={() => pollMutation.mutate()} loading={pollMutation.isPending}>
-          📡 Poll עכשיו
-        </Button>
-      </Group>
+      {/* Health summary */}
+      {h && (
+        <SimpleGrid cols={{ base: 2, sm: 4 }}>
+          <Paper withBorder p="sm" radius="md">
+            <Text size="xs" c="dimmed" mb={2}>DB</Text>
+            <Badge color={h.db_ok ? 'green' : 'red'} variant="filled">{h.db_ok ? '✅ תקין' : '❌ ניתוק'}</Badge>
+          </Paper>
+          <Paper withBorder p="sm" radius="md">
+            <Text size="xs" c="dimmed" mb={2}>Uptime</Text>
+            <Text fw={600} size="sm">{formatUptime(h.uptime_seconds)}</Text>
+          </Paper>
+          <Paper withBorder p="sm" radius="md">
+            <Text size="xs" c="dimmed" mb={2}>Python</Text>
+            <Text fw={600} size="sm" dir="ltr">{h.python_version}</Text>
+          </Paper>
+          <Paper withBorder p="sm" radius="md">
+            <Text size="xs" c="dimmed" mb={2}>זמן שרת</Text>
+            <Text fw={600} size="xs" dir="ltr">{dayjs(h.server_time).format('HH:mm:ss')}</Text>
+          </Paper>
+        </SimpleGrid>
+      )}
 
-      <Paper withBorder radius="md" style={{ overflow: 'hidden' }}>
-        <DataTable
-          records={snapshots}
-          fetching={isLoading}
-          minHeight={150}
-          columns={[
-            {
-              accessor: 'captured_at', title: 'זמן',
-              render: (s) => <Text size="sm" dir="ltr">{dayjs(s.captured_at).format('DD/MM HH:mm:ss')}</Text>,
-            },
-            {
-              accessor: 'is_healthy', title: 'סטטוס',
-              render: (s) => <Text>{s.is_healthy ? '🟢 תקין' : '🔴 לא תקין'}</Text>,
-            },
-            {
-              accessor: 'stats', title: 'קריאות פתוחות',
-              render: (s) => <Text size="sm">{(s.stats as any)?.calls_open ?? '—'}</Text>,
-            },
-            {
-              accessor: 'stats2', title: 'מעליות',
-              render: (s) => <Text size="sm">{(s.stats as any)?.elevators_total ?? '—'}</Text>,
-            },
-            {
-              accessor: 'error', title: 'שגיאה',
-              render: (s) => s.error ? <Text size="xs" c="red">{s.error}</Text> : null,
-            },
-          ]}
-        />
+      {/* Log level counters */}
+      {console_?.counts && (
+        <Group gap="xs">
+          {Object.entries(console_.counts).map(([lvl, cnt]) => (
+            <Paper
+              key={lvl}
+              p="xs"
+              radius="md"
+              withBorder
+              style={{
+                cursor: 'pointer',
+                borderColor: levelFilter === lvl ? 'var(--mantine-color-blue-5)' : (lvl === 'ERROR' || lvl === 'CRITICAL' ? 'var(--mantine-color-red-4)' : undefined),
+                borderWidth: levelFilter === lvl ? 2 : 1,
+              }}
+              onClick={() => setLevelFilter(levelFilter === lvl ? null : lvl)}
+            >
+              <Group gap={6}>
+                <Badge color={LOG_LEVEL_COLORS[lvl] ?? 'gray'} size="xs">{lvl}</Badge>
+                <Text size="sm" fw={700}>{cnt}</Text>
+              </Group>
+            </Paper>
+          ))}
+        </Group>
+      )}
+
+      {/* Log viewer */}
+      <Paper withBorder p="md" radius="md">
+        <Group justify="space-between" mb="sm">
+          <Text fw={600}>לוג אירועים</Text>
+          <Group gap="xs">
+            <Button size="xs" variant="subtle" onClick={() => refetchConsole()} loading={consoleLoading}>🔄 רענן</Button>
+            <Button size="xs" variant="subtle" color="red" onClick={() => clearMutation.mutate(levelFilter ?? undefined)} loading={clearMutation.isPending}>
+              🗑 מחק {levelFilter ?? 'הכל'}
+            </Button>
+            <Button size="xs" variant="subtle" onClick={() => pollMutation.mutate()} loading={pollMutation.isPending}>📡 Poll</Button>
+          </Group>
+        </Group>
+
+        <Group mb="sm" gap="xs">
+          <TextInput
+            placeholder="חיפוש..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            size="xs"
+            style={{ flex: 1 }}
+          />
+          <Select
+            placeholder="רמה"
+            value={levelFilter}
+            onChange={setLevelFilter}
+            clearable
+            size="xs"
+            w={120}
+            data={['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']}
+          />
+        </Group>
+
+        {consoleLoading && <Center h={100}><Loader size="sm" /></Center>}
+        {consoleError && <Alert color="orange">לא ניתן להתחבר לשרת הדייר</Alert>}
+
+        {console_ && !consoleError && (
+          <ScrollArea h={420}>
+            <Table striped highlightOnHover style={{ fontSize: 12 }}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th style={{ width: 80 }}>רמה</Table.Th>
+                  <Table.Th style={{ width: 130 }}>זמן</Table.Th>
+                  <Table.Th style={{ width: 130 }}>מקור</Table.Th>
+                  <Table.Th>הודעה</Table.Th>
+                  <Table.Th style={{ width: 30 }}></Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {console_.logs.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={5}>
+                      <Center py="lg"><Text c="dimmed" size="sm">אין לוגים</Text></Center>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : console_.logs.map((log) => (
+                  <Table.Tr
+                    key={log.id}
+                    style={{ background: log.level === 'CRITICAL' ? 'var(--mantine-color-red-0)' : log.level === 'ERROR' ? 'var(--mantine-color-red-0)' : undefined }}
+                  >
+                    <Table.Td>
+                      <Badge color={LOG_LEVEL_COLORS[log.level] ?? 'gray'} size="xs" variant="filled">{log.level}</Badge>
+                    </Table.Td>
+                    <Table.Td style={{ fontSize: 11, direction: 'ltr', color: 'var(--mantine-color-dimmed)' }}>
+                      {dayjs(log.created_at).format('DD/MM HH:mm:ss')}
+                    </Table.Td>
+                    <Table.Td style={{ fontSize: 11, fontFamily: 'monospace', direction: 'ltr', color: 'var(--mantine-color-dimmed)' }}>
+                      {log.source ?? '—'}
+                    </Table.Td>
+                    <Table.Td style={{ maxWidth: 300 }}>
+                      <Text size="xs" lineClamp={2}>{log.message}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      {(log.stack_trace || log.message.length > 80) && (
+                        <Tooltip label="פרטים">
+                          <ActionIcon size="xs" variant="subtle" onClick={() => { setSelectedLog(log); setStackOpen(true) }}>🔍</ActionIcon>
+                        </Tooltip>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
       </Paper>
+
+      {/* Poll history (collapsible) */}
+      <Button
+        variant="subtle"
+        size="xs"
+        onClick={() => setShowHistory((v) => !v)}
+        style={{ alignSelf: 'flex-start' }}
+      >
+        {showHistory ? '▲ הסתר היסטוריית polls' : '▼ הצג היסטוריית polls'}
+      </Button>
+
+      {showHistory && (
+        <Paper withBorder radius="md" style={{ overflow: 'hidden' }}>
+          <DataTable
+            records={snapshots}
+            fetching={snapshotsLoading}
+            minHeight={100}
+            columns={[
+              { accessor: 'captured_at', title: 'זמן', render: (s) => <Text size="sm" dir="ltr">{dayjs(s.captured_at).format('DD/MM HH:mm:ss')}</Text> },
+              { accessor: 'is_healthy', title: 'סטטוס', render: (s) => <Text>{s.is_healthy ? '🟢' : '🔴'}</Text> },
+              { accessor: 'stats', title: 'קריאות', render: (s) => <Text size="sm">{(s.stats as any)?.calls_open ?? '—'}</Text> },
+              { accessor: 'error', title: 'שגיאה', render: (s) => s.error ? <Text size="xs" c="red">{s.error}</Text> : null },
+            ]}
+          />
+        </Paper>
+      )}
+
+      <StackTraceModal log={selectedLog} opened={stackOpen} onClose={() => setStackOpen(false)} />
     </Stack>
   )
 }
