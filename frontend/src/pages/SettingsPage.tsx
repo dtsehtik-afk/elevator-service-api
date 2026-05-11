@@ -32,10 +32,12 @@ const DEFAULT: Schedule = {
 
 type NavConfig = Record<string, { label?: string; visible?: boolean }>
 
-function flattenNav(items: typeof DEFAULT_NAV_ITEMS, depth = 0): { path: string; defaultLabel: string; depth: number }[] {
+type NavItem = { label: string; path: string; icon: string; children?: { label: string; path: string; icon: string }[] }
+
+function flattenNav(items: NavItem[], depth = 0): { path: string; defaultLabel: string; depth: number }[] {
   return items.flatMap(item => [
     { path: item.path, defaultLabel: item.label, depth },
-    ...(item.children ? flattenNav(item.children, depth + 1) : []),
+    ...(item.children?.length ? flattenNav(item.children, depth + 1) : []),
   ])
 }
 

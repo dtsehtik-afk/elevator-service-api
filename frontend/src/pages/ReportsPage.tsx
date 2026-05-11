@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Stack, Title, Paper, Group, Select, Button, Text, Table, Badge,
   ActionIcon, Checkbox, Modal, TextInput, ScrollArea, Divider,
@@ -94,7 +95,9 @@ const PAGE_SIZE = 50
 
 export default function ReportsPage() {
   const qc = useQueryClient()
-  const [entityType, setEntityType] = useState<string>('service_calls')
+  const [searchParams] = useSearchParams()
+  const urlEntity = searchParams.get('entity')
+  const [entityType, setEntityType] = useState<string>(urlEntity && ENTITY_LABELS[urlEntity] ? urlEntity : 'service_calls')
   const [selectedCols, setSelectedCols] = useState<string[]>([])
   const [filters, setFilters] = useState<FilterItem[]>([])
   const [quickFilters, setQuickFilters] = useState<QuickFilters>({})
@@ -107,6 +110,17 @@ export default function ReportsPage() {
   const [viewName, setViewName] = useState('')
   const [activeView, setActiveView] = useState<string | null>(null)
   const [quickOpen, { toggle: toggleQuick }] = useDisclosure(true)
+
+  // Sync entity type when URL param changes (side panel navigation)
+  useEffect(() => {
+    if (urlEntity && ENTITY_LABELS[urlEntity] && urlEntity !== entityType) {
+      setEntityType(urlEntity)
+      setFilters([])
+      setQuickFilters({})
+      setResult(null)
+      setPage(1)
+    }
+  }, [urlEntity])
 
   // AI chat
   const [chatOpen, { open: openChat, close: closeChat }] = useDisclosure(false)

@@ -2,13 +2,14 @@ import { useState } from 'react'
 import {
   Stack, Title, Paper, Table, Badge, Button, Group, Text, Modal,
   TextInput, Select, NumberInput, Textarea, Grid, SimpleGrid,
-  Loader, Center, Tabs, Card, RingProgress,
+  Loader, Center, Card, PasswordInput,
 } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { hrApi, type HRProfile } from '../api/hr'
+import { createTechnician } from '../api/technicians'
 
 const EMPLOYMENT_TYPES = [
   { value: 'FULL_TIME', label: 'משרה מלאה' },
@@ -30,11 +31,49 @@ const ROLE_LABELS: Record<string, string> = {
   SALES: 'מכירות', INVENTORY_MANAGER: 'מנהל מלאי',
 }
 
+const ROLE_OPTIONS = Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))
+
+interface NewEmployeeForm {
+  name: string
+  email: string
+  phone: string
+  password: string
+  role: string
+}
+
 export default function HRPage() {
   const qc = useQueryClient()
   const [selected, setSelected] = useState<HRProfile | null>(null)
   const [modalOpen, { open, close }] = useDisclosure(false)
   const [form, setForm] = useState<Partial<HRProfile>>({})
+
+  // New employee
+  const [newOpen, { open: openNew, close: closeNew }] = useDisclosure(false)
+  const [newForm, setNewForm] = useState<NewEmployeeForm>({ name: '', email: '', phone: '', password: '', role: 'TECHNICIAN' })
+
+  const createMutation = useMutation({
+    mutationFn: () => createTechnician({
+      name: newForm.name,
+      email: newForm.email,
+      phone: newForm.phone || undefined,
+      password: newForm.password,
+      role: newForm.role,
+      specializations: [],
+      area_codes: [],
+      max_daily_calls: 8,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hr-list'] })
+      qc.invalidateQueries({ queryKey: ['hr-stats'] })
+      closeNew()
+      setNewForm({ name: '', email: '', phone: '', password: '', role: 'TECHNICIAN' })
+      notifications.show({ message: 'העובד נוסף בהצלחה', color: 'green' })
+    },
+    onError: (e: any) => notifications.show({
+      message: e?.response?.data?.detail || 'שגיאה בהוספת עובד',
+      color: 'red',
+    }),
+  })
 
   const { data: stats } = useQuery({ queryKey: ['hr-stats'], queryFn: hrApi.stats })
   const { data: employees, isLoading } = useQuery({ queryKey: ['hr-list'], queryFn: hrApi.list })
@@ -70,7 +109,12 @@ export default function HRPage() {
 
   return (
     <Stack gap="md" dir="rtl">
-      <Title order={2}>👥 משאבי אנוש (HR)</Title>
+      <Group justify="space-between">
+        <Title order={2}>👥 משאבי אנוש (HR)</Title>
+        <Button leftSection={<span>➕</span>} onClick={openNew}>
+          הוסף עובד חדש
+        </Button>
+      </Group>
 
       {/* Stats */}
       {stats && (
@@ -161,6 +205,69 @@ export default function HRPage() {
           </Table>
         )}
       </Paper>
+
+      {/* New employee modal */}
+      <Modal
+        opened={newOpen}
+        onClose={closeNew}
+        title="הוספת עובד חדש"
+        size="md"
+        centered
+        dir="rtl"
+      >
+        <Stack gap="sm">
+          <Grid>
+            <Grid.Col span={6}>
+              <TextInput
+                label="שם מלא"
+                required
+                value={newForm.name}
+                onChange={e => setNewForm(p => ({ ...p, name: e.target.value }))}
+              />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <Select
+                label="תפקיד"
+                data={ROLE_OPTIONS}
+                value={newForm.role}
+                onChange={v => setNewForm(p => ({ ...p, role: v ?? 'TECHNICIAN' }))}
+              />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput
+                label="אימייל"
+                type="email"
+                required
+                value={newForm.email}
+                onChange={e => setNewForm(p => ({ ...p, email: e.target.value }))}
+              />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput
+                label="טלפון"
+                value={newForm.phone}
+                onChange={e => setNewForm(p => ({ ...p, phone: e.target.value }))}
+              />
+            </Grid.Col>
+            <Grid.Col span={12}>
+              <PasswordInput
+                label="סיסמה ראשונית"
+                required
+                value={newForm.password}
+                onChange={e => setNewForm(p => ({ ...p, password: e.target.value }))}
+                description="לפחות 8 תווים"
+              />
+            </Grid.Col>
+          </Grid>
+          <Button
+            onClick={() => createMutation.mutate()}
+            loading={createMutation.isPending}
+            disabled={!newForm.name || !newForm.email || newForm.password.length < 8}
+          >
+            צור עובד
+          </Button>
+        </Stack>
+      </Modal>
 
       {/* Edit modal */}
       <Modal

@@ -14,7 +14,7 @@ class TechnicianCreate(BaseModel):
     phone: Optional[str] = None
     whatsapp_number: Optional[str] = None
     password: str = Field(..., min_length=8)
-    role: str = Field("TECHNICIAN", pattern="^(ADMIN|TECHNICIAN|DISPATCHER)$")
+    role: str = Field("TECHNICIAN", pattern="^(ADMIN|TECHNICIAN|DISPATCHER|CEO|VP|SERVICE_MANAGER|ACCOUNTANT|SECRETARY|SALES|INVENTORY_MANAGER)$")
     specializations: List[str] = Field(default_factory=list)
     area_codes: List[str] = Field(default_factory=list)
     max_daily_calls: int = Field(8, ge=1, le=20)

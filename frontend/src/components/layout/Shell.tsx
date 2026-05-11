@@ -53,7 +53,6 @@ const SECTIONS: Section[] = [
       { label: 'מפת מעליות', path: '/map', icon: '🗺️' },
       { label: 'חברות ניהול', path: '/management-companies', icon: '🏗️' },
       { label: 'ייבוא נתונים', path: '/import', icon: '📥' },
-      { label: 'דוחות', path: '/reports', icon: '📈' },
     ],
   },
   {
@@ -77,6 +76,22 @@ const SECTIONS: Section[] = [
     children: [
       { label: 'לקוחות', path: '/customers', icon: '👤' },
       { label: 'לידים', path: '/leads', icon: '🎯' },
+    ],
+  },
+  {
+    id: 'reports',
+    label: 'דוחות',
+    icon: '📈',
+    path: '/reports',
+    children: [
+      { label: 'קריאות שירות', path: '/reports?entity=service_calls', icon: '📞' },
+      { label: 'מעליות', path: '/reports?entity=elevators', icon: '🏢' },
+      { label: 'לקוחות', path: '/reports?entity=customers', icon: '👤' },
+      { label: 'חשבוניות', path: '/reports?entity=invoices', icon: '💰' },
+      { label: 'חוזים', path: '/reports?entity=contracts', icon: '📋' },
+      { label: 'תחזוקה', path: '/reports?entity=maintenance', icon: '📅' },
+      { label: 'דוחות בודק', path: '/reports?entity=inspections', icon: '🔍' },
+      { label: 'לידים', path: '/reports?entity=leads', icon: '🎯' },
     ],
   },
   {
@@ -108,7 +123,7 @@ const SECTIONS: Section[] = [
     id: 'support',
     label: 'תמיכה',
     icon: '🛠️',
-    path: '/admin-console',
+    path: '/support',
     children: [],
   },
   {
@@ -158,20 +173,22 @@ function getActiveSection(pathname: string): Section | undefined {
 
 // ── DEFAULT_NAV_ITEMS export keeps settings page compatibility ─────────────────
 
-export const DEFAULT_NAV_ITEMS = SECTIONS.flatMap(s =>
-  s.children.length
-    ? [{ label: s.label, path: s.path, icon: s.icon, children: s.children }]
-    : [{ label: s.label, path: s.path, icon: s.icon }]
-)
+export const DEFAULT_NAV_ITEMS = SECTIONS.map(s => ({
+  label: s.label,
+  path: s.path,
+  icon: s.icon,
+  children: s.children,
+}))
 
 // ── Sub-item link ──────────────────────────────────────────────────────────────
 
 function SideLink({ item }: { item: SubItem }) {
   const navigate = useNavigate()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+  const fullPath = pathname + search
   const active = item.path === '/'
     ? pathname === '/'
-    : pathname === item.path || pathname.startsWith(item.path + '/')
+    : fullPath === item.path || pathname === item.path || pathname.startsWith(item.path + '/')
 
   return (
     <NavLink
@@ -258,11 +275,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
             {/* Center: horizontal section tabs (hidden on mobile) */}
             <ScrollArea
-              type="never"
-              style={{ flex: 1, maxWidth: 720 }}
+              type="auto"
+              style={{ flex: 1 }}
               visibleFrom="sm"
+              styles={{ scrollbar: { display: 'none' } }}
             >
-              <Group gap={2} wrap="nowrap" justify="center" px="sm">
+              <Group gap={1} wrap="nowrap" justify="center" px="xs">
                 {SECTIONS.map(s => {
                   const ov = navConfig[s.path] ?? {}
                   if (ov.visible === false) return null
@@ -277,16 +295,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       style={{
                         color: isActive ? '#74c0fc' : 'rgba(255,255,255,0.75)',
                         background: isActive ? 'rgba(116,192,252,0.12)' : 'transparent',
-                        borderRadius: 8,
+                        borderRadius: 6,
                         borderBottom: isActive ? '2px solid #74c0fc' : '2px solid transparent',
                         fontWeight: isActive ? 600 : 400,
                         whiteSpace: 'nowrap',
-                        padding: '4px 10px',
-                        height: 36,
+                        padding: '4px 7px',
+                        height: 32,
+                        fontSize: 12,
                         transition: 'all 0.15s',
+                        minWidth: 0,
                       }}
                     >
-                      {s.icon} {label}
+                      <span style={{ fontSize: 11, marginInlineEnd: 3 }}>{s.icon}</span>{label}
                     </Button>
                   )
                 })}
@@ -309,7 +329,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                     color: 'rgba(255,255,255,0.7)',
                     background: 'rgba(255,255,255,0.08)',
                     borderRadius: 20,
-                    minWidth: 120,
+                    minWidth: 90,
                   }}
                 >
                   <Group gap="xs" justify="space-between" style={{ flex: 1 }}>
@@ -375,7 +395,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
           {/* Panel title */}
           {activeSection && panelItems.length > 0 && (
-            <Text size="xs" c="dimmed" fw={600} px="xs" mb="xs" tt="uppercase" ls="0.5px">
+            <Text size="xs" c="dimmed" fw={600} px="xs" mb="xs" tt="uppercase" style={{ letterSpacing: '0.5px' }}>
               {activeSection.icon} {activeSection.label}
             </Text>
           )}
