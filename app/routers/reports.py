@@ -250,10 +250,10 @@ def export_report(
     )
 
     label_he = schemas[entity_type]["label_he"]
-    xlsx_bytes = export_to_excel(result, label_he)
+    xlsx_buf = export_to_excel(result, label_he)
 
     return StreamingResponse(
-        io.BytesIO(xlsx_bytes),
+        xlsx_buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={entity_type}_report.xlsx"},
     )
