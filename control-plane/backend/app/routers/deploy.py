@@ -195,7 +195,7 @@ class UpdateStatus(BaseModel):
     deploy_output: Optional[str]
 
 
-@router.post("/{tenant_id}/update", response_model=UpdateStatus)
+@router.post("/update", response_model=UpdateStatus)
 def trigger_update(
     tenant_id: uuid.UUID,
     background_tasks: BackgroundTasks,
