@@ -277,7 +277,11 @@ async def receive_call(
                 parsed.fault_type,
             )
 
-    # 6. Log
+    # 6. Log — always create, even if earlier steps failed
+    try:
+        db.rollback()  # reset any stale transaction state from earlier blocks
+    except Exception:
+        pass
     log = IncomingCallLog(
         raw_text=email_body,
         caller_name=parsed.name or None,

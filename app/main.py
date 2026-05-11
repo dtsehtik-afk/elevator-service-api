@@ -214,6 +214,9 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_project_tasks_project_id ON project_tasks (project_id)",
+                # incoming_call_logs — columns added after initial table creation
+                "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_type VARCHAR(200)",
+                "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_time_raw VARCHAR(50)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
