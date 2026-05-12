@@ -164,6 +164,8 @@ async def lifespan(app: FastAPI):
                 "CREATE SEQUENCE IF NOT EXISTS service_calls_call_number_seq",
                 "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS call_number BIGINT DEFAULT nextval('service_calls_call_number_seq')",
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_service_calls_call_number ON service_calls (call_number)",
+                # Backfill any calls that still have NULL call_number (created before migration)
+                "UPDATE service_calls SET call_number = nextval('service_calls_call_number_seq') WHERE call_number IS NULL",
                 # Maintenance times per year (2/4/6/12)
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS maintenance_times_per_year INTEGER DEFAULT 6",
                 # Backfill: set times_per_year=6 where NULL, derive from existing interval_days
