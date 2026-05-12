@@ -194,7 +194,12 @@ async def receive_call(
             db, call_data, "webhook@system"
         )
     elif match.match_status in ("PARTIAL", "UNMATCHED"):
-        fault_is_specific = parsed.fault_type in ("STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "RESCUE")
+        _lead_keywords = ["מתעניין", "הצעת מחיר", "פגישה", "הדגמה", "ייעוץ"]
+        is_lead_call = any(kw in (parsed.call_type or "") for kw in _lead_keywords)
+        fault_is_specific = (
+            not is_lead_call
+            and parsed.fault_type in ("STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "RESCUE")
+        )
         if fault_is_specific:
             # Specific fault with unknown address → dispatcher alert + pending queue
             closest_address = match.elevator.address if match.elevator else None
