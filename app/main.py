@@ -69,6 +69,8 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS ix_elevators_management_company_id ON elevators (management_company_id)",
                 # after_hours_pending flag for caller approval flow
                 "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS after_hours_pending BOOLEAN NOT NULL DEFAULT FALSE",
+                # resolved_by — name of technician who closed the call
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS resolved_by VARCHAR(150)",
                 # system_settings key-value store
                 """CREATE TABLE IF NOT EXISTS system_settings (
                     key VARCHAR(100) PRIMARY KEY,

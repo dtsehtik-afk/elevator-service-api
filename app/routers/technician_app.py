@@ -505,6 +505,7 @@ def submit_report(tech_id: str, data: ReportSubmit, db: Session = Depends(get_db
     call.status = "RESOLVED" if data.resolved else "IN_PROGRESS"
     if data.resolved:
         call.resolved_at = datetime.now(timezone.utc)
+        call.resolved_by = tech.name
     call.resolution_notes = data.notes
     call.quote_needed = data.quote_needed
 

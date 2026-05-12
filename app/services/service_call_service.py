@@ -248,8 +248,10 @@ def update_service_call(
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(call, field, value)
 
-    if data.status == "RESOLVED" and not call.resolved_at:
+    if data.status in ("RESOLVED", "CLOSED") and not call.resolved_at:
         call.resolved_at = datetime.now(timezone.utc)
+    if data.status in ("RESOLVED", "CLOSED") and not call.resolved_by:
+        call.resolved_by = current_user_email
 
     if data.status and data.status != old_status:
         audit = AuditLog(

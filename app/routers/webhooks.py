@@ -1201,6 +1201,7 @@ def reject_call(tech_id: str, assignment_id: str, db: Session = Depends(get_db))
 
 class ResolveCallRequest(BaseModel):
     resolution_notes: str = ""
+    quote_needed: bool = False
 
 
 @router.post("/resolve-call/{tech_id}/{call_id}", summary="Technician closes/resolves a call")
@@ -1223,6 +1224,8 @@ def resolve_call(tech_id: str, call_id: str, data: ResolveCallRequest = ResolveC
 
     call.status = "RESOLVED"
     call.resolved_at = datetime.now(timezone.utc)
+    call.resolved_by = tech.name
+    call.quote_needed = data.quote_needed
     if data.resolution_notes:
         call.resolution_notes = data.resolution_notes
 
@@ -1249,6 +1252,90 @@ def resolve_call(tech_id: str, call_id: str, data: ResolveCallRequest = ResolveC
                 send_whatsapp_message(num, f"✅ {tech.name} סגר קריאה: {addr}")
     except Exception as exc:
         logger.warning("resolve_call notify failed: %s", exc)
+
+    return {"ok": True}
+
+
+class MonitorCallRequest(BaseModel):
+    notes: str = ""
+
+
+@router.post("/monitor-call/{tech_id}/{call_id}", summary="Technician moves a call to MONITORING status")
+def monitor_call_by_tech(tech_id: str, call_id: str, data: MonitorCallRequest = MonitorCallRequest(), db: Session = Depends(get_db)):
+    from app.models.assignment import Assignment, AuditLog
+    from app.models.service_call import ServiceCall
+    from app.models.technician import Technician as TechnicianModel
+    from datetime import datetime, timezone
+
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
+
+    call = db.query(ServiceCall).filter(
+        ServiceCall.id == call_id,
+        ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]),
+    ).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="קריאה לא נמצאה")
+
+    old_status = call.status
+    call.status = "MONITORING"
+    call.priority = "LOW"
+    call.monitoring_notes = data.notes
+    call.monitoring_since = datetime.now(timezone.utc)
+
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=tech.name,
+        old_status=old_status,
+        new_status="MONITORING",
+        notes=f"במעקב על ידי {tech.name}" + (f": {data.notes}" if data.notes else ""),
+    ))
+    db.commit()
+    return {"ok": True}
+
+
+class TransferToTeamRequest(BaseModel):
+    notes: str = ""
+
+
+@router.post("/transfer-to-team/{tech_id}/{call_id}", summary="Technician requests technical team assistance")
+def transfer_to_team(tech_id: str, call_id: str, data: TransferToTeamRequest = TransferToTeamRequest(), db: Session = Depends(get_db)):
+    from app.models.assignment import AuditLog
+    from app.models.service_call import ServiceCall
+    from app.models.technician import Technician as TechnicianModel
+    from app.models.elevator import Elevator
+
+    tech = db.query(TechnicianModel).filter(TechnicianModel.id == tech_id).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="טכנאי לא נמצא")
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="קריאה לא נמצאה")
+
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+    addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+
+    notes_text = data.notes or "ללא פרטים נוספים"
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=tech.name,
+        old_status=call.status,
+        new_status=call.status,
+        notes=f"העברה לצוות טכני ע\"י {tech.name}: {notes_text}",
+    ))
+    db.commit()
+
+    try:
+        whatsapp_service.notify_dispatcher(
+            f"🔧 *בקשת סיוע מצוות טכני*\n"
+            f"📍 {addr}\n"
+            f"👨‍🔧 טכנאי: {tech.name}\n"
+            f"💬 {notes_text}"
+        )
+    except Exception as exc:
+        logger.warning("transfer_to_team notify failed: %s", exc)
 
     return {"ok": True}
 
@@ -1521,12 +1608,14 @@ def add_elevator_from_pending(log_id: str, db: Session = Depends(get_db)):
     db.flush()
 
     # Create service call
+    _valid_fault_types = {"MECHANICAL", "ELECTRICAL", "SOFTWARE", "STUCK", "DOOR", "RESCUE", "MAINTENANCE", "OTHER"}
+    fault_type = log.fault_type if log.fault_type in _valid_fault_types else "OTHER"
     call_data = ServiceCallCreate(
         elevator_id=elevator.id,
         reported_by=f"{log.caller_name} | {log.caller_phone}" if log.caller_name and log.caller_phone else (log.caller_name or log.caller_phone or "מוקד טלפוני"),
         description=f"{log.call_type or ''} | מעלית חדשה — נוספה אוטומטית מקריאה נכנסת".strip(" |"),
         priority=log.priority or "MEDIUM",
-        fault_type=log.fault_type or "OTHER",
+        fault_type=fault_type,
     )
     service_call = service_call_service.create_service_call(db, call_data, "webhook@system")
 

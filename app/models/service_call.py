@@ -4,9 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Sequence, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
+
+_call_number_seq = Sequence("service_calls_call_number_seq", optional=True)
 
 from app.database import Base
 
@@ -20,8 +22,7 @@ class ServiceCall(Base):
         Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     call_number: Mapped[Optional[int]] = mapped_column(
-        Integer, nullable=True, unique=True, index=True,
-        server_default=text("nextval('service_calls_call_number_seq')")
+        Integer, _call_number_seq, nullable=True, unique=True, index=True,
     )
     elevator_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -44,6 +45,7 @@ class ServiceCall(Base):
 
     resolution_notes: Mapped[str] = mapped_column(Text, nullable=True)
     quote_needed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    resolved_by: Mapped[str] = mapped_column(String(150), nullable=True)
     monitoring_notes: Mapped[str] = mapped_column(Text, nullable=True)
     monitoring_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     # True when call arrived outside working hours and we're waiting for caller to approve surcharge

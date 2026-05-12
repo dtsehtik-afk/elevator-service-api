@@ -83,6 +83,8 @@ export default function CallsPage() {
   const [detailCall, setDetailCall] = useState<CallDetail | null>(null)
   const [monitorNotes, setMonitorNotes] = useState('')
   const [monitorOpened, { open: openMonitor, close: closeMonitor }] = useDisclosure()
+  const [notifyTeamOpened, { open: openNotifyTeam, close: closeNotifyTeam }] = useDisclosure()
+  const [notifyTeamNotes, setNotifyTeamNotes] = useState('')
   const [assignOpened, { open: openAssign, close: closeAssign }] = useDisclosure()
   const [assignTechId, setAssignTechId] = useState<string | null>(null)
   const [assignNotes, setAssignNotes] = useState('')
@@ -205,6 +207,18 @@ export default function CallsPage() {
       setAssignNotes('')
     },
     onError: () => notifications.show({ message: 'שגיאה בשיבוץ', color: 'red' }),
+  })
+
+  const notifyTeamMutation = useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes: string }) =>
+      client.post(`/calls/${id}/notify-team`, null, { params: { notes } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['call-detail'] })
+      notifications.show({ message: '🔧 המשגר קיבל הודעה על בקשת הסיוע', color: 'grape' })
+      closeNotifyTeam()
+      setNotifyTeamNotes('')
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשליחת הבקשה', color: 'red' }),
   })
 
   const monitorMutation = useMutation({
@@ -483,6 +497,12 @@ export default function CallsPage() {
                     <Text size="sm">{formatDateTime(detail.resolved_at)}</Text>
                   </Group>
                 )}
+                {detail.resolved_by && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>👨‍🔧 סגר</Text>
+                    <Text size="sm" fw={600}>{detail.resolved_by}</Text>
+                  </Group>
+                )}
               </Stack>
             </Paper>
 
@@ -607,6 +627,15 @@ export default function CallsPage() {
                   🔍 העבר למעקב
                 </Button>
               )}
+              {detail && ['OPEN', 'ASSIGNED', 'IN_PROGRESS'].includes(detail.status) && (
+                <Button
+                  variant="light"
+                  color="grape"
+                  onClick={() => { setSelectedCall(detail); setNotifyTeamNotes(''); openNotifyTeam() }}
+                >
+                  🔧 העבר לצוות טכני
+                </Button>
+              )}
               {detail && ['OPEN', 'ASSIGNED'].includes(detail.status) && (
                 <Button
                   variant="light"
@@ -726,6 +755,31 @@ export default function CallsPage() {
               onClick={() => selectedCall && monitorMutation.mutate({ id: selectedCall.id, notes: monitorNotes })}
             >
               אשר מעקב
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* ── Notify team modal ── */}
+      <Modal opened={notifyTeamOpened} onClose={closeNotifyTeam} title="🔧 העברה לצוות טכני" dir="rtl">
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">המשגר יקבל הודעה בווצאפ עם פרטי הבקשה. הקריאה תישאר פעילה.</Text>
+          <Textarea
+            label="תיאור הבעיה הטכנית"
+            placeholder="לדוגמה: נדרש חשמלאי מוסמך, בעיה במנוע, ..."
+            value={notifyTeamNotes}
+            onChange={e => setNotifyTeamNotes(e.target.value)}
+            rows={3}
+            autoFocus
+          />
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={closeNotifyTeam}>ביטול</Button>
+            <Button
+              color="grape"
+              loading={notifyTeamMutation.isPending}
+              onClick={() => selectedCall && notifyTeamMutation.mutate({ id: selectedCall.id, notes: notifyTeamNotes })}
+            >
+              שלח בקשת סיוע
             </Button>
           </Group>
         </Stack>

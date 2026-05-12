@@ -78,6 +78,7 @@ export interface ServiceCall {
   is_recurring: boolean
   resolution_notes: string | null
   quote_needed: boolean
+  resolved_by: string | null
   sla_deadline: string | null
   technician_id: string | null
   created_at: string

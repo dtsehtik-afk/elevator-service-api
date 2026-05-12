@@ -128,8 +128,16 @@ async function claimCall(techId: string, callId: string) {
   await client.post(`/webhooks/claim-call-by-tech/${techId}/${callId}`)
 }
 
-async function resolveCall(techId: string, callId: string, notes: string) {
-  await client.post(`/webhooks/resolve-call/${techId}/${callId}`, { resolution_notes: notes })
+async function resolveCall(techId: string, callId: string, notes: string, quoteNeeded: boolean) {
+  await client.post(`/webhooks/resolve-call/${techId}/${callId}`, { resolution_notes: notes, quote_needed: quoteNeeded })
+}
+
+async function monitorCall(techId: string, callId: string, notes: string) {
+  await client.post(`/webhooks/monitor-call/${techId}/${callId}`, { notes })
+}
+
+async function transferToTeam(techId: string, callId: string, notes: string) {
+  await client.post(`/webhooks/transfer-to-team/${techId}/${callId}`, { notes })
 }
 
 async function searchElevators(techId: string, q: string) {
@@ -512,23 +520,56 @@ function TechMain() {
   const [resolveOpen, setResolveOpen] = useState(false)
   const [resolveCallId, setResolveCallId] = useState<string | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
+  const [resolveQuoteNeeded, setResolveQuoteNeeded] = useState(false)
   const voice = useVoice(t => setResolveNotes(n => n ? n + ' ' + t : t))
+  const [monitorOpen, setMonitorOpen] = useState(false)
+  const [monitorCallId, setMonitorCallId] = useState<string | null>(null)
+  const [monitorNotes, setMonitorNotes] = useState('')
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferCallId, setTransferCallId] = useState<string | null>(null)
+  const [transferNotes, setTransferNotes] = useState('')
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
   const [elevResults, setElevResults] = useState<{ id: string; address: string; city: string; building_name: string }[]>([])
 
   const resolveMutation = useMutation({
-    mutationFn: ({ callId, notes }: { callId: string; notes: string }) =>
-      resolveCall(techId!, callId, notes),
+    mutationFn: ({ callId, notes, quoteNeeded }: { callId: string; notes: string; quoteNeeded: boolean }) =>
+      resolveCall(techId!, callId, notes, quoteNeeded),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pending'] })
       qc.invalidateQueries({ queryKey: ['open-board'] })
       setResolveOpen(false)
       setResolveNotes('')
+      setResolveQuoteNeeded(false)
       notifications.show({ message: '✅ הקריאה סגורה בהצלחה', color: 'green' })
     },
     onError: () => notifications.show({ message: 'שגיאה בסגירת הקריאה', color: 'red' }),
+  })
+
+  const monitorMutation = useMutation({
+    mutationFn: ({ callId, notes }: { callId: string; notes: string }) =>
+      monitorCall(techId!, callId, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending'] })
+      qc.invalidateQueries({ queryKey: ['open-board'] })
+      setMonitorOpen(false)
+      setMonitorNotes('')
+      notifications.show({ message: '👁 הקריאה הועברה למעקב', color: 'blue' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בהעברה למעקב', color: 'red' }),
+  })
+
+  const transferMutation = useMutation({
+    mutationFn: ({ callId, notes }: { callId: string; notes: string }) =>
+      transferToTeam(techId!, callId, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending'] })
+      setTransferOpen(false)
+      setTransferNotes('')
+      notifications.show({ message: '🔧 המשגר קיבל הודעה על בקשת הסיוע', color: 'teal' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בבקשת הסיוע', color: 'red' }),
   })
 
   const reassignMutation = useMutation({
@@ -657,8 +698,16 @@ function TechMain() {
                     onClick={() => { setReassignCallId(call.call_id); setReassignOpen(true) }}>
                     🏢 שנה כתובת</Button>
                   <Button flex={1} size="sm" color="red" variant="light"
-                    onClick={() => { setResolveCallId(call.call_id); setResolveNotes(''); setResolveOpen(true) }}>
+                    onClick={() => { setResolveCallId(call.call_id); setResolveNotes(''); setResolveQuoteNeeded(false); setResolveOpen(true) }}>
                     ✅ סגור קריאה</Button>
+                </Group>
+                <Group gap="xs" mt="xs">
+                  <Button flex={1} size="sm" color="blue" variant="light"
+                    onClick={() => { setMonitorCallId(call.call_id); setMonitorNotes(''); setMonitorOpen(true) }}>
+                    👁 העבר למעקב</Button>
+                  <Button flex={1} size="sm" color="grape" variant="light"
+                    onClick={() => { setTransferCallId(call.call_id); setTransferNotes(''); setTransferOpen(true) }}>
+                    🔧 העבר לצוות טכני</Button>
                 </Group>
               </Card>
             ))}
@@ -681,14 +730,67 @@ function TechMain() {
                   rightSection={<AIRefineButton value={resolveNotes} onChange={setResolveNotes} />}
                   rightSectionPointerEvents="all"
                 />
+                <Checkbox
+                  label="💰 נדרשת הצעת מחיר ללקוח"
+                  checked={resolveQuoteNeeded}
+                  onChange={e => setResolveQuoteNeeded(e.currentTarget.checked)}
+                />
                 <Group justify="flex-end" mt="sm">
                   <Button variant="default" onClick={() => setResolveOpen(false)}>ביטול</Button>
                   <Button
                     color="red"
                     loading={resolveMutation.isPending}
-                    onClick={() => resolveCallId && resolveMutation.mutate({ callId: resolveCallId, notes: resolveNotes })}
+                    onClick={() => resolveCallId && resolveMutation.mutate({ callId: resolveCallId, notes: resolveNotes, quoteNeeded: resolveQuoteNeeded })}
                   >
                     סגור קריאה
+                  </Button>
+                </Group>
+              </Stack>
+            </Modal>
+
+            {/* ── Monitor call modal ── */}
+            <Modal opened={monitorOpen} onClose={() => setMonitorOpen(false)} title="👁 העברה למעקב" size="md" dir="rtl">
+              <Stack gap="sm">
+                <Text size="sm" c="dimmed">הקריאה תעבור לסטטוס מעקב. העדיפות תרד ל"נמוך" ותסגר אוטומטית לאחר 7 ימים.</Text>
+                <Textarea
+                  placeholder="הערות (אופציונלי)..."
+                  minRows={3}
+                  value={monitorNotes}
+                  onChange={e => setMonitorNotes(e.target.value)}
+                  autoFocus
+                />
+                <Group justify="flex-end" mt="sm">
+                  <Button variant="default" onClick={() => setMonitorOpen(false)}>ביטול</Button>
+                  <Button
+                    color="blue"
+                    loading={monitorMutation.isPending}
+                    onClick={() => monitorCallId && monitorMutation.mutate({ callId: monitorCallId, notes: monitorNotes })}
+                  >
+                    העבר למעקב
+                  </Button>
+                </Group>
+              </Stack>
+            </Modal>
+
+            {/* ── Transfer to team modal ── */}
+            <Modal opened={transferOpen} onClose={() => setTransferOpen(false)} title="🔧 העברה לצוות טכני" size="md" dir="rtl">
+              <Stack gap="sm">
+                <Text size="sm" c="dimmed">המשגר יקבל הודעה בווצאפ עם בקשת הסיוע. הקריאה תישאר פעילה.</Text>
+                <Textarea
+                  placeholder="תאר את הבעיה הטכנית שדורשת סיוע..."
+                  minRows={3}
+                  value={transferNotes}
+                  onChange={e => setTransferNotes(e.target.value)}
+                  autoFocus
+                />
+                <Group justify="flex-end" mt="sm">
+                  <Button variant="default" onClick={() => setTransferOpen(false)}>ביטול</Button>
+                  <Button
+                    color="grape"
+                    loading={transferMutation.isPending}
+                    onClick={() => transferCallId && transferMutation.mutate({ callId: transferCallId, notes: transferNotes })}
+                  >
+                    שלח בקשת סיוע
                   </Button>
                 </Group>
               </Stack>

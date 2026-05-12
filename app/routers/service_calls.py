@@ -309,6 +309,53 @@ def set_monitoring(
     return call
 
 
+@router.post(
+    "/{call_id}/notify-team",
+    summary="Send technical team assistance request for a call",
+)
+def notify_team(
+    call_id: uuid.UUID,
+    notes: str = "",
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Manager sends a WhatsApp alert to the dispatcher requesting technical team assistance."""
+    from app.models.assignment import AuditLog
+    from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Service call not found")
+
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+    addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+    actor = current_user.name or current_user.email
+    notes_text = notes or "ללא פרטים נוספים"
+
+    db.add(AuditLog(
+        service_call_id=call.id,
+        changed_by=actor,
+        old_status=call.status,
+        new_status=call.status,
+        notes=f"העברה לצוות טכני ע\"י {actor}: {notes_text}",
+    ))
+    db.commit()
+
+    try:
+        from app.services.whatsapp_service import notify_dispatcher
+        notify_dispatcher(
+            f"🔧 *בקשת סיוע מצוות טכני*\n"
+            f"📍 {addr}\n"
+            f"👤 {actor}\n"
+            f"💬 {notes_text}"
+        )
+    except Exception as exc:
+        logger.error("notify_team failed: %s", exc)
+
+    return {"ok": True}
+
+
 @router.get(
     "/{call_id}/audit",
     response_model=List[AuditLogResponse],
