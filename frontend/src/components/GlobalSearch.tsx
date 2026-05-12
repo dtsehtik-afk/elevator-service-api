@@ -84,6 +84,11 @@ export function GlobalSearch({ opened, onClose }: Props) {
   }, [navigate, onClose])
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onClose()
+      return
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActiveIdx(i => Math.min(i + 1, results.length - 1))

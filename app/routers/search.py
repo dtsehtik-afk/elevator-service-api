@@ -88,7 +88,7 @@ def global_search(
             or_(
                 ServiceCall.description.ilike(pattern),
                 ServiceCall.reported_by.ilike(pattern),
-                ServiceCall.technician_notes.ilike(pattern),
+                ServiceCall.resolution_notes.ilike(pattern),
             )
         )
         .order_by(ServiceCall.created_at.desc())
