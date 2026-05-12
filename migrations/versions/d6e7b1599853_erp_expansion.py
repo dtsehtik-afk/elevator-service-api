@@ -41,9 +41,9 @@ def upgrade() -> None:
     op.add_column('elevators', sa.Column('door_width_cm', sa.Integer(), nullable=True))
     op.add_column('elevators', sa.Column('cabin_finish', sa.String(length=100), nullable=True))
     op.add_column('elevators', sa.Column('floor_type', sa.String(length=100), nullable=True))
-    op.add_column('elevators', sa.Column('accessibility_compliant', sa.Boolean(), nullable=False))
-    op.add_column('elevators', sa.Column('fire_system_connected', sa.Boolean(), nullable=False))
-    op.add_column('elevators', sa.Column('generator_connected', sa.Boolean(), nullable=False))
+    op.add_column('elevators', sa.Column('accessibility_compliant', sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column('elevators', sa.Column('fire_system_connected', sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column('elevators', sa.Column('generator_connected', sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column('elevators', sa.Column('iot_gateway_ip', sa.String(length=50), nullable=True))
     op.drop_constraint(op.f('elevators_labor_file_number_key'), 'elevators', type_='unique')
     op.drop_constraint(op.f('elevators_serial_number_key'), 'elevators', type_='unique')
@@ -72,7 +72,7 @@ def upgrade() -> None:
     op.drop_column('inspection_reports', 'inspector_email')
     op.alter_column('management_companies', 'caller_phones',
                existing_type=postgresql.ARRAY(sa.TEXT()),
-               type_=app.models.elevator._FlexArray(),
+               type_=sa.JSON(),
                existing_nullable=True,
                existing_server_default=sa.text("'{}'::text[]"))
     op.alter_column('management_companies', 'created_at',
@@ -87,13 +87,13 @@ def upgrade() -> None:
     op.add_column('parts', sa.Column('dimensions', sa.String(length=50), nullable=True))
     op.add_column('parts', sa.Column('storage_slot', sa.String(length=50), nullable=True))
     op.add_column('parts', sa.Column('lead_time_days', sa.Integer(), nullable=True))
-    op.add_column('parts', sa.Column('tax_exempt', sa.Boolean(), nullable=False))
-    op.add_column('parts', sa.Column('currency', sa.String(length=10), nullable=False))
+    op.add_column('parts', sa.Column('tax_exempt', sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column('parts', sa.Column('currency', sa.String(length=10), nullable=False, server_default=sa.text("'ILS'")))
     op.add_column('parts', sa.Column('last_purchase_price', sa.Numeric(precision=12, scale=2), nullable=True))
     op.add_column('parts', sa.Column('average_cost', sa.Numeric(precision=12, scale=2), nullable=True))
     op.create_index(op.f('ix_parts_barcode'), 'parts', ['barcode'], unique=False)
     op.add_column('service_calls', sa.Column('contract_id', sa.Uuid(), nullable=True))
-    op.add_column('service_calls', sa.Column('is_chargeable', sa.Boolean(), nullable=False))
+    op.add_column('service_calls', sa.Column('is_chargeable', sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column('service_calls', sa.Column('invoice_id', sa.Uuid(), nullable=True))
     op.add_column('service_calls', sa.Column('quote_id', sa.Uuid(), nullable=True))
     op.add_column('service_calls', sa.Column('customer_po_number', sa.String(length=50), nullable=True))
@@ -167,7 +167,7 @@ def downgrade() -> None:
                nullable=True,
                existing_server_default=sa.text('now()'))
     op.alter_column('management_companies', 'caller_phones',
-               existing_type=app.models.elevator._FlexArray(),
+               existing_type=sa.JSON(),
                type_=postgresql.ARRAY(sa.TEXT()),
                existing_nullable=True,
                existing_server_default=sa.text("'{}'::text[]"))
