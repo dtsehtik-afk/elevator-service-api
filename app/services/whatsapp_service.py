@@ -128,12 +128,20 @@ def notify_technician_new_call(
     recommended_tech_name: str = "",
     lat: float = None,
     lng: float = None,
+    call_time=None,
 ) -> bool:
     """Send a new-call notification to a technician (broadcast model — first to take wins)."""
     from app.config import get_settings
     fault  = _FAULT_LABEL.get(fault_type, fault_type)
     pri    = _PRIORITY_LABEL.get(priority, priority)
-    ts     = _now_il()
+    if call_time is not None:
+        from zoneinfo import ZoneInfo
+        if hasattr(call_time, 'astimezone'):
+            ts = call_time.astimezone(ZoneInfo("Asia/Jerusalem")).strftime("%-d/%-m/%Y %H:%M")
+        else:
+            ts = str(call_time)
+    else:
+        ts = _now_il()
 
     desc_line        = f"📝 *פירוט:* {description}\n" if description else ""
     caller_line      = f"👤 *מתקשר:* {caller_name}\n" if caller_name else ""

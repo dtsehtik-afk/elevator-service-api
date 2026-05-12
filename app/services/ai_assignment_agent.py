@@ -364,6 +364,7 @@ def assign_with_confirmation(
                 recommended_tech_name=recommended_name,
                 lat=elevator.latitude,
                 lng=elevator.longitude,
+                call_time=service_call.created_at,
             )
 
     service_call.status = "ASSIGNED"
