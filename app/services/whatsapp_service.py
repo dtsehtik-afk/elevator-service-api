@@ -390,6 +390,8 @@ def notify_dispatcher_elevator_not_found(
         lines.append("❓ לא נמצאה מעלית — האם להוסיף מעלית חדשה?")
 
     lines.append("\n⚠️ *הקריאה לא נפתחה במערכת — נא לטפל ידנית*")
+    pending_url = f"{settings.app_base_url}/pending-calls"
+    lines.append(f"🔗 {pending_url}")
 
     return notify_dispatcher("\n".join(lines))
 
