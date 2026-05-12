@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Sequence, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, Sequence, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -53,6 +53,48 @@ class ServiceCall(Base):
 
     # SLA deadline — computed at creation based on priority
     sla_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ── Commercial & Billing ────────────────────────────────────────────────
+    contract_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    #
+    # ⚠️ הערה עסקית: ברירת מחדל FALSE מכוונת ונכונה!
+    # רוב הקריאות מכוסות תחת חוזה השירות השוטף.
+    # הקריאה תסומן כ-is_chargeable=True רק במקרים חריגים:
+    #   - קריאה מחוץ לשעות עבודה (after_hours_pending=True)
+    #   - ונדליזם
+    #   - קריאה מיוחדת שלא קשורה לשירות השוטף
+    # אל תשנה ברירת מחדל זו ללא אישור.
+    is_chargeable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True
+    )
+    quote_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("quotes.id", ondelete="SET NULL"), nullable=True
+    )
+    # הזמנת רכש של הלקוח (דרוש לאישור חשבונית בחברות רבות)
+    customer_po_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # ── Time & SLA Tracking ────────────────────────────────────────────────
+    technician_arrival_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    technician_departure_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    travel_time_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    work_time_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Backward compatibility flag: True only for calls created after BPM enforcement was deployed.
+    # Existing calls get server_default=false so they are never blocked by the new validation.
+    requires_time_report: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,           # Python ORM default for NEW calls
+        server_default="false"  # SQL default for existing rows during migration
+    )
+
+    # ── Dictionaries & Signatures ──────────────────────────────────────────────
+    malfunction_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # קוד תקלה קטלוגי
+    repair_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # קוד תיקון קטלוגי
+    contact_name_on_site: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # חותם בשטח
+    customer_signature_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # לינק לחתימה דיגיטלית
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

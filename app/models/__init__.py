@@ -24,6 +24,9 @@ from app.models.custom_field import CustomField, CustomFieldValue
 from app.models.hr_record import HRRecord
 from app.models.project import Project, ProjectTask
 from app.models.admin_log import AdminLog
+from app.models.warehouse import Warehouse
+from app.models.warehouse_stock import WarehouseStock
+from app.models.inventory_transaction import InventoryTransaction
 
 __all__ = [
     "Building",
@@ -56,4 +59,7 @@ __all__ = [
     "Project",
     "ProjectTask",
     "AdminLog",
+    "Warehouse",
+    "WarehouseStock",
+    "InventoryTransaction",
 ]

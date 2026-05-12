@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import ARRAY, JSON, TypeDecorator, Uuid
 
@@ -127,9 +128,31 @@ class Elevator(Base):
     headroom_cm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     safety_certificate_expiry: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
-    # ── Status / risk ─────────────────────────────────────────────────────────
+    # ── Status & Lifecycle ────────────────────────────────────────────────────
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE", index=True)
     risk_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # בבניה | פעיל | מושבת | שיפוץ
+    installation_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="פעיל")
+    handover_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)  # תאריך מסירה ללקוח
+    dismantle_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)  # תאריך פירוק
+
+    # ── Deep Technical Specs ──────────────────────────────────────────────────
+    engine_serial: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # מס' סריאלי מנוע
+    controller_serial: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # מס' סריאלי פיקוד
+    load_capacity_kg: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # משקל נשיאה ק"ג
+    max_persons: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # מספר נוסעים מקסימלי
+    speed_m_s: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # מהירות מ/ש
+    stops_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # מספר תחנות
+    doors_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # מספר דלתות
+    door_width_cm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # רוחב דלת ס"מ
+    cabin_finish: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # גימור תא (נירוסטה/זכוכית/צבע)
+    floor_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # סוג רצפה (שיש/גרניט/פח)
+
+    # ── Compliance & IoT ──────────────────────────────────────────────────────
+    accessibility_compliant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # עומד בתקן נגישות
+    fire_system_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # מחובר לגלאי אש
+    generator_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # מחובר לגנרטור חרום
+    iot_gateway_ip: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # כתובת IP/MAC לבקרה חכמה
 
     # ── Grouping ──────────────────────────────────────────────────────────────
     management_company_id: Mapped[Optional[uuid.UUID]] = mapped_column(

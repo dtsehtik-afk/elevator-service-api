@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -37,6 +37,21 @@ class Part(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Inventory & Logistics (ERP expansion) ───────────────────────────────
+    barcode: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    manufacturer_part_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # מק"ט יצרן
+    weight_kg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    dimensions: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g. "30x15x5 cm"
+    # Physical shelf location within the warehouse (not the warehouse itself — use WarehouseStock for that)
+    storage_slot: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g. "A-12-04"
+    lead_time_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # זמן אספקה מהספק בימים
+
+    # ── Financials (ERP expansion) ──────────────────────────────────────────────
+    tax_exempt: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="ILS")
+    last_purchase_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)  # מחיר קנייה אחרון
+    average_cost: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)  # מחיר ממוצע נע (מעודכן בכל RECEIPT)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
