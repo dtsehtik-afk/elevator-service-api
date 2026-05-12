@@ -70,11 +70,7 @@ def upgrade() -> None:
     op.drop_column('inspection_reports', 'inspector_license')
     op.drop_column('inspection_reports', 'next_inspection_date')
     op.drop_column('inspection_reports', 'inspector_email')
-    op.alter_column('management_companies', 'caller_phones',
-               existing_type=postgresql.ARRAY(sa.TEXT()),
-               type_=sa.JSON(),
-               existing_nullable=True,
-               existing_server_default=sa.text("'{}'::text[]"))
+    # caller_phones: _FlexArray uses ARRAY(TEXT) on PostgreSQL — no type change needed.
     op.alter_column('management_companies', 'created_at',
                existing_type=postgresql.TIMESTAMP(timezone=True),
                nullable=False,
@@ -166,11 +162,7 @@ def downgrade() -> None:
                existing_type=postgresql.TIMESTAMP(timezone=True),
                nullable=True,
                existing_server_default=sa.text('now()'))
-    op.alter_column('management_companies', 'caller_phones',
-               existing_type=sa.JSON(),
-               type_=postgresql.ARRAY(sa.TEXT()),
-               existing_nullable=True,
-               existing_server_default=sa.text("'{}'::text[]"))
+    # caller_phones: restore is a no-op — column remains ARRAY(TEXT) on PostgreSQL.
     op.add_column('inspection_reports', sa.Column('inspector_email', sa.VARCHAR(length=100), autoincrement=False, nullable=True))
     op.add_column('inspection_reports', sa.Column('next_inspection_date', sa.DATE(), autoincrement=False, nullable=True))
     op.add_column('inspection_reports', sa.Column('inspector_license', sa.VARCHAR(length=50), autoincrement=False, nullable=True))
