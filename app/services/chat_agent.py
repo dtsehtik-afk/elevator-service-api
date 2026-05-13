@@ -449,6 +449,20 @@ def _close_service_call(db: Session, call_id: str, resolution_notes: str) -> dic
     call.resolution_notes = resolution_notes
     call.resolved_at = datetime.now(timezone.utc)
     db.commit()
+
+    # Find the technician and send updated route
+    from app.models.assignment import Assignment
+    from app.services.route_service import send_route_to_technician
+    # Find active assignment to notify the tech
+    assignment = db.query(Assignment).filter(
+        Assignment.service_call_id == cid,
+        Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"])
+    ).first()
+    if assignment:
+        tech = db.query(Technician).filter(Technician.id == assignment.technician_id).first()
+        if tech:
+            send_route_to_technician(db, tech)
+
     return {"success": True, "call_number": call.call_number, "status": "CLOSED"}
 
 
@@ -486,6 +500,11 @@ def _assign_service_call(db: Session, call_id: str, technician_name: str) -> dic
         db.add(new_assign)
     call.status = "ASSIGNED"
     db.commit()
+
+    # Send updated route to the newly assigned technician
+    from app.services.route_service import send_route_to_technician
+    send_route_to_technician(db, tech)
+
     return {"success": True, "call_number": call.call_number, "assigned_to": tech.name}
 
 

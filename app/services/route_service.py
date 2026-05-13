@@ -67,16 +67,15 @@ def _priority_weight(priority: str) -> int:
 def build_route(
     db: Session,
     technician: Technician,
-    include_unassigned: bool = True,
-) -> list[RouteStop]:
+) -> tuple[list[RouteStop], list[RouteStop]]:
     """
     Build an optimized ordered route for a technician from their current position.
 
-    Includes:
-      - Calls already CONFIRMED/ASSIGNED to this technician
-      - Unassigned OPEN calls within _MAX_RADIUS_KM (if include_unassigned=True)
+    Includes ONLY calls CONFIRMED to this technician (assignment.status=CONFIRMED).
+    Also returns a separate list of unassigned OPEN calls nearby as suggestions.
 
-    Returns ordered list of RouteStop (nearest-neighbor order).
+    Returns:
+        (ordered_route, suggestions)
     """
     tech_lat = technician.current_latitude
     tech_lng = technician.current_longitude
@@ -87,47 +86,49 @@ def build_route(
     # ── Collect candidate calls ───────────────────────────────────────────────
     candidates: list[dict] = []
 
-    # 1. Calls already assigned to this technician
+    # Only calls CONFIRMED to this technician appear in the route
     assigned_call_ids = {
         a.service_call_id
         for a in db.query(Assignment)
         .filter(
             Assignment.technician_id == technician.id,
-            Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]),
+            Assignment.status == "CONFIRMED",  # ← Only confirmed, not pending
         )
         .all()
     }
     for call_id in assigned_call_ids:
         call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
-        if call and call.status in ("OPEN", "ASSIGNED", "IN_PROGRESS"):
+        if call and call.status not in ("CLOSED", "RESOLVED"):
             candidates.append({"call": call, "assigned": True})
 
-    # 2. Unassigned OPEN calls nearby
-    if include_unassigned:
-        assigned_globally = {
-            a.service_call_id
-            for a in db.query(Assignment)
-            .filter(Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]))
-            .all()
-        }
-        open_calls = (
-            db.query(ServiceCall)
-            .filter(ServiceCall.status == "OPEN")
-            .all()
-        )
-        for call in open_calls:
-            if call.id in assigned_globally or call.id in assigned_call_ids:
-                continue
-            elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
-            if not elevator:
-                continue
-            lat, lng = ensure_elevator_coords(db, elevator)
-            dist_km = _haversine_km(tech_lat, tech_lng, lat, lng)
-            if dist_km <= _MAX_RADIUS_KM:
-                candidates.append({"call": call, "assigned": False})
+    # 2. Unassigned OPEN calls nearby (as suggestions)
+    suggestions: list[dict] = []
+    assigned_globally = {
+        a.service_call_id
+        for a in db.query(Assignment)
+        .filter(Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]))
+        .all()
+    }
+    open_calls = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.status == "OPEN")
+        .all()
+    )
+    for call in open_calls:
+        if call.id in assigned_globally or call.id in assigned_call_ids:
+            continue
+        elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        if not elevator:
+            continue
+        lat, lng = ensure_elevator_coords(db, elevator)
+        dist_km = _haversine_km(tech_lat, tech_lng, lat, lng)
+        if dist_km <= _MAX_RADIUS_KM:
+            suggestions.append({
+                "call": call, "elevator": elevator, "lat": lat, "lng": lng
+            })
 
-    if not candidates:
-        return []
+    if not candidates and not suggestions:
+        return [], []
 
     # ── Nearest-neighbor ordering ────────────────────────────────────────────
     # Resolve coords for all candidates
@@ -198,10 +199,28 @@ def build_route(
         ))
         cur_lat, cur_lng = stop["lat"], stop["lng"]
 
-    return ordered
+    # Format suggestions
+    sug_list = []
+    for s in suggestions[:5]:  # limit to top 5 nearby
+        km = _haversine_km(tech_lat, tech_lng, s["lat"], s["lng"])
+        sug_list.append(RouteStop(
+            call_id=str(s["call"].id),
+            elevator_id=str(s["elevator"].id),
+            address=s["elevator"].address,
+            city=s["elevator"].city,
+            building=s["elevator"].building_name or "",
+            fault_type=_FAULT_HE.get(s["call"].fault_type, s["call"].fault_type),
+            priority=s["call"].priority,
+            lat=s["lat"],
+            lng=s["lng"],
+            travel_minutes=_km_to_minutes(km),
+        ))
+    sug_list.sort(key=lambda x: x.travel_minutes)
+
+    return ordered, sug_list
 
 
-def format_route_message(technician_name: str, stops: list[RouteStop]) -> str:
+def format_route_message(technician_name: str, stops: list[RouteStop], suggestions: list[RouteStop] = None) -> str:
     """Format the ordered route as a WhatsApp message with a Google Maps link."""
     if not stops:
         return f"בוקר טוב {technician_name}! אין קריאות פתוחות באזורך כרגע 👍"
@@ -240,6 +259,13 @@ def format_route_message(technician_name: str, stops: list[RouteStop]) -> str:
         )
 
     lines.append(f"\n🔗 [פתח מסלול ב-Google Maps]({maps_url})")
+
+    if suggestions:
+        lines.append("\n💡 *המלצות על הדרך* (קריאות פתוחות קרובות אליך):")
+        for s in suggestions[:3]:
+            lines.append(f"• {s.address}, {s.city} ({s.fault_type}) - כ~{s.travel_minutes} דקות")
+        lines.append("_שלח 'לקחתי [כתובת]' כדי להוסיף למסלול._")
+
     return "\n".join(lines)
 
 
@@ -251,8 +277,8 @@ def send_route_to_technician(db: Session, technician: Technician) -> bool:
     if not phone:
         return False
 
-    stops = build_route(db, technician)
-    msg   = format_route_message(technician.name, stops)
+    stops, suggestions = build_route(db, technician)
+    msg   = format_route_message(technician.name, stops, suggestions)
     sent  = _send_message(phone, msg)
 
     if sent:

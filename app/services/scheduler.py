@@ -344,7 +344,7 @@ def _handle_technician_report(db, phone: str, text: str):
         )
 
     # Rebuild route after closing — remove resolved stops
-    if closed > 0 and tech.current_latitude and tech.current_longitude:
+    if tech.current_latitude and tech.current_longitude:
         try:
             from app.services.route_service import send_route_to_technician
             send_route_to_technician(db, tech)
@@ -361,11 +361,22 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:
     Falls back to classic 1/2 if only one pending call or Gemini unavailable.
     """
     from app.services import ai_assignment_agent
+    from app.models.technician import Technician
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    tech = (db.query(Technician)
+            .filter(Technician.phone.contains(digits[-9:]) |
+                    Technician.whatsapp_number.contains(digits[-9:]))
+            .first())
 
     # Classic 1/2: always act on the oldest pending assignment (FIFO)
     if text.strip() == "1":
         oldest = min(pending, key=lambda x: x["assigned_at"])
         ai_assignment_agent.confirm_assignment_by_id(db, phone, oldest["assignment_id"])
+        if tech:
+            from app.services.route_service import send_route_to_technician
+            send_route_to_technician(db, tech)
         return
     if text.strip() == "2":
         oldest = min(pending, key=lambda x: x["assigned_at"])
@@ -385,6 +396,10 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:
         ai_assignment_agent.confirm_assignment_by_id(db, phone, aid)
     for aid in result["reject"]:
         ai_assignment_agent.reject_assignment_by_id(db, phone, aid)
+    
+    if tech and result["accept"]:
+        from app.services.route_service import send_route_to_technician
+        send_route_to_technician(db, tech)
 
 
 def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
@@ -392,7 +407,7 @@ def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
     Ask Gemini to match a technician's free-text reply to pending assignments.
     Returns {"accept": [assignment_id, ...], "reject": [assignment_id, ...]}.
     """
-    import json as _json
+    import json as _json, re
     try:
         calls_desc = "\n".join(
             f"- ID: {p['assignment_id']} | כתובת: {p['address']}, {p['city']}"
@@ -747,6 +762,10 @@ def _handle_self_assign(db, phone: str, text: str) -> None:
     )
     logger.info("✋ %s self-assigned call %s at %s", tech.name, matched_call.id, addr)
 
+    # Send updated route to technician
+    from app.services.route_service import send_route_to_technician
+    send_route_to_technician(db, tech)
+
 
 def _handle_technician_defer(db, phone: str, text: str) -> None:
     """
@@ -994,8 +1013,8 @@ def _handle_send_route(db, phone: str) -> None:
             "שתף מיקום חי דרך WhatsApp ואשלח את המסלול מיד.")
         return
 
-    stops = build_route(db, tech)
-    msg = format_route_message(tech.name, stops)
+    stops, suggestions = build_route(db, tech)
+    msg = format_route_message(tech.name, stops, suggestions)
     _send_message(tech.whatsapp_number or tech.phone, msg)
     logger.info("🗺️ Route sent on demand to %s (%d stops)", tech.name, len(stops))
 
@@ -1234,7 +1253,7 @@ def _handle_chat_question_simple(db, phone: str, question: str, settings) -> Non
             f"📋 *הקריאה הפעילה שלך*\n"
             f"📍 {addr}\n"
             f"🔧 {call.fault_type if call else ''}\n"
-            f"🚗 ~{asgn.travel_minutes or '?'} דקות"
+            f"🚗 בנסיעה: ~{asgn.travel_minutes or '?'} דקות"
         )
         return
 
@@ -1830,6 +1849,46 @@ def _send_morning_maintenance_alerts():
         db.close()
 
 
+def _geocode_all_elevators():
+    """
+    Background job: geocode all elevators that are missing latitude/longitude.
+    Runs once at startup (with a delay) and nightly to keep coords up to date.
+    Rate-limited by geocode_address (1 req/sec) and uses in-memory cache.
+    """
+    from app.database import SessionLocal
+    from app.models.elevator import Elevator
+    from app.services.maps_service import geocode_address
+
+    db = SessionLocal()
+    try:
+        elevators = (
+            db.query(Elevator)
+            .filter(
+                (Elevator.latitude == None) | (Elevator.longitude == None)  # noqa: E711
+            )
+            .all()
+        )
+        if not elevators:
+            logger.info("✅ All elevators already have coordinates.")
+            return
+        logger.info("📍 Geocoding %d elevators without coordinates...", len(elevators))
+        updated = 0
+        for elev in elevators:
+            try:
+                coords = geocode_address(elev.address, elev.city)
+                if coords:
+                    elev.latitude, elev.longitude = coords
+                    db.commit()
+                    updated += 1
+            except Exception as exc:
+                logger.warning("Geocode failed for %s %s: %s", elev.address, elev.city, exc)
+        logger.info("📍 Geocoding complete: %d/%d elevators updated.", updated, len(elevators))
+    except Exception as exc:
+        logger.error("_geocode_all_elevators failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -1849,6 +1908,15 @@ def start_scheduler():
     # _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)  # disabled
     _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
     _scheduler.add_job(_check_inspection_deficiency_escalation, "interval", hours=6)
+    # Geocode elevators missing coordinates: once 90s after startup + nightly at 02:00
+    from datetime import timedelta
+    _scheduler.add_job(
+        _geocode_all_elevators, "date",
+        run_date=datetime.now() + timedelta(seconds=90),
+        id="geocode_startup", max_instances=1,
+    )
+    _scheduler.add_job(_geocode_all_elevators, "cron", hour=2, minute=0,
+                       id="geocode_nightly", max_instances=1)
     _scheduler.start()
     logger.info("Background scheduler started (timezone: Asia/Jerusalem)")
 
