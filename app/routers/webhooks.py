@@ -1734,3 +1734,27 @@ def match_elevator_to_pending(log_id: str, elevator_id: str, db: Session = Depen
         logger.warning("AI assignment after match-elevator failed: %s", exc)
 
     return {"elevator_id": str(elevator.id), "service_call_id": str(service_call.id)}
+
+
+class DismissCallRequest(BaseModel):
+    reason: str
+
+
+@router.post("/pending-unmatched/{log_id}/dismiss", summary="Dismiss an unmatched call with a reason")
+def dismiss_pending_call(log_id: str, data: DismissCallRequest, db: Session = Depends(get_db)):
+    """Mark an unmatched call as dismissed — removes it from the pending queue."""
+    import uuid as _uuid
+
+    if not data.reason or not data.reason.strip():
+        raise HTTPException(status_code=400, detail="יש לציין סיבת ביטול")
+
+    log = db.query(IncomingCallLog).filter(IncomingCallLog.id == _uuid.UUID(log_id)).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="לא נמצאה רשומת קריאה")
+    if log.service_call_id:
+        raise HTTPException(status_code=409, detail="קריאת שירות כבר קיימת — לא ניתן לבטל")
+
+    log.match_status = "DISMISSED"
+    log.match_notes = f"בוטל: {data.reason.strip()}"
+    db.commit()
+    return {"ok": True}

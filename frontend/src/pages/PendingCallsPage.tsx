@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import {
   Stack, Title, Text, Card, Badge, Group, Button, Divider,
-  Loader, Center, Modal, TextInput, Alert,
+  Loader, Center, Modal, TextInput, Alert, Textarea,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -13,6 +13,7 @@ import client from '../api/client'
 const FAULT_LABEL: Record<string, string> = {
   STUCK: 'מעלית תקועה', DOOR: 'תקלת דלת', ELECTRICAL: 'חשמלית',
   MECHANICAL: 'מכנית', SOFTWARE: 'תוכנה', OTHER: 'כללית',
+  MAINTENANCE: 'תחזוקה',
 }
 const PRIORITY_COLOR: Record<string, string> = {
   CRITICAL: 'red', HIGH: 'orange', MEDIUM: 'yellow', LOW: 'green',
@@ -61,6 +62,11 @@ async function matchElevator(logId: string, elevatorId: string) {
   return data
 }
 
+async function dismissCall(logId: string, reason: string) {
+  const { data } = await client.post(`/webhooks/pending-unmatched/${logId}/dismiss`, { reason })
+  return data
+}
+
 async function searchElevators(q: string): Promise<ElevatorOption[]> {
   const { data } = await client.get('/elevators', { params: { search: q, limit: 10 } })
   return data
@@ -79,6 +85,9 @@ export default function PendingCallsPage() {
   const [elevResults, setElevResults] = useState<ElevatorOption[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+
+  const [dismissModalLog, setDismissModalLog] = useState<PendingCall | null>(null)
+  const [dismissReason, setDismissReason] = useState('')
 
   const { data: pending = [], isLoading } = useQuery({
     queryKey: ['pending-unmatched'],
@@ -107,6 +116,17 @@ export default function PendingCallsPage() {
     onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה', color: 'red' }),
   })
 
+  const dismissMutation = useMutation({
+    mutationFn: ({ logId, reason }: { logId: string; reason: string }) => dismissCall(logId, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending-unmatched'] })
+      setDismissModalLog(null)
+      setDismissReason('')
+      notifications.show({ message: '🗑️ הקריאה בוטלה', color: 'gray' })
+    },
+    onError: (e: any) => notifications.show({ message: e?.response?.data?.detail ?? 'שגיאה', color: 'red' }),
+  })
+
   const handleElevSearch = async (q: string) => {
     setElevSearch(q)
     setSearchError(null)
@@ -123,6 +143,11 @@ export default function PendingCallsPage() {
     }
   }
 
+  const handleDismissSubmit = () => {
+    if (!dismissModalLog || !dismissReason.trim()) return
+    dismissMutation.mutate({ logId: dismissModalLog.id, reason: dismissReason.trim() })
+  }
+
   return (
     <Stack gap="md" dir="rtl">
       <Group justify="space-between">
@@ -132,7 +157,7 @@ export default function PendingCallsPage() {
 
       <Text c="dimmed" size="sm">
         קריאות שהגיעו ממוקד הטלפוניה אך המערכת לא זיהתה את המעלית.
-        ניתן להוסיף מעלית חדשה או לשייך לכתובת קיימת.
+        ניתן להוסיף מעלית חדשה, לשייך לכתובת קיימת, או לבטל עם ציון סיבה.
       </Text>
 
       {isLoading ? (
@@ -202,6 +227,12 @@ export default function PendingCallsPage() {
                   ✅ שייך לקרובה
                 </Button>
               )}
+              <Button
+                size="sm" color="red" variant="light" flex={1}
+                onClick={() => { setDismissModalLog(call); setDismissReason('') }}
+              >
+                🗑️ בטל קריאה
+              </Button>
             </Group>
           </Card>
         ))
@@ -240,6 +271,43 @@ export default function PendingCallsPage() {
           {!searchLoading && elevSearch.length >= 2 && elevResults.length === 0 && !searchError && (
             <Text c="dimmed" ta="center" size="sm">לא נמצאו תוצאות</Text>
           )}
+        </Stack>
+      </Modal>
+
+      {/* Dismiss modal */}
+      <Modal
+        opened={!!dismissModalLog}
+        onClose={() => { setDismissModalLog(null); setDismissReason('') }}
+        title="🗑️ ביטול קריאה"
+        size="sm"
+        dir="rtl"
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            קריאה מ: {dismissModalLog?.call_street}, {dismissModalLog?.call_city}
+          </Text>
+          <Textarea
+            label="סיבת ביטול"
+            placeholder='למשל: "לא בשירות שלנו", "קריאה כפולה", "כתובת שגויה"'
+            required
+            minRows={2}
+            value={dismissReason}
+            onChange={e => setDismissReason(e.target.value)}
+            autoFocus
+          />
+          <Group justify="flex-end" gap="sm">
+            <Button variant="subtle" color="gray" onClick={() => { setDismissModalLog(null); setDismissReason('') }}>
+              ביטול
+            </Button>
+            <Button
+              color="red"
+              disabled={!dismissReason.trim()}
+              loading={dismissMutation.isPending}
+              onClick={handleDismissSubmit}
+            >
+              אשר ביטול
+            </Button>
+          </Group>
         </Stack>
       </Modal>
     </Stack>
