@@ -22,6 +22,11 @@ from app.models.elevator import Elevator
 from app.models.maintenance import MaintenanceSchedule as MaintenanceRecord
 from app.models.service_call import ServiceCall
 from app.models.technician import Technician
+from app.models.customer import Customer
+from app.models.contact import Contact
+from app.models.management_company import ManagementCompany
+from app.models.inspection_report import InspectionReport
+from app.models.incoming_call import IncomingCallLog
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +132,57 @@ _GEMINI_TOOLS = [{
             "parameters": {"type": "OBJECT", "properties": {
                 "phone": {"type": "STRING", "description": "מספר הטלפון של הטכנאי"},
             }, "required": ["phone"]},
+        },
+        {
+            "name": "get_call_by_number",
+            "description": "מחזיר פרטים מלאים על קריאת שירות לפי מספר קריאה. קבל 'S00042' או '42' — שניהם עובדים.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "call_number": {"type": "STRING", "description": "מספר הקריאה, למשל S00042 או 42"},
+            }, "required": ["call_number"]},
+        },
+        {
+            "name": "list_technicians",
+            "description": "מחזיר רשימת כל הטכנאים הפעילים עם סטטוס זמינות, תפקיד ומספר קריאות פתוחות.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "available_only": {"type": "BOOLEAN", "description": "אם True — רק טכנאים זמינים כרגע"},
+            }, "required": []},
+        },
+        {
+            "name": "search_customers",
+            "description": "חפש לקוחות לפי שם, טלפון, עיר או איש קשר. מחזיר פרטי לקוח ורשימת מעליות.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "query": {"type": "STRING", "description": "מחרוזת חיפוש — שם לקוח, עיר, טלפון"},
+            }, "required": ["query"]},
+        },
+        {
+            "name": "get_management_company_info",
+            "description": "מחזיר פרטי חברת ניהול — טלפון, איש קשר, כמה מעליות, מספרי טלפון מוכרים.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "name": {"type": "STRING", "description": "שם חברת הניהול (חיפוש חלקי)"},
+            }, "required": ["name"]},
+        },
+        {
+            "name": "get_elevator_inspections",
+            "description": "מחזיר דוחות בדיקה תקופתית עבור מעלית — תאריך, תוצאה (עבר/נכשל), ליקויים.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "elevator_id": {"type": "STRING", "description": "UUID של המעלית"},
+                "limit": {"type": "INTEGER", "description": "מספר דוחות אחרונים (ברירת מחדל: 5)"},
+            }, "required": ["elevator_id"]},
+        },
+        {
+            "name": "get_upcoming_maintenance",
+            "description": "מחזיר תחזוקות מתוכננות או באיחור — מי צריך ביקור קרוב, מה עבר את התאריך.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "days_ahead": {"type": "INTEGER", "description": "כמה ימים קדימה לבדוק (ברירת מחדל: 14)"},
+                "overdue_only": {"type": "BOOLEAN", "description": "אם True — רק תחזוקות שעברו את התאריך"},
+            }, "required": []},
+        },
+        {
+            "name": "get_pending_unmatched_calls",
+            "description": "מחזיר קריאות שנכנסו ממוקד/מייל ולא שויכו אוטומטית למעלית — ממתינות לטיפול ידני.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "limit": {"type": "INTEGER", "description": "מספר תוצאות מקסימלי (ברירת מחדל: 10)"},
+            }, "required": []},
         },
     ]
 }]
@@ -577,6 +633,197 @@ def _get_my_calls(db: Session, phone: str) -> dict:
     return _get_technician_route(db, tech.name)
 
 
+def _get_call_by_number(db: Session, call_number_str: str) -> dict:
+    """Lookup a service call by its number (accepts 'S00042' or '42')."""
+    raw = call_number_str.strip().upper().lstrip("S").lstrip("0") or "0"
+    try:
+        num = int(raw)
+    except ValueError:
+        return {"error": f"מספר קריאה לא תקין: {call_number_str}"}
+    call = db.query(ServiceCall).filter(ServiceCall.call_number == num).first()
+    if not call:
+        return {"error": f"לא נמצאה קריאה מספר {call_number_str}"}
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    tech = None
+    asgn = (
+        db.query(Assignment)
+        .filter(Assignment.service_call_id == call.id, Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]))
+        .order_by(Assignment.created_at.desc())
+        .first()
+    )
+    if asgn:
+        t = db.query(Technician).filter(Technician.id == asgn.technician_id).first()
+        tech = t.name if t else None
+    return {
+        "מספר_קריאה": f"S{call.call_number:05d}" if call.call_number else None,
+        "כתובת": f"{elev.address}, {elev.city}" if elev else "לא ידוע",
+        "סטטוס": call.status,
+        "עדיפות": call.priority,
+        "סוג_תקלה": call.fault_type,
+        "תיאור": call.description,
+        "מדווח_ע_י": call.reported_by,
+        "טכנאי_משובץ": tech,
+        "הערות_פתרון": call.resolution_notes,
+        "נפתחה": call.created_at.strftime("%d/%m/%Y %H:%M") if call.created_at else None,
+    }
+
+
+def _list_technicians(db: Session, available_only: bool = False) -> list:
+    """Return all active technicians with availability and open call count."""
+    q = db.query(Technician).filter(Technician.is_active == True)  # noqa
+    if available_only:
+        q = q.filter(Technician.is_available == True)  # noqa
+    techs = q.order_by(Technician.name).all()
+    result = []
+    for t in techs:
+        open_count = (
+            db.query(Assignment)
+            .join(ServiceCall, Assignment.service_call_id == ServiceCall.id)
+            .filter(Assignment.technician_id == t.id, ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]))
+            .count()
+        )
+        result.append({
+            "שם": t.name,
+            "טלפון": t.phone,
+            "תפקיד": t.role,
+            "זמין": t.is_available,
+            "בכוננות": t.is_on_call,
+            "קריאות_פתוחות": open_count,
+        })
+    return result
+
+
+def _search_customers(db: Session, query: str) -> list:
+    """Search customers by name, phone, city or contact person."""
+    q = f"%{query}%"
+    customers = (
+        db.query(Customer)
+        .filter(
+            Customer.is_active == True,  # noqa
+            (Customer.name.ilike(q)) | (Customer.phone.ilike(q)) |
+            (Customer.city.ilike(q)) | (Customer.contact_person.ilike(q)),
+        )
+        .limit(8)
+        .all()
+    )
+    result = []
+    for c in customers:
+        elev_count = db.query(Elevator).filter(Elevator.customer_id == c.id).count()
+        result.append({
+            "שם": c.name,
+            "סוג": c.customer_type,
+            "טלפון": c.phone,
+            "עיר": c.city,
+            "איש_קשר": c.contact_person,
+            "מעליות": elev_count,
+        })
+    return result or [{"תוצאה": "לא נמצאו לקוחות תואמים"}]
+
+
+def _get_management_company_info(db: Session, name: str) -> list:
+    """Return management company details matching the name."""
+    companies = (
+        db.query(ManagementCompany)
+        .filter(ManagementCompany.name.ilike(f"%{name}%"))
+        .limit(5)
+        .all()
+    )
+    result = []
+    for c in companies:
+        elev_count = db.query(Elevator).filter(Elevator.management_company_id == c.id).count()
+        result.append({
+            "שם": c.name,
+            "איש_קשר": c.contact_name,
+            "טלפון": c.phone,
+            "אימייל": c.email,
+            "טלפונים_מוכרים": c.caller_phones,
+            "מעליות_בניהול": elev_count,
+        })
+    return result or [{"תוצאה": "לא נמצאה חברת ניהול תואמת"}]
+
+
+def _get_elevator_inspections(db: Session, elevator_id: str, limit: int = 5) -> list:
+    """Return recent inspection reports for an elevator."""
+    import uuid as _uuid
+    try:
+        eid = _uuid.UUID(elevator_id)
+    except ValueError:
+        return [{"error": "מזהה מעלית לא תקין"}]
+    reports = (
+        db.query(InspectionReport)
+        .filter(InspectionReport.elevator_id == eid)
+        .order_by(InspectionReport.inspection_date.desc())
+        .limit(limit)
+        .all()
+    )
+    if not reports:
+        return [{"תוצאה": "אין דוחות בדיקה לעלית זו"}]
+    result = []
+    for r in reports:
+        result.append({
+            "תאריך": r.inspection_date.strftime("%d/%m/%Y") if r.inspection_date else None,
+            "תוצאה": "עבר" if r.result == "PASS" else ("נכשל" if r.result == "FAIL" else "לא ידוע"),
+            "בודק": r.inspector_name,
+            "ליקויים": r.deficiency_count,
+            "סטטוס_דוח": r.report_status,
+            "מספר_תיק": r.labor_file_number,
+        })
+    return result
+
+
+def _get_upcoming_maintenance(db: Session, days_ahead: int = 14, overdue_only: bool = False) -> list:
+    """Return upcoming or overdue maintenance schedules."""
+    now = datetime.now(timezone.utc).date()
+    future = now + timedelta(days=days_ahead)
+    q = db.query(MaintenanceRecord)
+    if overdue_only:
+        q = q.filter(MaintenanceRecord.status == "OVERDUE")
+    else:
+        q = q.filter(
+            MaintenanceRecord.status.in_(["SCHEDULED", "OVERDUE"]),
+            MaintenanceRecord.scheduled_date <= future,
+        )
+    records = q.order_by(MaintenanceRecord.scheduled_date).limit(20).all()
+    if not records:
+        return [{"תוצאה": "אין תחזוקות ממתינות בטווח הזמן הזה"}]
+    result = []
+    for r in records:
+        elev = db.query(Elevator).filter(Elevator.id == r.elevator_id).first()
+        tech = db.query(Technician).filter(Technician.id == r.technician_id).first() if r.technician_id else None
+        result.append({
+            "כתובת": f"{elev.address}, {elev.city}" if elev else "לא ידוע",
+            "תאריך_מתוכנן": r.scheduled_date.strftime("%d/%m/%Y") if r.scheduled_date else None,
+            "סוג": r.maintenance_type,
+            "סטטוס": r.status,
+            "טכנאי": tech.name if tech else None,
+        })
+    return result
+
+
+def _get_pending_unmatched_calls(db: Session, limit: int = 10) -> list:
+    """Return unmatched incoming calls awaiting manual elevator assignment."""
+    logs = (
+        db.query(IncomingCallLog)
+        .filter(IncomingCallLog.match_status.in_(["UNMATCHED", "PARTIAL"]))
+        .order_by(IncomingCallLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    if not logs:
+        return [{"תוצאה": "אין קריאות ממתינות לשיוך"}]
+    result = []
+    for lg in logs:
+        result.append({
+            "כתובת": f"{lg.call_street or ''}, {lg.call_city or ''}".strip(", "),
+            "סוג_תקלה": lg.fault_type,
+            "עדיפות": lg.priority,
+            "מתקשר": lg.caller_name or lg.caller_phone,
+            "סטטוס_התאמה": "התאמה חלקית" if lg.match_status == "PARTIAL" else "לא זוהה",
+            "נכנסה": lg.created_at.strftime("%d/%m/%Y %H:%M") if lg.created_at else None,
+        })
+    return result
+
+
 # ── Tool dispatcher ───────────────────────────────────────────────────────────
 
 def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
@@ -614,6 +861,20 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
         return _get_technician_route(db, tool_input["technician_name"])
     elif tool_name == "get_my_calls":
         return _get_my_calls(db, tool_input.get("phone", ""))
+    elif tool_name == "get_call_by_number":
+        return _get_call_by_number(db, tool_input.get("call_number", ""))
+    elif tool_name == "list_technicians":
+        return _list_technicians(db, tool_input.get("available_only", False))
+    elif tool_name == "search_customers":
+        return _search_customers(db, tool_input.get("query", ""))
+    elif tool_name == "get_management_company_info":
+        return _get_management_company_info(db, tool_input.get("name", ""))
+    elif tool_name == "get_elevator_inspections":
+        return _get_elevator_inspections(db, tool_input["elevator_id"], tool_input.get("limit", 5))
+    elif tool_name == "get_upcoming_maintenance":
+        return _get_upcoming_maintenance(db, tool_input.get("days_ahead", 14), tool_input.get("overdue_only", False))
+    elif tool_name == "get_pending_unmatched_calls":
+        return _get_pending_unmatched_calls(db, tool_input.get("limit", 10))
     else:
         return {"error": f"כלי לא מוכר: {tool_name}"}
 
@@ -859,6 +1120,57 @@ _ANTHROPIC_TOOLS = [
         "input_schema": {"type": "object", "properties": {
             "phone": {"type": "string"},
         }, "required": ["phone"]},
+    },
+    {
+        "name": "get_call_by_number",
+        "description": "מחזיר פרטים מלאים על קריאת שירות לפי מספר קריאה (S00042 או 42).",
+        "input_schema": {"type": "object", "properties": {
+            "call_number": {"type": "string"},
+        }, "required": ["call_number"]},
+    },
+    {
+        "name": "list_technicians",
+        "description": "מחזיר רשימת כל הטכנאים הפעילים עם סטטוס זמינות וקריאות פתוחות.",
+        "input_schema": {"type": "object", "properties": {
+            "available_only": {"type": "boolean"},
+        }, "required": []},
+    },
+    {
+        "name": "search_customers",
+        "description": "חפש לקוחות לפי שם, טלפון, עיר או איש קשר.",
+        "input_schema": {"type": "object", "properties": {
+            "query": {"type": "string"},
+        }, "required": ["query"]},
+    },
+    {
+        "name": "get_management_company_info",
+        "description": "מחזיר פרטי חברת ניהול — טלפון, איש קשר, מעליות בניהול.",
+        "input_schema": {"type": "object", "properties": {
+            "name": {"type": "string"},
+        }, "required": ["name"]},
+    },
+    {
+        "name": "get_elevator_inspections",
+        "description": "מחזיר דוחות בדיקה תקופתית עבור מעלית.",
+        "input_schema": {"type": "object", "properties": {
+            "elevator_id": {"type": "string"},
+            "limit": {"type": "integer"},
+        }, "required": ["elevator_id"]},
+    },
+    {
+        "name": "get_upcoming_maintenance",
+        "description": "מחזיר תחזוקות מתוכננות או באיחור בטווח ימים נתון.",
+        "input_schema": {"type": "object", "properties": {
+            "days_ahead": {"type": "integer"},
+            "overdue_only": {"type": "boolean"},
+        }, "required": []},
+    },
+    {
+        "name": "get_pending_unmatched_calls",
+        "description": "מחזיר קריאות שנכנסו ולא שויכו למעלית — ממתינות לטיפול ידני.",
+        "input_schema": {"type": "object", "properties": {
+            "limit": {"type": "integer"},
+        }, "required": []},
     },
 ]
 
