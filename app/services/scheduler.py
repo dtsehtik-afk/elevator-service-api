@@ -1,6 +1,7 @@
 """APScheduler background job runner — nightly maintenance + morning WhatsApp reminders."""
 
 import logging
+import re
 import tempfile
 import os
 from datetime import datetime

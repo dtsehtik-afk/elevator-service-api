@@ -48,16 +48,23 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 _last_nominatim_call = 0.0   # rate-limit: 1 req/sec
+_geocode_cache: dict[str, Optional[tuple[float, float]]] = {}  # avoid repeated calls
 
 
 def geocode_address(address: str, city: str) -> Optional[tuple[float, float]]:
     """
     Convert a street address to (lat, lng) using OpenStreetMap Nominatim.
     Free, no API key required. Rate-limited to 1 req/sec per Nominatim policy.
+    Results are cached in memory to prevent repeated calls for the same address.
     Returns None on failure.
     """
     global _last_nominatim_call
     query = f"{address}, {city}, ישראל"
+
+    # Return cached result immediately (including None = "already tried, no result")
+    if query in _geocode_cache:
+        return _geocode_cache[query]
+
     try:
         # Respect Nominatim 1 req/sec rate limit
         elapsed = time.monotonic() - _last_nominatim_call
@@ -73,11 +80,16 @@ def geocode_address(address: str, city: str) -> Optional[tuple[float, float]]:
         _last_nominatim_call = time.monotonic()
         results = resp.json()
         if results:
-            return float(results[0]["lat"]), float(results[0]["lon"])
+            coords = float(results[0]["lat"]), float(results[0]["lon"])
+            _geocode_cache[query] = coords
+            return coords
         logger.warning("Nominatim: no result for '%s'", query)
     except Exception as exc:
         logger.error("Nominatim geocoding error: %s", exc)
+
+    _geocode_cache[query] = None  # cache the failure too
     return None
+
 
 
 def ensure_elevator_coords(db: Session, elevator) -> tuple[float, float]:
