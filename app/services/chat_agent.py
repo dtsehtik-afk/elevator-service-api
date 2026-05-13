@@ -90,6 +90,44 @@ _GEMINI_TOOLS = [{
                 "phone": {"type": "STRING", "description": "מספר טלפון לחיפוש"},
             }, "required": ["phone"]},
         },
+        {
+            "name": "close_service_call",
+            "description": "סוגר קריאת שירות ומזין הערות פתרון. השתמש רק לאחר קבלת אישור מפורש מהמשתמש.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "call_id": {"type": "STRING", "description": "UUID של הקריאה לסגירה"},
+                "resolution_notes": {"type": "STRING", "description": "הערות תיקון/פתרון"},
+            }, "required": ["call_id", "resolution_notes"]},
+        },
+        {
+            "name": "assign_service_call",
+            "description": "מעביר קריאת שירות לטכנאי אחר. השתמש רק לאחר קבלת אישור מפורש מהמשתמש.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "call_id": {"type": "STRING", "description": "UUID של הקריאה"},
+                "technician_name": {"type": "STRING", "description": "שם הטכנאי החדש"},
+            }, "required": ["call_id", "technician_name"]},
+        },
+        {
+            "name": "transfer_to_quote",
+            "description": "מסמן קריאת שירות כדורשת הצעת מחיר ומוסיף הערות. השתמש רק לאחר קבלת אישור מפורש מהמשתמש.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "call_id": {"type": "STRING", "description": "UUID של הקריאה"},
+                "notes": {"type": "STRING", "description": "הערות לגבי הצעת המחיר"},
+            }, "required": ["call_id"]},
+        },
+        {
+            "name": "get_technician_route",
+            "description": "מחזיר את רשימת הקריאות הפתוחות של טכנאי מסודרות כמסלול עבודה להיום.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "technician_name": {"type": "STRING", "description": "שם הטכנאי"},
+            }, "required": ["technician_name"]},
+        },
+        {
+            "name": "get_my_calls",
+            "description": "מחזיר את הקריאות הפתוחות המשובצות לטכנאי שמחזיק בשיחה הנוכחית.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "phone": {"type": "STRING", "description": "מספר הטלפון של הטכנאי"},
+            }, "required": ["phone"]},
+        },
     ]
 }]
 
@@ -393,6 +431,133 @@ def _get_system_summary(db: Session) -> dict:
     }
 
 
+# ── Write-action DB functions ─────────────────────────────────────────────────
+
+def _close_service_call(db: Session, call_id: str, resolution_notes: str) -> dict:
+    """Close a service call and save resolution notes."""
+    import uuid as _uuid
+    try:
+        cid = _uuid.UUID(call_id)
+    except ValueError:
+        return {"error": "מזהה קריאה לא תקין"}
+    call = db.query(ServiceCall).filter(ServiceCall.id == cid).first()
+    if not call:
+        return {"error": "הקריאה לא נמצאה"}
+    if call.status in ("CLOSED", "RESOLVED"):
+        return {"error": f"הקריאה כבר במצב {call.status}"}
+    call.status = "CLOSED"
+    call.resolution_notes = resolution_notes
+    call.resolved_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"success": True, "call_number": call.call_number, "status": "CLOSED"}
+
+
+def _assign_service_call(db: Session, call_id: str, technician_name: str) -> dict:
+    """Reassign a service call to a different technician."""
+    import uuid as _uuid
+    try:
+        cid = _uuid.UUID(call_id)
+    except ValueError:
+        return {"error": "מזהה קריאה לא תקין"}
+    call = db.query(ServiceCall).filter(ServiceCall.id == cid).first()
+    if not call:
+        return {"error": "הקריאה לא נמצאה"}
+    tech = db.query(Technician).filter(Technician.name.ilike(f"%{technician_name}%")).first()
+    if not tech:
+        return {"error": f"הטכנאי '{technician_name}' לא נמצא במערכת"}
+    # Update existing active assignment or create new one
+    from app.models.assignment import Assignment
+    existing = (
+        db.query(Assignment)
+        .filter(Assignment.service_call_id == cid,
+                Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]))
+        .first()
+    )
+    if existing:
+        existing.technician_id = tech.id
+        existing.status = "CONFIRMED"
+    else:
+        new_assign = Assignment(
+            service_call_id=cid,
+            technician_id=tech.id,
+            assignment_type="MANUAL",
+            status="CONFIRMED",
+        )
+        db.add(new_assign)
+    call.status = "ASSIGNED"
+    db.commit()
+    return {"success": True, "call_number": call.call_number, "assigned_to": tech.name}
+
+
+def _transfer_to_quote(db: Session, call_id: str, notes: str = "") -> dict:
+    """Mark a service call as requiring a quote."""
+    import uuid as _uuid
+    try:
+        cid = _uuid.UUID(call_id)
+    except ValueError:
+        return {"error": "מזהה קריאה לא תקין"}
+    call = db.query(ServiceCall).filter(ServiceCall.id == cid).first()
+    if not call:
+        return {"error": "הקריאה לא נמצאה"}
+    call.quote_needed = True
+    if notes:
+        existing = call.resolution_notes or ""
+        call.resolution_notes = f"{existing}\n[הצעת מחיר]: {notes}".strip()
+    db.commit()
+    return {"success": True, "call_number": call.call_number, "quote_needed": True}
+
+
+def _get_technician_route(db: Session, technician_name: str) -> dict:
+    """Return open assigned calls for a technician, ordered as a work route."""
+    from app.models.assignment import Assignment
+    tech = db.query(Technician).filter(Technician.name.ilike(f"%{technician_name}%")).first()
+    if not tech:
+        return {"error": f"הטכנאי '{technician_name}' לא נמצא"}
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.technician_id == tech.id,
+                Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]))
+        .all()
+    )
+    route = []
+    for a in assignments:
+        call = db.query(ServiceCall).filter(
+            ServiceCall.id == a.service_call_id,
+            ServiceCall.status.notin_(["CLOSED", "RESOLVED"])
+        ).first()
+        if not call:
+            continue
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        route.append({
+            "מספר_קריאה": call.call_number or str(call.id)[:8],
+            "כתובת": f"{elev.address}, {elev.city}" if elev else "לא ידוע",
+            "בניין": elev.building_name or "" if elev else "",
+            "עדיפות": call.priority,
+            "סטטוס": call.status,
+            "תיאור": call.description[:80] if call.description else "",
+            "תאריך_פתיחה": call.created_at.strftime("%d/%m %H:%M") if call.created_at else "",
+        })
+    route.sort(key=lambda x: ("CRITICAL" not in x["עדיפות"], "HIGH" not in x["עדיפות"]))
+    return {"טכנאי": tech.name, "קריאות": route, "סה_כ": len(route)}
+
+
+def _get_my_calls(db: Session, phone: str) -> dict:
+    """Return open calls assigned to the technician identified by phone."""
+    from app.models.assignment import Assignment
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    last9 = digits[-9:]
+    tech = (
+        db.query(Technician)
+        .filter((Technician.phone.contains(last9)) | (Technician.whatsapp_number.contains(last9)))
+        .first()
+    )
+    if not tech:
+        return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
+    return _get_technician_route(db, tech.name)
+
+
 # ── Tool dispatcher ───────────────────────────────────────────────────────────
 
 def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
@@ -420,6 +585,16 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
         return _get_technician_location(db, tool_input.get("technician_name"), tool_input.get("near_address"))
     elif tool_name == "search_by_phone":
         return _search_by_phone(db, tool_input.get("phone", ""))
+    elif tool_name == "close_service_call":
+        return _close_service_call(db, tool_input["call_id"], tool_input.get("resolution_notes", ""))
+    elif tool_name == "assign_service_call":
+        return _assign_service_call(db, tool_input["call_id"], tool_input["technician_name"])
+    elif tool_name == "transfer_to_quote":
+        return _transfer_to_quote(db, tool_input["call_id"], tool_input.get("notes", ""))
+    elif tool_name == "get_technician_route":
+        return _get_technician_route(db, tool_input["technician_name"])
+    elif tool_name == "get_my_calls":
+        return _get_my_calls(db, tool_input.get("phone", ""))
     else:
         return {"error": f"כלי לא מוכר: {tool_name}"}
 
@@ -435,7 +610,15 @@ _SYSTEM_PROMPT = """אתה עוזר לוגיסטיקה של חברת אקורד 
 4. עברית קצרה וישירה — ווצאפ, לא דוח. משפט-שניים מספיקים ברוב המקרים
 5. אל תמציא — השתמש רק בנתונים מהכלים. אם אין מידע — "אין לי נתונים על כך"
 6. אם נשאלת על מעלית / כתובת ספציפית — חפש קודם בכלים לפני שתענה
-7. תאריכים בפורמט DD/MM/YYYY"""
+7. תאריכים בפורמט DD/MM/YYYY
+
+כללי פעולה (שינוי נתונים) — קריטי:
+8. לפני כל פעולה שמשנה נתונים (סגירת קריאה, העברה לטכנאי, הצעת מחיר) — עצור ושאל:
+   "האם אתה בטוח שברצונך ל[פעולה] קריאה [מספר/כתובת]? (ענה כן/לא)"
+   אל תפעיל את הכלי עד שקיבלת תשובה חיובית מפורשת (כן, אישור, בצע, יאללה, אוקיי).
+9. אם המשתמש ביקש לסגור קריאה ללא הערות — בקש הערות סגירה קצרות לפני שתמשיך.
+10. לאחר ביצוע פעולה — אשר בקצרה מה בוצע בפועל.
+11. אם לא ברור לאיזה קריאה מתייחסים — חפש קודם בכלים ושאל להבהרה."""
 
 
 def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
@@ -616,6 +799,44 @@ _ANTHROPIC_TOOLS = [
     {
         "name": "search_by_phone",
         "description": "חפש מעליות לפי מספר טלפון.",
+        "input_schema": {"type": "object", "properties": {
+            "phone": {"type": "string"},
+        }, "required": ["phone"]},
+    },
+    {
+        "name": "close_service_call",
+        "description": "סוגר קריאת שירות. השתמש רק לאחר קבלת אישור מפורש.",
+        "input_schema": {"type": "object", "properties": {
+            "call_id": {"type": "string"},
+            "resolution_notes": {"type": "string"},
+        }, "required": ["call_id", "resolution_notes"]},
+    },
+    {
+        "name": "assign_service_call",
+        "description": "מעביר קריאה לטכנאי אחר. השתמש רק לאחר קבלת אישור מפורש.",
+        "input_schema": {"type": "object", "properties": {
+            "call_id": {"type": "string"},
+            "technician_name": {"type": "string"},
+        }, "required": ["call_id", "technician_name"]},
+    },
+    {
+        "name": "transfer_to_quote",
+        "description": "מסמן קריאה כדורשת הצעת מחיר. השתמש רק לאחר קבלת אישור מפורש.",
+        "input_schema": {"type": "object", "properties": {
+            "call_id": {"type": "string"},
+            "notes": {"type": "string"},
+        }, "required": ["call_id"]},
+    },
+    {
+        "name": "get_technician_route",
+        "description": "מחזיר רשימת קריאות פתוחות לטכנאי כמסלול עבודה.",
+        "input_schema": {"type": "object", "properties": {
+            "technician_name": {"type": "string"},
+        }, "required": ["technician_name"]},
+    },
+    {
+        "name": "get_my_calls",
+        "description": "מחזיר את הקריאות הפתוחות של הטכנאי שמחזיק בשיחה.",
         "input_schema": {"type": "object", "properties": {
             "phone": {"type": "string"},
         }, "required": ["phone"]},
