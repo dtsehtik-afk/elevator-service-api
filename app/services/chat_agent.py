@@ -23,7 +23,6 @@ from app.models.maintenance import MaintenanceSchedule as MaintenanceRecord
 from app.models.service_call import ServiceCall
 from app.models.technician import Technician
 from app.models.customer import Customer
-from app.models.contact import Contact
 from app.models.management_company import ManagementCompany
 from app.models.inspection_report import InspectionReport
 from app.models.incoming_call import IncomingCallLog
@@ -478,10 +477,22 @@ def _get_system_summary(db: Session) -> dict:
     today_calls  = db.query(ServiceCall).filter(ServiceCall.created_at >= today_start).count()
     active_techs = db.query(Technician).filter(Technician.is_active == True).count()  # noqa
 
+    closed_today = (
+        db.query(ServiceCall)
+        .filter(ServiceCall.status.in_(["RESOLVED", "CLOSED"]), ServiceCall.updated_at >= today_start)
+        .all()
+    )
+    closers: dict[str, int] = {}
+    for c in closed_today:
+        name = c.resolved_by or "לא ידוע"
+        closers[name] = closers.get(name, 0) + 1
+
     return {
         "קריאות_פתוחות": open_calls,
         "קריאות_בטיפול": in_progress,
         "קריאות_היום": today_calls,
+        "נסגרו_היום": len(closed_today),
+        "סגרו_היום": closers,
         "טכנאים_פעילים": active_techs,
         "שעה_נוכחית": now.strftime("%d/%m/%Y %H:%M"),
     }
@@ -881,24 +892,15 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
 
 # ── Main chat function ────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """אתה עוזר לוגיסטיקה של חברת אקורד מעליות, זמין דרך ווצאפ לטכנאים ומנהלים.
+_SYSTEM_PROMPT = """אתה עוזר דיגיטלי של חברת אקורד מעליות, זמין לטכנאים ומנהלים דרך ווצאפ.
+יש לך גישה מלאה למערכת דרך כלים — מעליות, קריאות שירות, טכנאים, לקוחות, חברות ניהול, בדיקות, תחזוקה וקריאות ממתינות.
 
-כללי תגובה — חובה לפעול לפיהם:
-1. ענה אך ורק על מה שנשאלת — אל תוסיף מידע שלא התבקש
-2. אל תשלח סיכום קריאות / סטטוס כללי מיוזמתך — אבל שאלות ישירות (כמו "כמה קריאות היום?", "מי עובד עכשיו?") — ענה עליהן תמיד באמצעות הכלים
-3. שמור על ההקשר של השיחה הנוכחית — אם השאלה היא המשך, ענה בהתאם
-4. עברית קצרה וישירה — ווצאפ, לא דוח. משפט-שניים מספיקים ברוב המקרים
-5. אל תמציא — השתמש רק בנתונים מהכלים. אם אין מידע — "אין לי נתונים על כך"
-6. אם נשאלת על מעלית / כתובת ספציפית — חפש קודם בכלים לפני שתענה
-7. תאריכים בפורמט DD/MM/YYYY
+השתמש בכלים כדי לשלוף מידע חי מהמסד. אל תמציא תשובות.
+ענה בעברית קצרה וישירה — ווצאפ, לא דוח. תאריכים בפורמט DD/MM/YYYY.
 
-כללי פעולה (שינוי נתונים) — קריטי:
-8. לפני כל פעולה שמשנה נתונים (סגירת קריאה, העברה לטכנאי, הצעת מחיר) — עצור ושאל:
-   "האם אתה בטוח שברצונך ל[פעולה] קריאה [מספר/כתובת]? (ענה כן/לא)"
-   אל תפעיל את הכלי עד שקיבלת תשובה חיובית מפורשת (כן, אישור, בצע, יאללה, אוקיי).
-9. אם המשתמש ביקש לסגור קריאה ללא הערות — בקש הערות סגירה קצרות לפני שתמשיך.
-10. לאחר ביצוע פעולה — אשר בקצרה מה בוצע בפועל.
-11. אם לא ברור לאיזה קריאה מתייחסים — חפש קודם בכלים ושאל להבהרה."""
+לפני פעולה שמשנה נתונים (סגירה, שיבוץ, העברה להצעת מחיר) — בקש אישור מפורש תחילה.
+
+אם המשתמש מבקש משהו שאין לך כלי עבורו — ענה בעברית ציין מה חסר, למשל: "פעולה זו אינה זמינה כרגע במערכת (חסר: [תיאור הפונקציונליות החסרה])"."""
 
 
 def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
