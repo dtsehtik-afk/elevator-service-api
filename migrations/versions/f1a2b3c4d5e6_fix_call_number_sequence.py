@@ -22,12 +22,17 @@ def upgrade():
         " START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
     ))
 
-    # 2. Backfill existing rows that have no call_number (NULL)
+    # 2. Backfill existing rows that have no call_number (NULL), ordered by created_at
     conn.execute(sa.text("""
+        WITH ordered AS (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC) AS rn
+            FROM service_calls
+            WHERE call_number IS NULL
+        )
         UPDATE service_calls
         SET call_number = nextval('service_calls_call_number_seq')
-        WHERE call_number IS NULL
-        ORDER BY created_at ASC
+        FROM ordered
+        WHERE service_calls.id = ordered.id
     """))
 
     # 3. Attach sequence as the DEFAULT for the column going forward
