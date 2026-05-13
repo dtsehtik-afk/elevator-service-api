@@ -1006,7 +1006,8 @@ def _quick_detect_intent(text: str, settings) -> str:
     take_kw    = ("לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך", "אני על זה", "אני מגיע")
     defer_kw   = ("דחה למחר", "אטפל מחר", "לדחות", "מחר בבוקר")
     request_kw = ("מבקש", "מבקשת", "אשמח לטפל", "רוצה לטפל")
-    route_kw   = ("מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום", "מה יש לי")
+    route_kw   = ("מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום", "מה יש לי",
+                   "את המסלול", "הקריאות שלי", "סדר יום")
     ignore_kw  = ("תודה", "אוקיי", "אוק", "סבבה", "בסדר", "👍", "🙏", "✅", "ממש תודה")
     question_kw = ("אפשר", "מה ה", "כמה", "מתי", "היסטוריה", "פרטים", "מי ה", "איפה",
                    "קריאות פתוחות", "סטטוס", "רשימה", "כתובת", "פירוט", "מה קרה", "מה המצב")
@@ -1105,8 +1106,8 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
         if quick_intent in _tech_intents:
             pass  # fall through to technician flow below
         else:
-            from app.services.dispatcher_commands import handle_dispatcher_command
-            handle_dispatcher_command(db, phone, text, settings, technician=tech)
+            # Questions and general queries → go directly to chat_agent for smart answers
+            _handle_chat_question(db, phone, text, settings, with_history=is_reply)
             return
 
     if is_dispatcher and not tech:
