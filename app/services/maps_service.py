@@ -78,14 +78,17 @@ def geocode_address(address: str, city: str) -> Optional[tuple[float, float]]:
             timeout=8,
         )
         _last_nominatim_call = time.monotonic()
-        results = resp.json()
-        if results:
-            coords = float(results[0]["lat"]), float(results[0]["lon"])
-            _geocode_cache[query] = coords
-            return coords
-        logger.warning("Nominatim: no result for '%s'", query)
+        if not resp.is_success:
+            logger.warning("Nominatim HTTP %s for '%s'", resp.status_code, query)
+        else:
+            results = resp.json()
+            if results:
+                coords = float(results[0]["lat"]), float(results[0]["lon"])
+                _geocode_cache[query] = coords
+                return coords
+            logger.warning("Nominatim: no result for '%s'", query)
     except Exception as exc:
-        logger.error("Nominatim geocoding error: %s", exc)
+        logger.warning("Nominatim geocoding error: %s", exc)
 
     _geocode_cache[query] = None  # cache the failure too
     return None

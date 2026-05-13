@@ -196,30 +196,10 @@ async def receive_call(
     elif match.match_status in ("PARTIAL", "UNMATCHED"):
         _lead_keywords = ["מתעניין", "הצעת מחיר", "פגישה", "הדגמה", "ייעוץ"]
         is_lead_call = any(kw in (parsed.call_type or "") for kw in _lead_keywords)
-        fault_is_specific = (
-            not is_lead_call
-            and parsed.fault_type in ("STUCK", "DOOR", "ELECTRICAL", "MECHANICAL", "SOFTWARE", "RESCUE")
-        )
-        if fault_is_specific:
-            # Specific fault with unknown address → dispatcher alert + pending queue
-            closest_address = match.elevator.address if match.elevator else None
-            closest_city = match.elevator.city if match.elevator else None
-            try:
-                whatsapp_service.notify_dispatcher_elevator_not_found(
-                    street=parsed.street,
-                    house_number=parsed.house_number,
-                    city=parsed.city,
-                    fault_type=parsed.fault_type,
-                    caller_name=parsed.name,
-                    caller_phone=parsed.phone,
-                    score=match.score,
-                    closest_address=closest_address,
-                    closest_city=closest_city,
-                )
-            except Exception as exc:
-                logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
-        else:
-            # No specific fault + unknown address → potential lead, notify sales manager
+        closest_address = match.elevator.address if match.elevator else None
+        closest_city = match.elevator.city if match.elevator else None
+        if is_lead_call:
+            # Lead keywords detected → notify sales manager only
             try:
                 from app.models.lead import Lead
                 address_str = " ".join(filter(None, [parsed.street, parsed.house_number, parsed.city]))
@@ -241,6 +221,22 @@ async def receive_call(
                 )
             except Exception as exc:
                 logger.error("Failed to create lead from unmatched call: %s", exc)
+        else:
+            # Any non-lead unmatched call → dispatcher alert + pending queue (all fault types)
+            try:
+                whatsapp_service.notify_dispatcher_elevator_not_found(
+                    street=parsed.street,
+                    house_number=parsed.house_number,
+                    city=parsed.city,
+                    fault_type=parsed.fault_type,
+                    caller_name=parsed.name,
+                    caller_phone=parsed.phone,
+                    score=match.score,
+                    closest_address=closest_address,
+                    closest_city=closest_city,
+                )
+            except Exception as exc:
+                logger.error("Failed to notify dispatcher about unmatched elevator: %s", exc)
 
     # 5. AI assignment — with after-hours caller confirmation for non-RESCUE calls
     assignment = None
@@ -451,40 +447,58 @@ def receive_whatsapp(
 
     # ── Route: pending assignment reply or free-text ──────────────────────────
     # ── Check if caller is waiting for after-hours approval ──────────────────
-    from app.models.service_call import ServiceCall as _SC
-    after_hours_call = (
-        db.query(_SC)
-        .filter(
-            _SC.after_hours_pending == True,  # noqa: E712
-            _SC.status == "OPEN",
-            _SC.reported_by.contains(phone[-8:]),  # match last 8 digits
-        )
-        .order_by(_SC.created_at.desc())
-        .first()
+    # Only check after-hours for callers (not registered technicians/dispatchers)
+    is_registered = _find_tech_by_phone_local(db, phone) is not None
+    dispatcher_numbers = [n.strip() for n in (settings.dispatcher_whatsapp or "").split(",") if n.strip()]
+    _digits = "".join(c for c in phone if c.isdigit())
+    if _digits.startswith("972"):
+        _digits = "0" + _digits[3:]
+    is_dispatcher_sender = any(
+        "".join(c for c in n if c.isdigit())[-9:] == _digits[-9:]
+        for n in dispatcher_numbers
     )
-    if after_hours_call:
-        caller_name = ai_assignment_agent._extract_caller(after_hours_call.reported_by)
-        caller_phone = ai_assignment_agent._extract_phone(after_hours_call.reported_by) or phone
-        if text.strip() == "1":
-            # Approved — proceed with assignment
-            after_hours_call.after_hours_pending = False
-            db.commit()
-            whatsapp_service.send_after_hours_approved(caller_phone, caller_name)
-            try:
-                ai_assignment_agent.assign_with_confirmation(db, after_hours_call)
-            except Exception as exc:
-                logger.error("After-hours assignment failed: %s", exc)
-        elif text.strip() == "2":
-            # Deferred to tomorrow
-            after_hours_call.after_hours_pending = False
-            after_hours_call.status = "CLOSED"
-            after_hours_call.resolution_notes = "נדחה על ידי הלקוח — מחוץ לשעות עבודה"
-            db.commit()
-            whatsapp_service.send_after_hours_deferred(caller_phone, caller_name)
-            whatsapp_service.notify_dispatcher(
-                f"↩️ לקוח דחה קריאה מחוץ לשעות עבודה — {after_hours_call.id}"
+    if not is_registered and not is_dispatcher_sender:
+        from app.models.service_call import ServiceCall as _SC
+        after_hours_call = (
+            db.query(_SC)
+            .filter(
+                _SC.after_hours_pending == True,  # noqa: E712
+                _SC.status == "OPEN",
+                _SC.reported_by.contains(phone[-8:]),  # match last 8 digits
             )
-        return {"status": "after_hours_handled"}
+            .order_by(_SC.created_at.desc())
+            .first()
+        )
+        if after_hours_call:
+            caller_name = ai_assignment_agent._extract_caller(after_hours_call.reported_by)
+            caller_phone = ai_assignment_agent._extract_phone(after_hours_call.reported_by) or phone
+            if text.strip() == "1":
+                # Approved — proceed with assignment
+                after_hours_call.after_hours_pending = False
+                db.commit()
+                whatsapp_service.send_after_hours_approved(caller_phone, caller_name)
+                try:
+                    ai_assignment_agent.assign_with_confirmation(db, after_hours_call)
+                except Exception as exc:
+                    logger.error("After-hours assignment failed: %s", exc)
+            elif text.strip() == "2":
+                # Deferred to tomorrow
+                after_hours_call.after_hours_pending = False
+                after_hours_call.status = "CLOSED"
+                after_hours_call.resolution_notes = "נדחה על ידי הלקוח — מחוץ לשעות עבודה"
+                db.commit()
+                whatsapp_service.send_after_hours_deferred(caller_phone, caller_name)
+                whatsapp_service.notify_dispatcher(
+                    f"↩️ לקוח דחה קריאה מחוץ לשעות עבודה — {after_hours_call.id}"
+                )
+            else:
+                from app.services.whatsapp_service import _send_message
+                _send_message(caller_phone,
+                    "⏰ אנחנו ממתינים לתשובתך:\n"
+                    "*1* — אשר טיפול דחוף\n"
+                    "*2* — דחה למחר"
+                )
+            return {"status": "after_hours_handled"}
 
     pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
     if pending:
