@@ -10,7 +10,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from email.header import decode_header
-from typing import Optional
+from typing import Optional, NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +349,14 @@ def _gemini_fuzzy_match(candidates, email_address: str, api_key: str):
     return None
 
 
-def _find_elevator(db, city: str, address: str, fields: dict):
+class _FindResult(NamedTuple):
+    elevator: object        # Elevator | None — confirmed match
+    closest: object         # Elevator | None — best candidate (for PARTIAL)
+    match_status: str       # "MATCHED" | "PARTIAL" | "UNMATCHED"
+    match_notes: str
+
+
+def _find_elevator(db, city: str, address: str, fields: dict) -> "_FindResult":
     """
     Multi-signal elevator lookup. NEVER creates a new elevator.
 
@@ -358,8 +365,8 @@ def _find_elevator(db, city: str, address: str, fields: dict):
       2. Street name + building number match
       3. Caller phone → caller_phones / known_callers lookup
       4. Gemini fuzzy address matching (typo-tolerant)
-      5. Same street, different number → ambiguous, notify dispatcher
-      6. No match → notify dispatcher
+      5. Same street, different number → PARTIAL (ambiguous)
+      6. No match → UNMATCHED
     """
     from app.config import get_settings
     from app.models.elevator import Elevator
@@ -382,7 +389,7 @@ def _find_elevator(db, city: str, address: str, fields: dict):
     for elev in candidates:
         if addr_norm and (elev.address or "").strip().lower() == addr_norm.lower():
             logger.info("✅ Matched by exact address: %s", elev.address)
-            return elev
+            return _FindResult(elev, None, "MATCHED", "התאמה מדויקת לכתובת")
 
     # 2. Street name + building number match; collect ambiguous street hits
     street_email = _extract_street_name(addr_norm)
@@ -394,7 +401,7 @@ def _find_elevator(db, city: str, address: str, fields: dict):
         elev_num = _extract_building_number(elev.address or "")
         if building_num and elev_num and building_num == elev_num:
             logger.info("✅ Matched by street+number: %s", elev.address)
-            return elev
+            return _FindResult(elev, None, "MATCHED", "התאמה לפי רחוב ומספר בית")
         ambiguous = elev  # same street, different number
 
     # 3. Phone lookup — check caller phone against all city candidates
@@ -402,31 +409,31 @@ def _find_elevator(db, city: str, address: str, fields: dict):
         phone_match = _phone_lookup(candidates, caller_phone)
         if phone_match:
             logger.info("✅ Matched by caller phone %s → elevator %s", caller_phone, phone_match.id)
-            return phone_match
+            return _FindResult(phone_match, None, "MATCHED", "התאמה לפי טלפון מתקשר")
 
     # 4. Gemini fuzzy address match (only if we have candidates and an address to compare)
     if addr_norm and candidates:
         fuzzy_match = _gemini_fuzzy_match(candidates, addr_norm, api_key)
         if fuzzy_match:
             logger.info("✅ Matched by Gemini fuzzy: email=%s → db=%s", addr_norm, fuzzy_match.address)
-            return fuzzy_match
+            return _FindResult(fuzzy_match, None, "MATCHED", "התאמה חכמה (Gemini)")
 
-    # 5. Ambiguous street (same street, different building number)
+    # 5. Ambiguous street (same street, different building number) → PARTIAL
     if ambiguous:
-        logger.warning(
-            "📍 Address mismatch: email=%s vs DB=%s — flagging for review",
-            addr_norm, ambiguous.address,
-        )
+        logger.warning("📍 Address mismatch: email=%s vs DB=%s — flagging for review", addr_norm, ambiguous.address)
         _notify_no_match(
             city_norm, addr_norm, fields,
             extra=f"⚠️ *כתובת לא ודאית*\nבמייל: *{addr_norm}*\nבמערכת: *{ambiguous.address}, {ambiguous.city}*\n"
         )
-        return None
+        return _FindResult(
+            None, ambiguous, "PARTIAL",
+            f"כתובת לא ודאית — במייל: {addr_norm}, במערכת: {ambiguous.address}, {ambiguous.city}",
+        )
 
-    # 6. Nothing found
+    # 6. Nothing found → UNMATCHED
     logger.info("📍 No elevator found for %s %s — notifying dispatcher", city_norm, addr_norm)
     _notify_no_match(city_norm, addr_norm, fields)
-    return None
+    return _FindResult(None, None, "UNMATCHED", f"לא נמצאה מעלית תואמת לכתובת {addr_norm}, {city_norm}")
 
 
 def _notify_no_match(city: str, address: str, fields: dict, extra: str = "") -> None:
@@ -717,14 +724,36 @@ def poll_emails(db) -> int:
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
-                elevator = _find_elevator(db, fields["city"], fields["address"], fields)
+                find_result = _find_elevator(db, fields["city"], fields["address"], fields)
+                elevator = find_result.elevator
 
                 if elevator is None:
-                    # No match or ambiguous address — dispatcher already notified inside _find_elevator
+                    # No confirmed match — save to pending queue so dispatcher can assign manually
                     logger.info(
-                        "📍 Skipping call creation — no elevator match for (%s %s), awaiting dispatcher review",
+                        "📍 No elevator match for (%s %s) — saving to pending queue",
                         fields.get("city"), fields.get("address"),
                     )
+                    try:
+                        from app.models.incoming_call import IncomingCallLog
+                        _fault = fields.get("fault_type", "OTHER")
+                        _priority = fields.get("priority", "MEDIUM")
+                        pending_log = IncomingCallLog(
+                            raw_text=body,
+                            caller_name=fields.get("name") or None,
+                            caller_phone=fields.get("phone") or None,
+                            call_city=fields.get("city") or None,
+                            call_street=fields.get("address") or None,
+                            call_type=fields.get("call_type") or None,
+                            fault_type=_fault if _fault in ("STUCK","DOOR","ELECTRICAL","MECHANICAL","SOFTWARE","RESCUE","MAINTENANCE","OTHER") else "OTHER",
+                            priority=_priority if _priority in ("CRITICAL","HIGH","MEDIUM","LOW") else "MEDIUM",
+                            match_status=find_result.match_status,
+                            match_notes=find_result.match_notes,
+                            elevator_id=find_result.closest.id if find_result.closest else None,
+                        )
+                        db.add(pending_log)
+                        db.commit()
+                    except Exception as exc:
+                        logger.error("Failed to save pending unmatched call log: %s", exc)
                     _record_as_scanned(db, message_id)
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
