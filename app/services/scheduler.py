@@ -370,17 +370,17 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:
                     Technician.whatsapp_number.contains(digits[-9:]))
             .first())
 
-    # Classic 1/2: always act on the oldest pending assignment (FIFO)
+    # Classic 1/2: act on the MOST RECENT pending assignment (LIFO — tech is likely replying to last message)
     if text.strip() == "1":
-        oldest = min(pending, key=lambda x: x["assigned_at"])
-        ai_assignment_agent.confirm_assignment_by_id(db, phone, oldest["assignment_id"])
+        newest = max(pending, key=lambda x: x["assigned_at"])
+        ai_assignment_agent.confirm_assignment_by_id(db, phone, newest["assignment_id"])
         if tech:
             from app.services.route_service import send_route_to_technician
             send_route_to_technician(db, tech)
         return
     if text.strip() == "2":
-        oldest = min(pending, key=lambda x: x["assigned_at"])
-        ai_assignment_agent.reject_assignment_by_id(db, phone, oldest["assignment_id"])
+        newest = max(pending, key=lambda x: x["assigned_at"])
+        ai_assignment_agent.reject_assignment_by_id(db, phone, newest["assignment_id"])
         return
 
     # Gemini natural-language parsing
@@ -1396,6 +1396,8 @@ def _check_pending_assignment_timeouts():
                                 notify_dispatcher_unassigned(
                                     s.dispatcher_whatsapp,
                                     elevator.address, elevator.city, call.fault_type,
+                                    call_number=call.call_number,
+                                    app_base_url=getattr(s, "app_base_url", ""),
                                 )
                                 # Tag the call so we don't alert again
                                 call.description = (call.description or "") + " [dispatcher_notified]"
@@ -1459,8 +1461,11 @@ def _check_pending_assignment_timeouts():
                     s = get_settings()
                     from app.services.whatsapp_service import notify_dispatcher
                     if _iwh():
+                        _base_url = getattr(s, "app_base_url", "").rstrip("/")
+                        _num_str = f" S{call.call_number:05d}" if call.call_number else ""
+                        _link = f"\n🔗 {_base_url}/calls" if _base_url else ""
                         notify_dispatcher(
-                            f"⚠️ קריאה ב{addr} לא אושרה אחרי {_ESCALATE_AFTER_MINUTES} דקות — נא לשבץ ידנית."
+                            f"⚠️ קריאה{_num_str} ב{addr} לא אושרה אחרי {_ESCALATE_AFTER_MINUTES} דקות — נא לשבץ ידנית.{_link}"
                         )
                     else:
                         logger.info("⏰ Off-hours — 180-min escalation for %s deferred to morning", addr)
@@ -1513,9 +1518,12 @@ def _check_pending_assignment_timeouts():
                             else ""
                         )
                         portal_url = f"{base_url}/app/tech/{reminder_tech.id}" if base_url else ""
+                        _call_age = max(0, int((now - call.created_at.replace(tzinfo=timezone.utc) if call.created_at.tzinfo is None else now - call.created_at).total_seconds() / 86400))
+                        _num_str = f" S{call.call_number:05d}" if call.call_number else ""
+                        _age_str = f" (מלפני {_call_age} ימים)" if _call_age > 0 else ""
                         _wa(
                             r_phone,
-                            f"🔔 *תזכורת — קריאה ממתינה לטיפול*\n"
+                            f"🔔 *תזכורת — קריאה{_num_str}{_age_str} ממתינה לטיפול*\n"
                             f"📍 {addr}\n"
                             f"{rec_line}"
                             f"⚡ {call.fault_type}\n"

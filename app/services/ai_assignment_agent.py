@@ -348,6 +348,7 @@ def assign_with_confirmation(
             desc = service_call.description or ""
             if ctx:
                 desc = f"{desc}\n{ctx}".strip() if desc else ctx
+            _age_days = (datetime.now(timezone.utc) - service_call.created_at.replace(tzinfo=timezone.utc) if service_call.created_at.tzinfo is None else datetime.now(timezone.utc) - service_call.created_at).days
             whatsapp_service.notify_technician_new_call(
                 phone=phone,
                 technician_name=tech.name,
@@ -365,6 +366,8 @@ def assign_with_confirmation(
                 lat=elevator.latitude,
                 lng=elevator.longitude,
                 call_time=service_call.created_at,
+                call_age_days=max(0, _age_days),
+                call_number=service_call.call_number,
             )
 
     service_call.status = "ASSIGNED"

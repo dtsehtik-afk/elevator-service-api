@@ -992,7 +992,7 @@ def _answer_gemini(db, s, contents: list) -> str:
                 "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
                 "tools": _GEMINI_TOOLS,
                 "contents": contents,
-                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600},
+                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1200},
             }
             for url in (_GEMINI_PRIMARY, _GEMINI_FALLBACK):
                 resp = client.post(f"{url}?key={s.gemini_api_key}", json=payload)

@@ -6,6 +6,7 @@ import html as html_lib
 import json
 import logging
 import re
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -112,6 +113,24 @@ class IncomingCallResponse(BaseModel):
     priority: str
     fault_type: str
     enriched: bool
+
+
+# In-memory dedup for Green API webhook retries — maps idMessage → timestamp
+_seen_message_ids: dict[str, float] = {}
+_DEDUP_TTL = 60.0  # seconds
+
+
+def _is_duplicate_message(msg_id: str) -> bool:
+    """Return True if we've already processed this message within the last 60s."""
+    now = time.monotonic()
+    # Purge old entries
+    expired = [k for k, t in _seen_message_ids.items() if now - t > _DEDUP_TTL]
+    for k in expired:
+        del _seen_message_ids[k]
+    if msg_id in _seen_message_ids:
+        return True
+    _seen_message_ids[msg_id] = now
+    return False
 
 
 class WhatsAppWebhookPayload(BaseModel):
@@ -378,6 +397,12 @@ def receive_whatsapp(
 
     if not phone:
         return {"status": "empty"}
+
+    # Dedup — Green API sometimes delivers the same webhook 2-3 times
+    msg_id = msg_data.get("idMessage", "")
+    if msg_id and _is_duplicate_message(msg_id):
+        logger.warning("⏭️ Duplicate webhook ignored: idMessage=%s", msg_id)
+        return {"status": "duplicate"}
 
     # ── Location message ──────────────────────────────────────────────────────
     if msg_type in ("locationMessage", "liveLocationMessage"):

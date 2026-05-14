@@ -129,6 +129,8 @@ def notify_technician_new_call(
     lat: float = None,
     lng: float = None,
     call_time=None,
+    call_age_days: int = 0,
+    call_number: int = None,
 ) -> bool:
     """Send a new-call notification to a technician (broadcast model — first to take wins)."""
     from app.config import get_settings
@@ -158,8 +160,14 @@ def notify_technician_new_call(
     portal_url = f"{base_url}/tech/{tech_id}" if tech_id else ""
     portal_line = f"📱 *פורטל טכנאי:*\n{portal_url}\n" if portal_url else ""
 
+    num_str = f" S{call_number:05d}" if call_number else ""
+    if call_age_days > 0:
+        title = f"🔄 *קריאה מלפני {call_age_days} ימים{num_str} — חזרה לטיפול*"
+    else:
+        title = f"🔔 *קריאת שירות חדשה{num_str}*"
+
     message = (
-        f"🔔 *קריאת שירות חדשה*\n"
+        f"{title}\n"
         f"🗓 {ts}\n"
         f"════════════════════\n"
         f"{recommended_line}"
@@ -357,13 +365,16 @@ def notify_customer_outside_hours(caller_phone: str, caller_name: str) -> None:
     _send_message(_CUSTOMER_TEST_PHONE, f"[בדיקה — יועבר ל-{caller_phone}]\n\n{msg}")
 
 
-def notify_dispatcher_unassigned(phone: str, address: str, city: str, fault_type: str) -> bool:
+def notify_dispatcher_unassigned(phone: str, address: str, city: str, fault_type: str,
+                                  call_number: int = None, app_base_url: str = "") -> bool:
     """Notify the dispatcher that no technician could be assigned."""
     fault = _FAULT_LABEL.get(fault_type, fault_type)
+    num_str = f" (S{call_number:05d})" if call_number else ""
+    link_line = f"\n🔗 {app_base_url}/calls" if app_base_url else ""
     message = (
         f"⚠️ *לא נמצא טכנאי פנוי*\n"
-        f"קריאה בכתובת {address}, {city} ({fault}) "
-        f"לא שובצה אוטומטית — נא לשבץ ידנית."
+        f"קריאה{num_str} בכתובת {address}, {city} ({fault}) "
+        f"לא שובצה אוטומטית — נא לשבץ ידנית.{link_line}"
     )
     return _send_message(phone, message)
 
