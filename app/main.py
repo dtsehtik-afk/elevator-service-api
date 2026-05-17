@@ -221,6 +221,8 @@ async def lifespan(app: FastAPI):
                 # incoming_call_logs — columns added after initial table creation
                 "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_type VARCHAR(200)",
                 "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_time_raw VARCHAR(50)",
+                # assignments — store Green API message ID to enable reply-linking
+                "ALTER TABLE assignments ADD COLUMN IF NOT EXISTS whatsapp_message_id VARCHAR(200)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

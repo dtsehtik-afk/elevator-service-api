@@ -354,7 +354,7 @@ def _handle_technician_report(db, phone: str, text: str):
     logger.info("📋 %d call(s) resolved by %s", closed, tech.name)
 
 
-def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:
+def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_id: str = "") -> None:
     """
     Parse a technician's free-text reply using Gemini and accept/reject
     the relevant pending assignments.
@@ -369,6 +369,19 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s) -> None:
             .filter(Technician.phone.contains(digits[-9:]) |
                     Technician.whatsapp_number.contains(digits[-9:]))
             .first())
+
+    # Reply-linked 1/2: if the tech replied to a specific message, match via stanzaId
+    if text.strip() in ("1", "2") and quoted_msg_id:
+        linked = next((p for p in pending if p.get("whatsapp_message_id") == quoted_msg_id), None)
+        if linked:
+            if text.strip() == "1":
+                ai_assignment_agent.confirm_assignment_by_id(db, phone, linked["assignment_id"])
+                if tech:
+                    from app.services.route_service import send_route_to_technician
+                    send_route_to_technician(db, tech)
+            else:
+                ai_assignment_agent.reject_assignment_by_id(db, phone, linked["assignment_id"])
+            return
 
     # Classic 1/2: act on the MOST RECENT pending assignment (LIFO — tech is likely replying to last message)
     if text.strip() == "1":
@@ -552,9 +565,11 @@ def _poll_whatsapp_replies():
                     elif msg_kind in ("textMessage", "extendedTextMessage"):
                         # textMessage = plain text; extendedTextMessage = reply/quote
                         is_reply = msg_kind == "extendedTextMessage"
+                        stanza_id = ""
                         if is_reply:
                             ext = msg_data.get("extendedTextMessageData", {})
                             text = ext.get("text", "").strip()
+                            stanza_id = ext.get("stanzaId", "")
                             # Include quoted context so agent knows what's being replied to
                             quoted = ext.get("quotedMessage", {})
                             quoted_text = (
@@ -566,10 +581,10 @@ def _poll_whatsapp_replies():
                         else:
                             text = msg_data.get("textMessageData", {}).get("textMessage", "").strip()
 
-                        logger.info("📩 Message from %s (reply=%s): %r", phone, is_reply, text)
+                        logger.info("📩 Message from %s (reply=%s stanza=%s): %r", phone, is_reply, stanza_id, text)
                         pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
                         if pending:
-                            _handle_tech_reply(db, phone, text, pending, s)
+                            _handle_tech_reply(db, phone, text, pending, s, quoted_msg_id=stanza_id)
                         elif len(text) > 0:
                             _handle_free_text(db, phone, text, s, is_reply=is_reply)
                 finally:

@@ -44,6 +44,8 @@ class Assignment(Base):
     reminder_sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Green API idMessage of the assignment notification sent to the technician
+    whatsapp_message_id: Mapped[str] = mapped_column(String(200), nullable=True)
 
     # Relationships
     service_call: Mapped["ServiceCall"] = relationship(  # noqa: F821

@@ -356,7 +356,7 @@ def assign_with_confirmation(
             if ctx:
                 desc = f"{desc}\n{ctx}".strip() if desc else ctx
             _age_days = (datetime.now(timezone.utc) - service_call.created_at.replace(tzinfo=timezone.utc) if service_call.created_at.tzinfo is None else datetime.now(timezone.utc) - service_call.created_at).days
-            whatsapp_service.notify_technician_new_call(
+            _wa_msg_id = whatsapp_service.notify_technician_new_call(
                 phone=phone,
                 technician_name=tech.name,
                 call_id=str(service_call.id),
@@ -376,6 +376,8 @@ def assign_with_confirmation(
                 call_age_days=max(0, _age_days),
                 call_number=service_call.call_number,
             )
+            if _wa_msg_id and isinstance(_wa_msg_id, str):
+                assignment.whatsapp_message_id = _wa_msg_id
 
     service_call.status = "ASSIGNED"
     service_call.assigned_at = datetime.now(timezone.utc)
@@ -576,6 +578,7 @@ def get_pending_assignments_for_phone(db: Session, phone: str) -> list:
             "address": elevator.address if elevator else "",
             "city": elevator.city if elevator else "",
             "assigned_at": a.assigned_at,
+            "whatsapp_message_id": a.whatsapp_message_id or "",
         })
     return result
 

@@ -525,10 +525,11 @@ def receive_whatsapp(
                 )
             return {"status": "after_hours_handled"}
 
+    stanza_id = msg_data.get("extendedTextMessageData", {}).get("stanzaId", "") if msg_type in ("extendedTextMessage", "quotedMessage") else ""
     pending = ai_assignment_agent.get_pending_assignments_for_phone(db, phone)
     if pending:
         from app.services.scheduler import _handle_tech_reply
-        _handle_tech_reply(db, phone, text, pending, settings)
+        _handle_tech_reply(db, phone, text, pending, settings, quoted_msg_id=stanza_id)
         return {"status": "processed"}
 
     # Free-text: report / question / self-assign
@@ -1783,3 +1784,92 @@ def dismiss_pending_call(log_id: str, data: DismissCallRequest, db: Session = De
     log.match_notes = f"בוטל: {data.reason.strip()}"
     db.commit()
     return {"ok": True}
+
+
+@router.post("/admin/recover-unmatched-calls", summary="Recover historical unmatched calls from WhatsApp message history")
+def recover_unmatched_calls(days: int = 7, db: Session = Depends(get_db)):
+    """
+    Scan outgoing WhatsApp messages for unmatched-call notifications and create
+    IncomingCallLog records for any that aren't already in the pending queue.
+    Useful for recovering calls that were dispatched before the logging fix was deployed.
+    """
+    from datetime import datetime as _dt, timezone, timedelta
+    from app.models.whatsapp_message import WhatsAppMessage
+
+    cutoff = _dt.utcnow().replace(tzinfo=timezone.utc) - timedelta(days=days)
+
+    messages = (
+        db.query(WhatsAppMessage)
+        .filter(
+            WhatsAppMessage.direction == "out",
+            WhatsAppMessage.timestamp >= cutoff,
+        )
+        .filter(
+            WhatsAppMessage.text.ilike("%קריאה מכתובת לא מוכרת%")
+            | WhatsAppMessage.text.ilike("%כתובת לא ודאית%")
+        )
+        .order_by(WhatsAppMessage.timestamp.asc())
+        .all()
+    )
+
+    recovered = 0
+    skipped = 0
+
+    for msg in messages:
+        text = msg.text or ""
+
+        # Parse address and city from the 📍 line: "📍 *{address}, {city}*"
+        addr_match = re.search(r"📍 \*(.+?), (.+?)\*", text)
+        if not addr_match:
+            continue
+        address = addr_match.group(1).strip()
+        city = addr_match.group(2).strip()
+
+        is_partial = "כתובת לא ודאית" in text
+        match_status = "PARTIAL" if is_partial else "UNMATCHED"
+
+        name_match  = re.search(r"👤 (.+)", text)
+        phone_match = re.search(r"📞 (.+)", text)
+        ctype_match = re.search(r"🔧 (.+)", text)
+
+        caller_name  = name_match.group(1).strip()  if name_match  else None
+        caller_phone = phone_match.group(1).strip() if phone_match else None
+        call_type    = ctype_match.group(1).strip() if ctype_match else None
+
+        # Dedup: skip if a log with the same partial address already exists ±1 h of this message
+        ts = msg.timestamp
+        ts_aware = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+        window_start = ts_aware - timedelta(hours=1)
+        window_end   = ts_aware + timedelta(hours=1)
+        addr_key = address[:20]
+
+        existing = (
+            db.query(IncomingCallLog)
+            .filter(
+                IncomingCallLog.call_street.ilike(f"%{addr_key}%"),
+                IncomingCallLog.match_status.in_(["PARTIAL", "UNMATCHED"]),
+                IncomingCallLog.created_at >= window_start,
+                IncomingCallLog.created_at <= window_end,
+            )
+            .first()
+        )
+        if existing:
+            skipped += 1
+            continue
+
+        log = IncomingCallLog(
+            raw_text=text,
+            caller_name=caller_name,
+            caller_phone=caller_phone,
+            call_city=city,
+            call_street=address,
+            call_type=call_type,
+            match_status=match_status,
+            match_notes=f"שוחזר מהיסטוריית ווצאפ — {ts_aware.strftime('%d/%m/%Y %H:%M')}",
+            created_at=ts_aware,
+        )
+        db.add(log)
+        recovered += 1
+
+    db.commit()
+    return {"recovered": recovered, "skipped": skipped, "total_found": len(messages)}
