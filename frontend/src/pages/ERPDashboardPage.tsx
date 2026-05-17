@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Title, SimpleGrid, Card, Text, Badge, Group, Stack, Alert,
-  Paper, Table, Loader, Divider, RingProgress, ThemeIcon,
+  Paper, Table, Loader, Divider, RingProgress, ThemeIcon, ScrollArea,
 } from '@mantine/core'
 import { erpApi } from '../api/erp'
 import type { ERPDashboard } from '../types'
+import ActivityFeed from '../components/ActivityFeed'
 
 function StatCard({ label, value, color, sub, onClick }: { label: string; value: string | number; color?: string; sub?: string; onClick?: () => void }) {
   return (
@@ -90,6 +91,19 @@ export default function ERPDashboardPage() {
           color={data.financial.overdue_invoices > 0 ? 'red' : 'green'}
           onClick={() => navigate('/invoices?status=OVERDUE')} />
       </SimpleGrid>
+
+      <Divider mb="md" />
+
+      {/* Activity Feed */}
+      <Paper withBorder p="md" radius="md" mb="lg">
+        <Group justify="space-between" mb="sm">
+          <Title order={4}>📋 פעילות פיננסית אחרונה</Title>
+          <Badge variant="light" color="gray">עדכון כל 30 שניות</Badge>
+        </Group>
+        <ScrollArea h={280}>
+          <ActivityFeed category="finance" limit={15} />
+        </ScrollArea>
+      </Paper>
 
       <Divider mb="md" />
 

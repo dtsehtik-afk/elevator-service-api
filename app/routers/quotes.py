@@ -15,6 +15,7 @@ from app.models.elevator import Elevator
 from app.models.quote import Quote
 from app.models.technician import Technician
 from app.schemas.quote import QuoteCreate, QuoteResponse, QuoteUpdate
+from app.services.activity_service import log_activity
 
 router = APIRouter(prefix="/quotes", tags=["Quotes"])
 
@@ -57,7 +58,7 @@ def list_quotes(
 def create_quote(
     data: QuoteCreate,
     db: Session = Depends(get_db),
-    _: Technician = Depends(get_current_user),
+    current_user: Technician = Depends(get_current_user),
 ):
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
@@ -68,6 +69,11 @@ def create_quote(
     db.add(q)
     db.commit()
     db.refresh(q)
+    log_activity(db, action="quote_created",
+                 message=f"הצעת מחיר {q.number} נוצרה ללקוח {customer.name}",
+                 category="finance", actor_name=current_user.name,
+                 entity_type="quote", entity_id=q.id, entity_ref=q.number)
+    db.commit()
     return _enrich(q)
 
 
@@ -88,15 +94,30 @@ def update_quote(
     quote_id: uuid.UUID,
     data: QuoteUpdate,
     db: Session = Depends(get_db),
-    _: Technician = Depends(get_current_user),
+    current_user: Technician = Depends(get_current_user),
 ):
     q = db.query(Quote).filter(Quote.id == quote_id).first()
     if not q:
         raise HTTPException(status_code=404, detail="Quote not found")
+    old_status = q.status
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(q, k, v)
     db.commit()
     db.refresh(q)
+    if data.status and data.status != old_status:
+        customer = db.query(Customer).filter(Customer.id == q.customer_id).first()
+        cname = customer.name if customer else ""
+        STATUS_MSG = {
+            "SENT": f"הצעת מחיר {q.number} נשלחה ללקוח {cname}",
+            "ACCEPTED": f"הצעת מחיר {q.number} התקבלה ע\"י {cname}",
+            "REJECTED": f"הצעת מחיר {q.number} נדחתה ע\"י {cname}",
+        }
+        msg = STATUS_MSG.get(data.status)
+        if msg:
+            log_activity(db, action=f"quote_{data.status.lower()}",
+                         message=msg, category="finance", actor_name=current_user.name,
+                         entity_type="quote", entity_id=q.id, entity_ref=q.number)
+            db.commit()
     return _enrich(q)
 
 

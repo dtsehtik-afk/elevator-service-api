@@ -20,6 +20,7 @@ from app.routers import reports as reports_router, custom_fields as custom_field
 from app.routers import hr as hr_router
 from app.routers import part_requests as part_requests_router
 from app.routers import consultants as consultants_router
+from app.routers import activity_log as activity_log_router
 from app.routers import ai as ai_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
@@ -328,6 +329,20 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE parts ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NOT NULL DEFAULT 'ILS'",
                 "ALTER TABLE parts ADD COLUMN IF NOT EXISTS last_purchase_price NUMERIC(12,2)",
                 "ALTER TABLE parts ADD COLUMN IF NOT EXISTS average_cost NUMERIC(12,2)",
+                # activity log
+                """CREATE TABLE IF NOT EXISTS activity_log (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    actor_name VARCHAR(150),
+                    action VARCHAR(60) NOT NULL,
+                    message TEXT NOT NULL,
+                    entity_type VARCHAR(50),
+                    entity_id VARCHAR(36),
+                    entity_ref VARCHAR(100),
+                    category VARCHAR(20) NOT NULL DEFAULT 'service',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_activity_log_created_at ON activity_log (created_at DESC)",
+                "CREATE INDEX IF NOT EXISTS ix_activity_log_category ON activity_log (category)",
                 # customers
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS creation_date DATE",
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS fax VARCHAR(30)",
@@ -541,6 +556,7 @@ app.include_router(admin_console_router.router)
 app.include_router(search_router.router)
 app.include_router(consultants_router.router)
 app.include_router(part_requests_router.router, prefix="/part-requests", tags=["Part Requests"])
+app.include_router(activity_log_router.router)
 
 
 @app.get("/health", tags=["Health"])

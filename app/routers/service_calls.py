@@ -17,6 +17,7 @@ from app.schemas.service_call import (
     ServiceCallCreate, ServiceCallResponse, ServiceCallUpdate,
 )
 from app.services import service_call_service
+from app.services.activity_service import log_activity
 
 router = APIRouter()
 
@@ -80,6 +81,21 @@ def create_call(
         raise HTTPException(status_code=404, detail="Elevator not found")
 
     call = service_call_service.create_service_call(db, data, current_user.email)
+
+    # Log activity
+    try:
+        elevator = get_elevator(db, data.elevator_id)
+        addr = f"{elevator.address}, {elevator.city}" if elevator else ""
+        call_ref = f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8]
+        log_activity(
+            db, action="call_opened",
+            message=f"נפתחה קריאה {call_ref} ב{addr} ({data.fault_type})",
+            actor_name=current_user.name,
+            entity_type="service_call", entity_id=call.id, entity_ref=call_ref,
+        )
+        db.commit()
+    except Exception:
+        pass
 
     # Trigger AI assignment + WhatsApp notification
     try:
@@ -177,7 +193,26 @@ def update_call(
         if not assigned:
             raise HTTPException(status_code=403, detail="You can only update your own assigned calls")
 
+    old_status = call.status
     updated = service_call_service.update_service_call(db, call_id, data, current_user.email)
+
+    # Log status changes
+    if data.status and data.status != old_status:
+        call_ref = f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8]
+        STATUS_MSG = {
+            "IN_PROGRESS": f"קריאה {call_ref} סומנה בטיפול ע\"י {current_user.name}",
+            "RESOLVED": f"קריאה {call_ref} דווחה כפתורה ע\"י {current_user.name}",
+            "CLOSED": f"קריאה {call_ref} נסגרה ע\"י {current_user.name}",
+            "MONITORING": f"קריאה {call_ref} הועברה למעקב ע\"י {current_user.name}",
+        }
+        msg = STATUS_MSG.get(data.status, f"קריאה {call_ref} עודכנה לסטטוס {data.status}")
+        try:
+            log_activity(db, action=f"call_{data.status.lower()}",
+                         message=msg, actor_name=current_user.name,
+                         entity_type="service_call", entity_id=call_id, entity_ref=call_ref)
+            db.commit()
+        except Exception:
+            pass
 
     # Cancel any PENDING_CONFIRMATION assignments when call details are edited
     from app.models.assignment import Assignment

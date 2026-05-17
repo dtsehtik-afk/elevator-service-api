@@ -14,6 +14,7 @@ from app.models.service_call import ServiceCall
 from app.models.technician import Technician
 from app.models.warehouse import Warehouse
 from app.schemas.part_request import PartRequestCreate
+from app.services.activity_service import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,13 @@ def create_request(db: Session, data: PartRequestCreate, current_user: Technicia
     db.commit()
     db.refresh(pr)
 
+    call_ref = f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8]
+    log_activity(db, action="part_requested",
+                 message=f"{current_user.name} ביקש חלק: {part.name} (כמות: {pr.quantity}) לקריאה {call_ref}",
+                 actor_name=current_user.name,
+                 entity_type="part_request", entity_id=pr.id, entity_ref=call_ref)
+    db.commit()
+
     # Notify managers via WhatsApp
     _notify_managers_new_request(db, pr, part, call, current_user, svc_type)
 
@@ -173,7 +181,15 @@ def approve_request(
     db.commit()
     db.refresh(pr)
 
-    # Notify requester
+    part = db.query(Part).filter(Part.id == pr.part_id).first()
+    call = db.query(ServiceCall).filter(ServiceCall.id == pr.service_call_id).first()
+    call_ref = f"S{call.call_number:05d}" if call and call.call_number else str(pr.service_call_id)[:8]
+    log_activity(db, action="part_approved",
+                 message=f"חלק {part.name if part else ''} אושר ע\"י {approver.name} לקריאה {call_ref}",
+                 actor_name=approver.name,
+                 entity_type="part_request", entity_id=pr.id, entity_ref=call_ref)
+    db.commit()
+
     _notify_requester(db, pr, approved=True)
     return pr
 
@@ -192,6 +208,15 @@ def reject_request(
     pr.rejection_reason = reason
     db.commit()
     db.refresh(pr)
+
+    part = db.query(Part).filter(Part.id == pr.part_id).first()
+    call = db.query(ServiceCall).filter(ServiceCall.id == pr.service_call_id).first()
+    call_ref = f"S{call.call_number:05d}" if call and call.call_number else str(pr.service_call_id)[:8]
+    log_activity(db, action="part_rejected",
+                 message=f"בקשת חלק {part.name if part else ''} נדחתה ע\"י {rejector.name} — {reason}",
+                 actor_name=rejector.name,
+                 entity_type="part_request", entity_id=pr.id, entity_ref=call_ref)
+    db.commit()
 
     _notify_requester(db, pr, approved=False)
     return pr
@@ -264,6 +289,14 @@ def issue_part(db: Session, pr_id: uuid.UUID, current_user: Technician) -> PartR
     pr.status = "ISSUED"
     db.commit()
     db.refresh(pr)
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == pr.service_call_id).first()
+    call_ref = f"S{call.call_number:05d}" if call and call.call_number else str(pr.service_call_id)[:8]
+    log_activity(db, action="part_issued",
+                 message=f"חלק {part.name} הוצא מהמחסן (כמות: {pr.quantity}) לקריאה {call_ref}",
+                 actor_name=current_user.name if current_user else None,
+                 entity_type="part_request", entity_id=pr.id, entity_ref=call_ref)
+    db.commit()
     return pr
 
 

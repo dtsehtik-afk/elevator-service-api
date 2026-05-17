@@ -14,6 +14,7 @@ from app.models.customer import Customer
 from app.models.invoice import Invoice, Receipt
 from app.models.technician import Technician
 from app.schemas.invoice import InvoiceCreate, InvoiceResponse, InvoiceUpdate, ReceiptCreate, ReceiptResponse
+from app.services.activity_service import log_activity
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
 
@@ -70,7 +71,7 @@ def list_invoices(
 def create_invoice(
     data: InvoiceCreate,
     db: Session = Depends(get_db),
-    _: Technician = Depends(get_current_user),
+    current_user: Technician = Depends(get_current_user),
 ):
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
@@ -81,6 +82,11 @@ def create_invoice(
     db.add(inv)
     db.commit()
     db.refresh(inv)
+    log_activity(db, action="invoice_created",
+                 message=f"חשבונית {inv.number} נוצרה ללקוח {customer.name} — ₪{inv.total_amount:,.0f}",
+                 category="finance", actor_name=current_user.name,
+                 entity_type="invoice", entity_id=inv.id, entity_ref=inv.number)
+    db.commit()
     return _enrich(inv)
 
 
@@ -147,6 +153,14 @@ def add_receipt(
     _sync_status(inv, db)
     db.commit()
     db.refresh(receipt)
+
+    if inv.status == "PAID":
+        log_activity(db, action="invoice_paid",
+                     message=f"חשבונית {inv.number} שולמה במלואה — ₪{float(inv.total):,.0f}",
+                     category="finance",
+                     entity_type="invoice", entity_id=inv.id, entity_ref=inv.number)
+        db.commit()
+
     return ReceiptResponse.model_validate(receipt)
 
 

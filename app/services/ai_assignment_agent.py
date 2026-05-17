@@ -33,6 +33,7 @@ from app.models.service_call import ServiceCall
 from app.models.technician import Technician
 from app.services import maps_service, whatsapp_service
 from app.services.working_hours import is_working_hours
+from app.services.activity_service import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +382,10 @@ def assign_with_confirmation(
             new_status="IN_PROGRESS",
             notes=f"AI auto-assigned to {tech.name} (email call)",
         ))
+        call_ref = f"S{service_call.call_number:05d}" if service_call.call_number else str(service_call.id)[:8]
+        log_activity(db, action="call_assigned",
+                     message=f"קריאה {call_ref} שובצה אוטומטית ל{tech.name} (ללא אישור)",
+                     entity_type="service_call", entity_id=service_call.id, entity_ref=call_ref)
         db.commit()
         db.refresh(assignment)
         phone = tech.whatsapp_number or tech.phone
@@ -576,6 +581,13 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
         except Exception as exc:
             logger.error("Route update failed for %s: %s", tech.name, exc)
 
+    if call:
+        call_ref = f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8]
+        log_activity(db, action="assignment_confirmed",
+                     message=f"קריאה {call_ref} אושרה ע\"י {tech.name}",
+                     actor_name=tech.name,
+                     entity_type="service_call", entity_id=call.id, entity_ref=call_ref)
+        db.commit()
     logger.info("✅ %s confirmed assignment for call %s", tech.name, call.id if call else "?")
     return assignment
 
@@ -616,6 +628,11 @@ def reject_assignment(db: Session, technician_phone: str) -> Optional[Assignment
         _rej_elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
         _rej_addr = f"{_rej_elevator.address}, {_rej_elevator.city}" if _rej_elevator else "כתובת לא ידועה"
         whatsapp_service.notify_dispatcher(f"↩️ *{tech.name}* דחה את הקריאה ב{_rej_addr}")
+        call_ref = f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8]
+        log_activity(db, action="assignment_rejected",
+                     message=f"קריאה {call_ref} נדחתה ע\"י {tech.name}",
+                     actor_name=tech.name,
+                     entity_type="service_call", entity_id=call.id, entity_ref=call_ref)
         db.add(AuditLog(
             service_call_id=call.id,
             changed_by=tech.email or tech.name,

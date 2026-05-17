@@ -4,6 +4,7 @@ import {
   ThemeIcon, RingProgress, ScrollArea, Alert, Divider, Progress, Tooltip,
   ActionIcon, Box, SimpleGrid,
 } from '@mantine/core'
+import ActivityFeed from '../components/ActivityFeed'
 import { DonutChart, BarChart } from '@mantine/charts'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -834,7 +835,18 @@ export default function DashboardPage() {
         </Grid.Col>
       </Grid>
 
-      {/* Row 7 — Building heat map */}
+      {/* Row 7 — Activity Feed */}
+      <Paper withBorder p="md" radius="md">
+        <Group justify="space-between" mb="sm">
+          <Title order={4}>📋 פעילות אחרונה</Title>
+          <Badge variant="light" color="gray">עדכון כל 30 שניות</Badge>
+        </Group>
+        <ScrollArea h={320}>
+          <ActivityFeed category="service" limit={20} />
+        </ScrollArea>
+      </Paper>
+
+      {/* Row 8 — Building heat map */}
       {buildingHeatmap.length > 0 && (
         <Paper withBorder p="md" radius="md">
           <Group justify="space-between" mb="sm">
