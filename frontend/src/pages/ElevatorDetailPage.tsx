@@ -304,8 +304,10 @@ export default function ElevatorDetailPage() {
   const [residentsExpanded, setResidentsExpanded] = useState(false)
   const [assignBuildingOpen, setAssignBuildingOpen] = useState(false)
   const [assignCompanyOpen, setAssignCompanyOpen] = useState(false)
+  const [assignConsultantOpen, setAssignConsultantOpen] = useState(false)
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null)
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
+  const [selectedConsultantId, setSelectedConsultantId] = useState<string | null>(null)
   const [addToGroupOpen, setAddToGroupOpen] = useState(false)
   const [elevatorSearch, setElevatorSearch] = useState('')
   const [locationPickerOpen, setLocationPickerOpen] = useState(false)
@@ -379,6 +381,18 @@ export default function ElevatorDetailPage() {
     queryKey: ['companies-list'],
     queryFn: async () => (await client.get('/management-companies')).data,
     enabled: assignCompanyOpen,
+  })
+
+  const { data: techniciansList = [] } = useQuery({
+    queryKey: ['technicians-list'],
+    queryFn: async () => (await client.get('/technicians')).data,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: consultantsList = [] } = useQuery({
+    queryKey: ['consultants-list'],
+    queryFn: async () => (await client.get('/consultants')).data,
+    enabled: assignConsultantOpen,
   })
 
   const { data: companyDetail } = useQuery({
@@ -483,6 +497,16 @@ export default function ElevatorDetailPage() {
       setAssignCompanyOpen(false)
       setSelectedCompanyId(null)
       notifications.show({ message: 'שיוך חברת הניהול עודכן', color: 'green' })
+    },
+  })
+
+  const assignConsultantMutation = useMutation({
+    mutationFn: (consultantId: string | null) => updateElevator(id!, { consultant_id: consultantId } as any),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['elevator', id] })
+      setAssignConsultantOpen(false)
+      setSelectedConsultantId(null)
+      notifications.show({ message: 'שיוך היועץ עודכן', color: 'green' })
     },
   })
 
@@ -641,6 +665,31 @@ export default function ElevatorDetailPage() {
             onClick={() => assignCompanyMutation.mutate(selectedCompanyId!)}
           >
             שייך
+          </Button>
+        </Stack>
+      </Modal>
+
+      {/* Assign consultant modal */}
+      <Modal opened={assignConsultantOpen} onClose={() => { setAssignConsultantOpen(false); setSelectedConsultantId(null) }} title="שיוך יועץ" dir="rtl">
+        <Stack gap="sm">
+          <Select
+            label="יועץ"
+            placeholder="חפש יועץ..."
+            searchable clearable
+            data={(consultantsList as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+            value={selectedConsultantId}
+            onChange={setSelectedConsultantId}
+          />
+          <Button
+            disabled={!selectedConsultantId}
+            loading={assignConsultantMutation.isPending}
+            onClick={() => assignConsultantMutation.mutate(selectedConsultantId!)}
+          >
+            שייך
+          </Button>
+          <Divider label="או" labelPosition="center" />
+          <Button variant="outline" onClick={() => window.open('/consultants', '_blank')}>
+            + צור יועץ חדש
           </Button>
         </Stack>
       </Modal>
@@ -991,12 +1040,57 @@ export default function ElevatorDetailPage() {
                       }
                     }}
                   />
+                  <Checkbox
+                    label="תחת יועץ"
+                    checked={!!elevator.consultant_id}
+                    onChange={() => {
+                      if (elevator.consultant_id) {
+                        assignConsultantMutation.mutate(null)
+                      } else {
+                        setAssignConsultantOpen(true)
+                      }
+                    }}
+                  />
                 </Group>
                 {elevator.building_id && (
                   <Text size="xs" c="dimmed" mt={4}>
                     {siblings.length > 0 ? `${siblings.length} מעליות נוספות בקבוצה זו` : 'מעלית זו היחידה בקבוצה'}
                     {elevator.management_company_id && ` · ${elevator.management_company_name ?? 'חברת ניהול'}`}
                   </Text>
+                )}
+                {elevator.consultant_id && elevator.consultant_name && (
+                  <Text size="xs" c="dimmed" mt={2}>🧑‍💼 יועץ: {elevator.consultant_name}</Text>
+                )}
+              </Grid.Col>
+
+              {/* Responsible technician, lead source */}
+              <Grid.Col span={12}>
+                <Divider label="שיוך טכנאי ומקור" labelPosition="right" mt="sm" mb="xs" />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <Select
+                    label="טכנאי אחראי"
+                    placeholder="בחר טכנאי..."
+                    searchable clearable
+                    data={(techniciansList as any[]).map((t: any) => ({ value: t.id, label: t.name }))}
+                    value={form.responsible_technician_id ?? null}
+                    onChange={v => set('responsible_technician_id', v || null)}
+                  />
+                ) : (
+                  <Field label="טכנאי אחראי" value={elevator.responsible_technician_name ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput
+                    label="נכנסה מ (מקור)"
+                    placeholder="המלצה, טנדר, פנייה ישירה..."
+                    value={form.lead_source ?? ''}
+                    onChange={e => set('lead_source', e.target.value || null)}
+                  />
+                ) : (
+                  <Field label="נכנסה מ (מקור)" value={elevator.lead_source ?? undefined} />
                 )}
               </Grid.Col>
             </Grid>

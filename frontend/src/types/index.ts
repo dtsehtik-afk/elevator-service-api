@@ -62,8 +62,26 @@ export interface Elevator {
   management_company_id: string | null
   management_company_name: string | null
   customer_id: string | null
+  responsible_technician_id: string | null
+  responsible_technician_name: string | null
+  consultant_id: string | null
+  consultant_name: string | null
+  lead_source: string | null
   created_at: string
   updated_at: string
+}
+
+export interface Consultant {
+  id: string
+  name: string
+  phone: string | null
+  email: string | null
+  address: string | null
+  notes: string | null
+  is_active: boolean
+  consultant_contacts: { name: string; phone?: string; email?: string }[]
+  elevator_count: number
+  created_at: string | null
 }
 
 export interface ServiceCall {

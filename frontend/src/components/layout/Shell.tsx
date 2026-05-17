@@ -52,6 +52,7 @@ const SECTIONS: Section[] = [
       { label: 'דוחות בודק', path: '/inspections', icon: '🔍' },
       { label: 'מפת מעליות', path: '/map', icon: '🗺️' },
       { label: 'חברות ניהול', path: '/management-companies', icon: '🏗️' },
+      { label: 'יועצים', path: '/consultants', icon: '🧑‍💼' },
       { label: 'ייבוא נתונים', path: '/import', icon: '📥' },
     ],
   },

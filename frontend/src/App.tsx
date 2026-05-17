@@ -12,6 +12,7 @@ import TechAppPage from './pages/TechAppPage'
 import InspectionsPage from './pages/InspectionsPage'
 import PendingCallsPage from './pages/PendingCallsPage'
 import ManagementCompaniesPage from './pages/ManagementCompaniesPage'
+import ConsultantsPage from './pages/ConsultantsPage'
 import ImportPage from './pages/ImportPage'
 import MapPage from './pages/MapPage'
 import SettingsPage from './pages/SettingsPage'
@@ -63,6 +64,7 @@ export default function App() {
                   <Route path="/maintenance" element={<MaintenancePage />} />
                   <Route path="/inspections" element={<InspectionsPage />} />
                   <Route path="/management-companies" element={<ManagementCompaniesPage />} />
+                  <Route path="/consultants" element={<ConsultantsPage />} />
                   <Route path="/map" element={<MapPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/import" element={<ImportPage />} />

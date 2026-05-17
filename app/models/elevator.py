@@ -162,6 +162,16 @@ class Elevator(Base):
     customer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # טכנאי אחראי — responsible/assigned technician for this elevator
+    responsible_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # יועץ — external consultant firm
+    consultant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("consultants.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # נכנסה מ — lead source / how the elevator was acquired
+    lead_source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -170,6 +180,14 @@ class Elevator(Base):
     @property
     def management_company_name(self) -> Optional[str]:
         return self.management_company.name if self.management_company else None
+
+    @property
+    def responsible_technician_name(self) -> Optional[str]:
+        return self.responsible_technician.name if self.responsible_technician else None
+
+    @property
+    def consultant_name(self) -> Optional[str]:
+        return self.consultant.name if self.consultant else None
 
     # ── Relationships ─────────────────────────────────────────────────────────
     building: Mapped[Optional["Building"]] = relationship(  # noqa: F821
@@ -189,4 +207,10 @@ class Elevator(Base):
     )
     contacts: Mapped[list["Contact"]] = relationship(  # noqa: F821
         "Contact", back_populates="elevator", foreign_keys="Contact.elevator_id"
+    )
+    responsible_technician: Mapped[Optional["Technician"]] = relationship(  # noqa: F821
+        "Technician", foreign_keys=[responsible_technician_id]
+    )
+    consultant: Mapped[Optional["Consultant"]] = relationship(  # noqa: F821
+        "Consultant", back_populates="elevators", foreign_keys=[consultant_id]
     )

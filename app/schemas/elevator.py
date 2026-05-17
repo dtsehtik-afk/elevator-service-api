@@ -77,6 +77,9 @@ class ElevatorUpdate(BaseModel):
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
     # Grouping
     management_company_id: Optional[uuid.UUID] = None
+    responsible_technician_id: Optional[uuid.UUID] = None
+    consultant_id: Optional[uuid.UUID] = None
+    lead_source: Optional[str] = None
 
     @field_validator(
         'address', 'city', 'building_name', 'notes', 'internal_number',
@@ -151,6 +154,12 @@ class ElevatorResponse(BaseModel):
     # Grouping
     management_company_id: Optional[uuid.UUID] = None
     management_company_name: Optional[str] = None
+    responsible_technician_id: Optional[uuid.UUID] = None
+    responsible_technician_name: Optional[str] = None
+    consultant_id: Optional[uuid.UUID] = None
+    consultant_name: Optional[str] = None
+    lead_source: Optional[str] = None
+    customer_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 

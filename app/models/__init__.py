@@ -28,6 +28,8 @@ from app.models.warehouse import Warehouse
 from app.models.warehouse_stock import WarehouseStock
 from app.models.inventory_transaction import InventoryTransaction
 from app.models.whatsapp_message import WhatsAppMessage
+from app.models.consultant import Consultant
+from app.models.part_request import PartRequest
 
 __all__ = [
     "Building",
@@ -64,4 +66,6 @@ __all__ = [
     "WarehouseStock",
     "InventoryTransaction",
     "WhatsAppMessage",
+    "Consultant",
+    "PartRequest",
 ]

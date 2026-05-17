@@ -19,6 +19,7 @@ from app.routers import settings as settings_router, conversations
 from app.routers import reports as reports_router, custom_fields as custom_fields_router
 from app.routers import hr as hr_router
 from app.routers import part_requests as part_requests_router
+from app.routers import consultants as consultants_router
 from app.routers import ai as ai_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
@@ -352,6 +353,26 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS station_count INTEGER",
                 "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS erp_metadata JSONB",
                 "CREATE INDEX IF NOT EXISTS ix_service_calls_parent_call_id ON service_calls (parent_call_id)",
+                # ── Consultants ──────────────────────────────────────────────
+                """CREATE TABLE IF NOT EXISTS consultants (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name VARCHAR(255) NOT NULL UNIQUE,
+                    phone VARCHAR(30),
+                    email VARCHAR(150),
+                    address VARCHAR(255),
+                    notes TEXT,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    consultant_contacts JSONB NOT NULL DEFAULT '[]',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_consultants_name ON consultants (name)",
+                # ── Elevator new fields ───────────────────────────────────────
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS responsible_technician_id UUID REFERENCES technicians(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_responsible_technician_id ON elevators (responsible_technician_id)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS consultant_id UUID REFERENCES consultants(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_consultant_id ON elevators (consultant_id)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS lead_source VARCHAR(100)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
@@ -416,7 +437,8 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
-    "/reports", "/custom-fields", "/roles", "/hr", "/projects", "/search",
+    "/reports", "/custom-fields", "/roles", "/hr", "/projects", "/search", "/consultants",
+    "/part-requests",
 )
 
 
@@ -470,6 +492,7 @@ app.include_router(ai_router.router)
 app.include_router(projects_router.router)
 app.include_router(admin_console_router.router)
 app.include_router(search_router.router)
+app.include_router(consultants_router.router)
 app.include_router(part_requests_router.router, prefix="/part-requests", tags=["Part Requests"])
 
 
