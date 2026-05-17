@@ -148,7 +148,7 @@ export default function InventoryPage() {
         <Title order={2}>📦 מלאי חלקי חילוף</Title>
         <Group gap="xs">
           <Button variant="light" onClick={() => setReceiveOpen(true)}>📥 קבלת סחורה</Button>
-          <Button variant="light" color="orange" onClick={() => setTransferOpen(true)}>🔄 העברה בין מחסנות</Button>
+          <Button variant="light" color="orange" onClick={() => setTransferOpen(true)}>🔄 העברה בין מחסנים</Button>
           <Button onClick={() => setCreateOpen(true)}>+ חלק חדש</Button>
         </Group>
       </Group>
@@ -165,7 +165,7 @@ export default function InventoryPage() {
               {WH_TYPE_LABEL[w.warehouse_type] || w.name} — {w.name}
             </Tabs.Tab>
           ))}
-          <Tabs.Tab value="manage">⚙️ ניהול מחסנות</Tabs.Tab>
+          <Tabs.Tab value="manage">⚙️ ניהול מחסנים</Tabs.Tab>
         </Tabs.List>
       </Tabs>
 
@@ -402,7 +402,7 @@ export default function InventoryPage() {
       </Modal>
 
       {/* Transfer modal */}
-      <Modal opened={transferOpen} onClose={() => setTransferOpen(false)} title="העברה בין מחסנות" size="lg" dir="rtl">
+      <Modal opened={transferOpen} onClose={() => setTransferOpen(false)} title="העברה בין מחסנים" size="lg" dir="rtl">
         <Stack>
           <Select
             label="חלק"

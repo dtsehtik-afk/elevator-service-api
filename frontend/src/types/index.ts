@@ -362,6 +362,33 @@ export interface Lead {
   updated_at: string
 }
 
+export interface PartRequest {
+  id: string
+  service_call_id: string
+  part_id: string
+  source_warehouse_id: string | null
+  requested_by: string | null
+  approved_by: string | null
+  quantity: number
+  notes: string | null
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'ISSUED' | 'CANCELLED'
+  approval_type: 'MANAGER_OVERRIDE' | 'COMPREHENSIVE_APPROVAL'
+  service_type_snapshot: 'REGULAR' | 'COMPREHENSIVE' | null
+  approval_notes: string | null
+  rejection_reason: string | null
+  approved_at: string | null
+  faulty_part_returned: boolean
+  return_warehouse_id: string | null
+  created_at: string
+  updated_at: string
+  // Enriched
+  part_name: string | null
+  part_sku: string | null
+  requester_name: string | null
+  approver_name: string | null
+  source_warehouse_name: string | null
+}
+
 export interface ERPDashboard {
   service: {
     open_calls: number

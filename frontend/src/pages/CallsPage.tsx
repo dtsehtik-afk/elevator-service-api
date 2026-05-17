@@ -21,6 +21,7 @@ import {
 } from '../utils/constants'
 import { formatDateTime } from '../utils/dates'
 import { EditViewDrawer } from '../components/EditViewDrawer'
+import { PartRequestsTab } from '../components/PartRequestsTab'
 import { ServiceCall, CallDetail } from '../types'
 
 const PAGE_SIZE = 20
@@ -130,6 +131,15 @@ export default function CallsPage() {
   const { data: technicians = [] } = useQuery({
     queryKey: ['technicians'],
     queryFn: () => listTechnicians(),
+  })
+
+  const { data: partsForSelect = [] } = useQuery({
+    queryKey: ['parts-select'],
+    queryFn: () => client.get('/inventory/parts', { params: { limit: 500 } }).then(r => r.data as any[]),
+  })
+  const { data: warehousesForSelect = [] } = useQuery({
+    queryKey: ['warehouses-select'],
+    queryFn: () => client.get('/inventory/warehouses').then(r => r.data as any[]),
   })
 
   const { data: callDetail, isLoading: detailLoading } = useQuery({
@@ -680,6 +690,18 @@ export default function CallsPage() {
                     </Timeline.Item>
                   ))}
                 </Timeline>
+              </>
+            )}
+
+            {/* Parts replacement section */}
+            {detail && (
+              <>
+                <Divider label="🔧 החלפת חלקים" labelPosition="center" />
+                <PartRequestsTab
+                  serviceCallId={detail.id}
+                  parts={partsForSelect.map((p: any) => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''}` }))}
+                  warehouses={warehousesForSelect.map((w: any) => ({ value: w.id, label: w.name }))}
+                />
               </>
             )}
 

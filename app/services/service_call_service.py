@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -249,6 +250,15 @@ def update_service_call(
 
     old_status = call.status
 
+    # Block closing if there are issued parts whose faulty unit hasn't been returned
+    if data.status == "CLOSED" and old_status != "CLOSED":
+        from app.services.part_request_service import call_has_pending_returns
+        if call_has_pending_returns(db, call_id):
+            raise HTTPException(
+                status_code=400,
+                detail="לא ניתן לסגור קריאה עם חלקים שהוחלפו לפני החזרת החלק התקול למחסן"
+            )
+
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(call, field, value)
 
@@ -275,9 +285,8 @@ def update_service_call(
     return call
 
 
-def _next_working_day(d: "date_type") -> "date_type":
+def _next_working_day(d):
     """Advance date past Saturday (Israeli day off)."""
-    from datetime import date as date_type
     while d.weekday() == 5:  # 5 = Saturday
         d += timedelta(days=1)
     return d

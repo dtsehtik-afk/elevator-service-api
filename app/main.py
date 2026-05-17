@@ -18,6 +18,7 @@ from app.routers import customers, quotes, contracts, invoices, inventory, leads
 from app.routers import settings as settings_router, conversations
 from app.routers import reports as reports_router, custom_fields as custom_fields_router
 from app.routers import hr as hr_router
+from app.routers import part_requests as part_requests_router
 from app.routers import ai as ai_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
@@ -273,6 +274,40 @@ async def lifespan(app: FastAPI):
                    WHERE NOT EXISTS (
                        SELECT 1 FROM warehouses w WHERE w.technician_id = t.id AND w.warehouse_type = 'VEHICLE'
                    ) AND t.id IS NOT NULL""",
+                # Backfill warehouse_stock for main warehouse from parts.quantity
+                """INSERT INTO warehouse_stock (id, part_id, warehouse_id, quantity)
+                   SELECT gen_random_uuid(), p.id, w.id, p.quantity
+                   FROM parts p
+                   CROSS JOIN warehouses w
+                   WHERE w.warehouse_type = 'MAIN'
+                     AND p.quantity > 0
+                     AND NOT EXISTS (
+                         SELECT 1 FROM warehouse_stock ws
+                         WHERE ws.part_id = p.id AND ws.warehouse_id = w.id
+                     )""",
+                # ── Part requests (approval workflow) ───────────────────────
+                """CREATE TABLE IF NOT EXISTS part_requests (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    service_call_id UUID NOT NULL REFERENCES service_calls(id) ON DELETE CASCADE,
+                    part_id UUID NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
+                    source_warehouse_id UUID REFERENCES warehouses(id) ON DELETE SET NULL,
+                    requested_by UUID REFERENCES technicians(id) ON DELETE SET NULL,
+                    approved_by UUID REFERENCES technicians(id) ON DELETE SET NULL,
+                    return_warehouse_id UUID REFERENCES warehouses(id) ON DELETE SET NULL,
+                    quantity INTEGER NOT NULL DEFAULT 1,
+                    notes TEXT,
+                    status VARCHAR(30) NOT NULL DEFAULT 'PENDING_APPROVAL',
+                    approval_type VARCHAR(40) NOT NULL DEFAULT 'MANAGER_OVERRIDE',
+                    service_type_snapshot VARCHAR(20),
+                    approval_notes TEXT,
+                    rejection_reason TEXT,
+                    approved_at TIMESTAMPTZ,
+                    faulty_part_returned BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_part_requests_service_call_id ON part_requests (service_call_id)",
+                "CREATE INDEX IF NOT EXISTS ix_part_requests_status ON part_requests (status)",
                 # ── ERP Extended Fields ──────────────────────────────────────
                 # parts
                 "ALTER TABLE parts ADD COLUMN IF NOT EXISTS is_inventory_managed BOOLEAN NOT NULL DEFAULT TRUE",
@@ -435,6 +470,7 @@ app.include_router(ai_router.router)
 app.include_router(projects_router.router)
 app.include_router(admin_console_router.router)
 app.include_router(search_router.router)
+app.include_router(part_requests_router.router, prefix="/part-requests", tags=["Part Requests"])
 
 
 @app.get("/health", tags=["Health"])
