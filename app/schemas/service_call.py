@@ -112,5 +112,6 @@ class CallDetailResponse(ServiceCallResponse):
     elevator_address: str
     elevator_city: str
     elevator_serial: Optional[str]
+    elevator_manufacturer: Optional[str] = None
     assignments: List[AssignmentDetailResponse] = []
     audit_logs: List[AuditLogResponse] = []

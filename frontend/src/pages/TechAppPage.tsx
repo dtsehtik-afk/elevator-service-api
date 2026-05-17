@@ -42,6 +42,7 @@ interface PendingCall {
   travel_minutes: number | string
   lat: number | null
   lng: number | null
+  manufacturer?: string | null
 }
 
 interface TechInfo {
@@ -60,6 +61,7 @@ interface OpenCall {
   primary_tech: string | null
   lat: number | null
   lng: number | null
+  manufacturer?: string | null
 }
 
 interface MaintenanceItem {
@@ -610,11 +612,11 @@ function TechMain() {
 
   const { data: partsForSelect = [] } = useQuery({
     queryKey: ['parts-select'],
-    queryFn: () => client.get('/inventory/parts', { params: { limit: 500 } }).then(r => r.data as any[]),
+    queryFn: () => client.get('/inventory', { params: { limit: 500, is_active: true } }).then(r => r.data as any[]),
   })
   const { data: warehousesForSelect = [] } = useQuery({
     queryKey: ['warehouses-select'],
-    queryFn: () => client.get('/inventory/warehouses').then(r => r.data as any[]),
+    queryFn: () => client.get('/inventory/warehouses/list').then(r => r.data as any[]),
   })
 
   const [activeTab, setActiveTab] = useState<'calls' | 'maint' | 'reports' | 'map' | 'inventory'>('calls')
@@ -631,6 +633,7 @@ function TechMain() {
   const [transferNotes, setTransferNotes] = useState('')
   const [partReqOpen, setPartReqOpen] = useState(false)
   const [partReqCallId, setPartReqCallId] = useState<string | null>(null)
+  const [partReqManufacturer, setPartReqManufacturer] = useState<string | null>(null)
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
@@ -814,7 +817,7 @@ function TechMain() {
                     🔧 העבר לצוות טכני</Button>
                 </Group>
                 <Button fullWidth size="sm" color="yellow" variant="light" mt="xs"
-                  onClick={() => { setPartReqCallId(call.call_id); setPartReqOpen(true) }}>
+                  onClick={() => { setPartReqCallId(call.call_id); setPartReqManufacturer(call.manufacturer ?? null); setPartReqOpen(true) }}>
                   🔩 החלפת חלק
                 </Button>
               </Card>
@@ -825,8 +828,9 @@ function TechMain() {
               {partReqCallId && (
                 <PartRequestsTab
                   serviceCallId={partReqCallId}
-                  parts={partsForSelect.map((p: any) => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''}` }))}
+                  parts={partsForSelect.map((p: any) => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''}`, category: p.category }))}
                   warehouses={warehousesForSelect.map((w: any) => ({ value: w.id, label: w.name }))}
+                  elevatorManufacturer={partReqManufacturer}
                 />
               )}
             </Modal>

@@ -437,7 +437,7 @@ _API_ONLY_PREFIXES = (
     "/uploads", "/assets", "/webhooks", "/analytics",
     "/schedule", "/buildings", "/contacts", "/app/", "/settings", "/admin",
     "/customers", "/quotes", "/contracts", "/invoices", "/inventory", "/leads", "/erp",
-    "/reports", "/custom-fields", "/roles", "/hr", "/projects", "/search", "/consultants",
+    "/reports", "/custom-fields", "/roles", "/hr", "/projects", "/search",
     "/part-requests",
 )
 

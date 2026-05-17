@@ -23,11 +23,15 @@ const STATUS_LABELS: Record<string, string> = {
 
 interface Props {
   serviceCallId: string
-  parts: { value: string; label: string }[]
+  parts: { value: string; label: string; category?: string }[]
   warehouses: { value: string; label: string }[]
+  elevatorManufacturer?: string | null
 }
 
-export function PartRequestsTab({ serviceCallId, parts, warehouses }: Props) {
+export function PartRequestsTab({ serviceCallId, parts, warehouses, elevatorManufacturer }: Props) {
+  const filteredParts = elevatorManufacturer
+    ? parts.filter(p => !p.category || p.category.toLowerCase().includes(elevatorManufacturer.toLowerCase()) || elevatorManufacturer.toLowerCase().includes((p.category || '').toLowerCase()))
+    : parts
   const qc = useQueryClient()
   const role = useAuthStore(s => s.role)
   const isManager = role === 'ADMIN' || role === 'MANAGER' || role === 'DISPATCHER'
@@ -179,9 +183,12 @@ export function PartRequestsTab({ serviceCallId, parts, warehouses }: Props) {
           <Alert color="blue" size="sm">
             המערכת תבדוק את סוג השירות של הלקוח ותשלח בקשת אישור מתאימה למנהל.
           </Alert>
+          {elevatorManufacturer && filteredParts.length < parts.length && (
+            <Text size="xs" c="dimmed">מסונן לפי יצרן: {elevatorManufacturer} ({filteredParts.length} מתוך {parts.length})</Text>
+          )}
           <Select
             label="חלק" required searchable
-            data={parts}
+            data={filteredParts}
             value={form.part_id}
             onChange={v => setForm(f => ({ ...f, part_id: v || '' }))}
           />

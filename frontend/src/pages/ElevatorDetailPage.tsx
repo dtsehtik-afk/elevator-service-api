@@ -308,6 +308,10 @@ export default function ElevatorDetailPage() {
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null)
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
   const [selectedConsultantId, setSelectedConsultantId] = useState<string | null>(null)
+  const [inlineCreateCompany, setInlineCreateCompany] = useState(false)
+  const [newCompanyName, setNewCompanyName] = useState('')
+  const [inlineCreateConsultant, setInlineCreateConsultant] = useState(false)
+  const [newConsultantName, setNewConsultantName] = useState('')
   const [addToGroupOpen, setAddToGroupOpen] = useState(false)
   const [elevatorSearch, setElevatorSearch] = useState('')
   const [locationPickerOpen, setLocationPickerOpen] = useState(false)
@@ -510,6 +514,30 @@ export default function ElevatorDetailPage() {
     },
   })
 
+  const createCompanyMutation = useMutation({
+    mutationFn: (name: string) => client.post('/management-companies', { name }).then(r => r.data),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['companies-list'] })
+      setSelectedCompanyId(data.id)
+      setInlineCreateCompany(false)
+      setNewCompanyName('')
+      notifications.show({ message: 'חברת הניהול נוצרה', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה ביצירת חברה', color: 'red' }),
+  })
+
+  const createConsultantMutation = useMutation({
+    mutationFn: (name: string) => client.post('/consultants', { name }).then(r => r.data),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['consultants-list'] })
+      setSelectedConsultantId(data.id)
+      setInlineCreateConsultant(false)
+      setNewConsultantName('')
+      notifications.show({ message: 'היועץ נוצר', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה ביצירת יועץ', color: 'red' }),
+  })
+
   const locationMutation = useMutation({
     mutationFn: ({ lat, lng }: { lat: number; lng: number }) =>
       updateElevator(id!, { latitude: lat, longitude: lng } as any),
@@ -649,7 +677,7 @@ export default function ElevatorDetailPage() {
       </Modal>
 
       {/* Assign company modal */}
-      <Modal opened={assignCompanyOpen} onClose={() => { setAssignCompanyOpen(false); setSelectedCompanyId(null) }} title="שיוך לחברת ניהול" dir="rtl">
+      <Modal opened={assignCompanyOpen} onClose={() => { setAssignCompanyOpen(false); setSelectedCompanyId(null); setInlineCreateCompany(false); setNewCompanyName('') }} title="שיוך לחברת ניהול" dir="rtl">
         <Stack gap="sm">
           <Select
             label="חברת ניהול"
@@ -666,11 +694,28 @@ export default function ElevatorDetailPage() {
           >
             שייך
           </Button>
+          <Divider label="או צור חברה חדשה" labelPosition="center" />
+          {!inlineCreateCompany ? (
+            <Button variant="outline" size="xs" onClick={() => setInlineCreateCompany(true)}>+ חברת ניהול חדשה</Button>
+          ) : (
+            <Stack gap="xs">
+              <TextInput
+                placeholder="שם חברת הניהול"
+                value={newCompanyName}
+                onChange={e => setNewCompanyName(e.target.value)}
+                autoFocus
+              />
+              <Group gap="xs">
+                <Button size="xs" loading={createCompanyMutation.isPending} disabled={!newCompanyName.trim()} onClick={() => createCompanyMutation.mutate(newCompanyName.trim())}>צור</Button>
+                <Button size="xs" variant="subtle" onClick={() => { setInlineCreateCompany(false); setNewCompanyName('') }}>ביטול</Button>
+              </Group>
+            </Stack>
+          )}
         </Stack>
       </Modal>
 
       {/* Assign consultant modal */}
-      <Modal opened={assignConsultantOpen} onClose={() => { setAssignConsultantOpen(false); setSelectedConsultantId(null) }} title="שיוך יועץ" dir="rtl">
+      <Modal opened={assignConsultantOpen} onClose={() => { setAssignConsultantOpen(false); setSelectedConsultantId(null); setInlineCreateConsultant(false); setNewConsultantName('') }} title="שיוך יועץ" dir="rtl">
         <Stack gap="sm">
           <Select
             label="יועץ"
@@ -687,10 +732,23 @@ export default function ElevatorDetailPage() {
           >
             שייך
           </Button>
-          <Divider label="או" labelPosition="center" />
-          <Button variant="outline" onClick={() => window.open('/consultants', '_blank')}>
-            + צור יועץ חדש
-          </Button>
+          <Divider label="או צור יועץ חדש" labelPosition="center" />
+          {!inlineCreateConsultant ? (
+            <Button variant="outline" size="xs" onClick={() => setInlineCreateConsultant(true)}>+ יועץ חדש</Button>
+          ) : (
+            <Stack gap="xs">
+              <TextInput
+                placeholder="שם היועץ"
+                value={newConsultantName}
+                onChange={e => setNewConsultantName(e.target.value)}
+                autoFocus
+              />
+              <Group gap="xs">
+                <Button size="xs" loading={createConsultantMutation.isPending} disabled={!newConsultantName.trim()} onClick={() => createConsultantMutation.mutate(newConsultantName.trim())}>צור</Button>
+                <Button size="xs" variant="subtle" onClick={() => { setInlineCreateConsultant(false); setNewConsultantName('') }}>ביטול</Button>
+              </Group>
+            </Stack>
+          )}
         </Stack>
       </Modal>
 

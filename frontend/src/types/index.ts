@@ -141,6 +141,7 @@ export interface CallDetail extends ServiceCall {
   elevator_address: string
   elevator_city: string
   elevator_serial: string | null
+  elevator_manufacturer: string | null
   assignments: AssignmentDetail[]
   audit_logs: AuditLogEntry[]
 }

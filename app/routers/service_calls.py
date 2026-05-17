@@ -441,6 +441,7 @@ def get_call_details(
         elevator_address=elevator.address if elevator else "—",
         elevator_city=elevator.city if elevator else "—",
         elevator_serial=elevator.serial_number if elevator else None,
+        elevator_manufacturer=elevator.manufacturer if elevator else None,
         assignments=assignment_details,
         audit_logs=audit_raw,
     )

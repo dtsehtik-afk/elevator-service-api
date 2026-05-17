@@ -969,6 +969,7 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
             "travel_minutes": a.travel_minutes or "?",
             "lat": elev.latitude if elev else None,
             "lng": elev.longitude if elev else None,
+            "manufacturer": elev.manufacturer if elev else None,
         })
     return result
 
@@ -1478,6 +1479,7 @@ def open_calls_board(db: Session = Depends(get_db)):
             "primary_tech": primary_tech_name,
             "lat": elev.latitude if elev else None,
             "lng": elev.longitude if elev else None,
+            "manufacturer": elev.manufacturer if elev else None,
         })
 
     result.sort(key=lambda x: PRIORITY_ORDER.get(x["priority"], 99))

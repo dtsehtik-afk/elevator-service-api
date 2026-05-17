@@ -135,11 +135,11 @@ export default function CallsPage() {
 
   const { data: partsForSelect = [] } = useQuery({
     queryKey: ['parts-select'],
-    queryFn: () => client.get('/inventory/parts', { params: { limit: 500 } }).then(r => r.data as any[]),
+    queryFn: () => client.get('/inventory', { params: { limit: 500, is_active: true } }).then(r => r.data as any[]),
   })
   const { data: warehousesForSelect = [] } = useQuery({
     queryKey: ['warehouses-select'],
-    queryFn: () => client.get('/inventory/warehouses').then(r => r.data as any[]),
+    queryFn: () => client.get('/inventory/warehouses/list').then(r => r.data as any[]),
   })
 
   const { data: callDetail, isLoading: detailLoading } = useQuery({
@@ -699,8 +699,9 @@ export default function CallsPage() {
                 <Divider label="🔧 החלפת חלקים" labelPosition="center" />
                 <PartRequestsTab
                   serviceCallId={detail.id}
-                  parts={partsForSelect.map((p: any) => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''}` }))}
+                  parts={partsForSelect.map((p: any) => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''}`, category: p.category }))}
                   warehouses={warehousesForSelect.map((w: any) => ({ value: w.id, label: w.name }))}
+                  elevatorManufacturer={(callDetail as any)?.elevator_manufacturer ?? null}
                 />
               </>
             )}
