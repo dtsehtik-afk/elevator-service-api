@@ -27,12 +27,22 @@ const TYPE_COLORS: Record<string, string> = {
   CORPORATE: 'orange',
 }
 
+function SortTh({ col, label, sortBy, sortDir, onSort }: { col: string; label: string; sortBy: string; sortDir: 'asc' | 'desc'; onSort: (c: string) => void }) {
+  return (
+    <Table.Th style={{ cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none' }} onClick={() => onSort(col)}>
+      {label}{sortBy === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+    </Table.Th>
+  )
+}
+
 export default function CustomersPage() {
   const navigate = useNavigate()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [sortBy, setSortBy] = useState('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [createOpen, setCreateOpen] = useState(false)
   const [erpOpen, setErpOpen] = useState(false)
   const [form, setForm] = useState({
@@ -72,7 +82,19 @@ export default function CustomersPage() {
     }
   }
 
-  const rows = customers.map(c => (
+  function handleSort(col: string) {
+    if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortBy(col); setSortDir('asc') }
+  }
+
+  const sortedCustomers = [...customers].sort((a, b) => {
+    const aVal = (a as any)[sortBy] ?? ''
+    const bVal = (b as any)[sortBy] ?? ''
+    const cmp = typeof aVal === 'number' ? aVal - bVal : String(aVal).localeCompare(String(bVal), 'he')
+    return sortDir === 'asc' ? cmp : -cmp
+  })
+
+  const rows = sortedCustomers.map(c => (
     <Table.Tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/customers/${c.id}`)}>
       <Table.Td>
         <Group gap={4}>
@@ -131,14 +153,14 @@ export default function CustomersPage() {
         <Table highlightOnHover>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>שם</Table.Th>
-              <Table.Th>סוג</Table.Th>
+              <SortTh col="name" label="שם" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortTh col="customer_type" label="סוג" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <Table.Th>טלפון</Table.Th>
-              <Table.Th>עיר</Table.Th>
-              <Table.Th>מעליות</Table.Th>
-              <Table.Th>חוזים פעילים</Table.Th>
-              <Table.Th>חשבוניות פתוחות</Table.Th>
-              <Table.Th>סטטוס</Table.Th>
+              <SortTh col="city" label="עיר" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortTh col="elevator_count" label="מעליות" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortTh col="active_contracts" label="חוזים פעילים" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortTh col="open_invoices" label="חשבוניות פתוחות" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortTh col="is_active" label="סטטוס" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>

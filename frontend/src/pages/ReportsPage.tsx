@@ -238,15 +238,15 @@ export default function ReportsPage() {
 
   const activeQuickCount = Object.values(quickFilters).filter(v => v != null && v !== '').length
 
-  async function runReport(pg = page) {
+  async function runReport(pg = page, sb: string | undefined = sortBy, sd: 'asc' | 'desc' = sortDir) {
     setLoading(true)
     try {
       const data = await reportsApi.query({
         entity_type: entityType,
         columns: selectedCols.length > 0 ? selectedCols : undefined,
         filters: buildAllFilters(),
-        sort_by: sortBy,
-        sort_dir: sortDir,
+        sort_by: sb,
+        sort_dir: sd,
         skip: (pg - 1) * PAGE_SIZE,
         limit: PAGE_SIZE,
       })
@@ -702,8 +702,11 @@ export default function ReportsPage() {
                           key={col.key}
                           style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
                           onClick={() => {
-                            if (sortBy === col.key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-                            else { setSortBy(col.key); setSortDir('desc') }
+                            const newSb = col.key
+                            const newSd: 'asc' | 'desc' = sortBy === col.key ? (sortDir === 'asc' ? 'desc' : 'asc') : 'desc'
+                            setSortBy(newSb)
+                            setSortDir(newSd)
+                            runReport(page, newSb, newSd)
                           }}
                         >
                           {col.label_he}
