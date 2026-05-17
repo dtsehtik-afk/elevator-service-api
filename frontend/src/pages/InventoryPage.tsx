@@ -47,12 +47,24 @@ export default function InventoryPage() {
   const [transfer, setTransfer] = useState({ part_id: '', source_warehouse_id: '', target_warehouse_id: '', quantity: 1, notes: '' })
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [receive, setReceive] = useState({ part_id: '', warehouse_id: '', quantity: 1, unit_price: 0, reference_number: '', notes: '' })
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null)
 
   const [form, setForm] = useState({
     name: '', sku: '', category: '', unit: "יח'", description: '',
     quantity: 0, min_quantity: 1, cost_price: 0, sell_price: 0,
     supplier_name: '', supplier_phone: '', notes: '',
   })
+
+  const handleDelete = async (id: string) => {
+    try {
+      await inventoryApi.delete(id)
+      notifications.show({ message: 'החלק נמחק', color: 'green' })
+      setDeleteConfirm(null)
+      loadParts()
+    } catch {
+      notifications.show({ message: 'שגיאה במחיקה', color: 'red' })
+    }
+  }
 
   const loadParts = () => {
     setLoading(true)
@@ -227,10 +239,17 @@ export default function InventoryPage() {
                     <Table.Td>{p.sell_price ? `₪${Number(p.sell_price).toLocaleString()}` : '—'}</Table.Td>
                     <Table.Td>{p.supplier_name || '—'}</Table.Td>
                     <Table.Td>
-                      <Button size="xs" variant="light"
-                        onClick={() => { setAdjustOpen({ id: p.id, name: p.name, qty: p.quantity }); setAdjustDelta(0) }}>
-                        עדכן מלאי
-                      </Button>
+                      <Group gap={4} wrap="nowrap">
+                        <Button size="xs" variant="light"
+                          onClick={() => { setAdjustOpen({ id: p.id, name: p.name, qty: p.quantity }); setAdjustDelta(0) }}>
+                          עדכן מלאי
+                        </Button>
+                        <ActionIcon size="sm" color="red" variant="subtle"
+                          onClick={() => setDeleteConfirm({ id: p.id, name: p.name })}
+                          title="מחק חלק">
+                          🗑️
+                        </ActionIcon>
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -469,6 +488,16 @@ export default function InventoryPage() {
             onClick={handleReceive}
             disabled={!receive.part_id || !receive.warehouse_id}
           >אשר קבלה</Button>
+        </Stack>
+      </Modal>
+
+      <Modal opened={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="מחיקת חלק" size="sm" dir="rtl">
+        <Stack>
+          <Text size="sm">האם למחוק את <strong>{deleteConfirm?.name}</strong>? פעולה זו בלתי הפיכה.</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setDeleteConfirm(null)}>ביטול</Button>
+            <Button color="red" onClick={() => deleteConfirm && handleDelete(deleteConfirm.id)}>מחק</Button>
+          </Group>
         </Stack>
       </Modal>
     </>
