@@ -268,6 +268,16 @@ def update_elevator(
     # Ensure every elevator has a customer; sync contact/address changes
     _ensure_elevator_customer(db, elevator)
     _sync_elevator_to_customer(db, elevator, set(updates.keys()))
+    # Propagate management_company_id / consultant_id to all elevators in the same building group
+    group_fields = {"management_company_id", "consultant_id"} & set(updates.keys())
+    if group_fields and elevator.building_id:
+        siblings = db.query(Elevator).filter(
+            Elevator.building_id == elevator.building_id,
+            Elevator.id != elevator.id,
+        ).all()
+        for sibling in siblings:
+            for field in group_fields:
+                setattr(sibling, field, updates[field])
     try:
         db.commit()
     except IntegrityError as exc:

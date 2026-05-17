@@ -44,6 +44,8 @@ def _build_schemas():
     from app.models.inspection_report import InspectionReport
     from app.models.technician import Technician
     from app.models.assignment import Assignment
+    from app.models.management_company import ManagementCompany
+    from app.models.consultant import Consultant
 
     _Customer = Customer  # alias to avoid shadowing in lambdas
 
@@ -87,7 +89,7 @@ def _build_schemas():
         "elevators": {
             "label_he": "מעליות",
             "model": Elevator,
-            "eager": [joinedload(Elevator.management_company), joinedload(Elevator.customer)],
+            "eager": [joinedload(Elevator.management_company), joinedload(Elevator.customer), joinedload(Elevator.consultant)],
             "default_columns": ["address", "city", "status", "model", "manufacturer", "contract_end", "risk_score"],
             "columns": {
                 "id":              {"label_he": "מזהה",        "type": "text",   "filter": Elevator.id,              "get": lambda o: str(o.id)},
@@ -103,14 +105,21 @@ def _build_schemas():
                 "risk_score":      {"label_he": "ציון סיכון",  "type": "number", "filter": Elevator.risk_score,      "get": lambda o: round(o.risk_score or 0, 1)},
                 "has_debt":        {"label_he": "חוב",         "type": "bool",   "filter": Elevator.has_debt,        "get": lambda o: _fmt(o.has_debt)},
                 "warranty_end":    {"label_he": "אחריות עד",   "type": "date",   "filter": Elevator.warranty_end,    "get": lambda o: _fmt(o.warranty_end)},
-                "management_company": {"label_he": "חברת ניהול","type": "text",  "filter": None,
+                "management_company": {"label_he": "חברת ניהול","type": "text",  "filter": ManagementCompany.name,
                                        "get": lambda o: _safe(o, "management_company", "name")},
+                "consultant":      {"label_he": "יועץ",        "type": "text",   "filter": Consultant.name,
+                                    "get": lambda o: _safe(o, "consultant", "name")},
                 "customer":        {"label_he": "לקוח",        "type": "text",   "filter": _Customer.name,
                                     "get": lambda o: _safe(o, "customer", "name")},
                 "last_service_date":{"label_he":"שירות אחרון", "type": "date",   "filter": Elevator.last_service_date,"get": lambda o: _fmt(o.last_service_date)},
                 "next_service_date":{"label_he":"שירות הבא",   "type": "date",   "filter": Elevator.next_service_date,"get": lambda o: _fmt(o.next_service_date)},
+                "lead_source":     {"label_he": "נכנסה מ",     "type": "text",   "filter": Elevator.lead_source,     "get": lambda o: o.lead_source},
             },
-            "filter_joins": {_Customer: (_Customer.id == Elevator.customer_id)},
+            "filter_joins": {
+                _Customer: (_Customer.id == Elevator.customer_id),
+                ManagementCompany: (ManagementCompany.id == Elevator.management_company_id),
+                Consultant: (Consultant.id == Elevator.consultant_id),
+            },
         },
         "customers": {
             "label_he": "לקוחות",
