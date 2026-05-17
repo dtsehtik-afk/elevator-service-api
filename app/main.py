@@ -223,6 +223,56 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE incoming_call_logs ADD COLUMN IF NOT EXISTS call_time_raw VARCHAR(50)",
                 # assignments — store Green API message ID to enable reply-linking
                 "ALTER TABLE assignments ADD COLUMN IF NOT EXISTS whatsapp_message_id VARCHAR(200)",
+                # Warehouse / inventory location management
+                """CREATE TABLE IF NOT EXISTS warehouses (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name VARCHAR(100) NOT NULL,
+                    warehouse_type VARCHAR(50) NOT NULL DEFAULT 'MAIN',
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    address VARCHAR(255),
+                    technician_id UUID REFERENCES technicians(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_warehouses_technician_id ON warehouses (technician_id)",
+                """CREATE TABLE IF NOT EXISTS warehouse_stock (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    part_id UUID NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
+                    warehouse_id UUID NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+                    quantity INTEGER NOT NULL DEFAULT 0,
+                    last_updated TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    CONSTRAINT uq_stock_part_warehouse UNIQUE (part_id, warehouse_id)
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_warehouse_stock_part_id ON warehouse_stock (part_id)",
+                "CREATE INDEX IF NOT EXISTS ix_warehouse_stock_warehouse_id ON warehouse_stock (warehouse_id)",
+                """CREATE TABLE IF NOT EXISTS inventory_transactions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    part_id UUID NOT NULL REFERENCES parts(id) ON DELETE RESTRICT,
+                    source_warehouse_id UUID REFERENCES warehouses(id) ON DELETE SET NULL,
+                    target_warehouse_id UUID REFERENCES warehouses(id) ON DELETE SET NULL,
+                    transaction_type VARCHAR(50) NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    unit_price NUMERIC(12,2),
+                    reference_number VARCHAR(100),
+                    notes TEXT,
+                    created_by UUID REFERENCES technicians(id) ON DELETE SET NULL,
+                    service_call_id UUID REFERENCES service_calls(id) ON DELETE SET NULL,
+                    date TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_inventory_transactions_part_id ON inventory_transactions (part_id)",
+                "CREATE INDEX IF NOT EXISTS ix_inventory_transactions_date ON inventory_transactions (date DESC)",
+                "CREATE INDEX IF NOT EXISTS ix_inventory_transactions_service_call_id ON inventory_transactions (service_call_id)",
+                # Ensure main warehouse exists
+                """INSERT INTO warehouses (name, warehouse_type)
+                   SELECT 'מחסן ראשי', 'MAIN'
+                   WHERE NOT EXISTS (SELECT 1 FROM warehouses WHERE warehouse_type = 'MAIN')""",
+                # Auto-create VEHICLE warehouse for each technician that lacks one
+                """INSERT INTO warehouses (name, warehouse_type, technician_id)
+                   SELECT 'רכב - ' || t.name, 'VEHICLE', t.id
+                   FROM technicians t
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM warehouses w WHERE w.technician_id = t.id AND w.warehouse_type = 'VEHICLE'
+                   ) AND t.id IS NOT NULL""",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

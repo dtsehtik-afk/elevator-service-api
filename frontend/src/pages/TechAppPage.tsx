@@ -3,7 +3,7 @@
  * Accessible at /tech — no admin shell, optimized for phone
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select, Paper } from '@mantine/core'
+import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select, Paper, NumberInput } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -465,6 +465,97 @@ function ReportsTab() {
   )
 }
 
+// ── Inventory Tab ─────────────────────────────────────────────────────────
+function TechInventoryTab({ techId }: { techId: string }) {
+  const [stock, setStock] = useState<{ part_id: string; part_name: string; part_sku?: string; quantity: number; min_quantity: number; is_low_stock: boolean; unit: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [warehouseId, setWarehouseId] = useState<string | null>(null)
+  const [usageOpen, setUsageOpen] = useState(false)
+  const [usagePart, setUsagePart] = useState<{ id: string; name: string } | null>(null)
+  const [usageQty, setUsageQty] = useState(1)
+  const [usageNotes, setUsageNotes] = useState('')
+
+  useEffect(() => {
+    // Find vehicle warehouse for this technician
+    client.get('/inventory/warehouses/list').then(r => {
+      const whs: any[] = r.data
+      const veh = whs.find((w: any) => w.warehouse_type === 'VEHICLE' && w.technician_id === techId)
+      if (veh) {
+        setWarehouseId(veh.id)
+        client.get(`/inventory/warehouses/${veh.id}/stock`).then(s => {
+          setStock(s.data)
+        }).finally(() => setLoading(false))
+      } else {
+        setLoading(false)
+      }
+    }).catch(() => setLoading(false))
+  }, [techId])
+
+  const handleUse = async () => {
+    if (!usagePart || !warehouseId) return
+    try {
+      await client.post('/inventory/stock/issue', {
+        part_id: usagePart.id,
+        warehouse_id: warehouseId,
+        quantity: usageQty,
+        notes: usageNotes || undefined,
+      })
+      notifications.show({ message: `${usagePart.name} × ${usageQty} — נוכה מהמלאי`, color: 'green' })
+      setUsageOpen(false)
+      setUsageNotes('')
+      // Refresh stock
+      if (warehouseId) {
+        client.get(`/inventory/warehouses/${warehouseId}/stock`).then(s => setStock(s.data)).catch(() => {})
+      }
+    } catch (e: any) {
+      notifications.show({ message: e?.response?.data?.detail || 'שגיאה בניכוי מלאי', color: 'red' })
+    }
+  }
+
+  if (loading) return <Center h={200}><Loader /></Center>
+  if (!warehouseId) return (
+    <Card withBorder p="xl" ta="center">
+      <Text c="dimmed">אין מחסן רכב משויך לטכנאי זה</Text>
+    </Card>
+  )
+
+  return (
+    <>
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed" ta="center">מלאי ברכב שלך — לחץ על חלק לדיווח שימוש</Text>
+        {stock.length === 0 && <Card withBorder p="xl" ta="center"><Text c="dimmed">אין חלקים ברכב</Text></Card>}
+        {stock.map(s => (
+          <Card key={s.part_id} withBorder radius="md" p="sm"
+            style={{ cursor: 'pointer', borderRight: s.is_low_stock ? '4px solid #fa5252' : '4px solid #40c057' }}
+            onClick={() => { setUsagePart({ id: s.part_id, name: s.part_name }); setUsageQty(1); setUsageOpen(true) }}>
+            <Group justify="space-between">
+              <div>
+                <Text fw={600} size="sm">{s.part_name}</Text>
+                {s.part_sku && <Text size="xs" c="dimmed">{s.part_sku}</Text>}
+              </div>
+              <Badge color={s.is_low_stock ? 'red' : 'green'} size="md">
+                {s.quantity} {s.unit}
+              </Badge>
+            </Group>
+            {s.is_low_stock && <Text size="xs" c="red" mt={4}>⚠️ מלאי נמוך — נדרש חידוש</Text>}
+          </Card>
+        ))}
+      </Stack>
+
+      <Modal opened={usageOpen} onClose={() => setUsageOpen(false)}
+        title={`ניכוי מלאי — ${usagePart?.name}`} dir="rtl">
+        <Stack>
+          <NumberInput label="כמות" required value={usageQty} min={1}
+            onChange={v => setUsageQty(Number(v) || 1)} />
+          <Textarea label="הערות (אופציונלי)" value={usageNotes}
+            onChange={e => setUsageNotes(e.target.value)} />
+          <Button onClick={handleUse}>אשר ניכוי</Button>
+        </Stack>
+      </Modal>
+    </>
+  )
+}
+
 // ── Map Tab ───────────────────────────────────────────────────────────────
 function MapTab({ techId }: { techId: string }) {
   const { data: pins = [], isLoading } = useQuery({ queryKey: ['map-pins', techId], queryFn: () => fetchMapPins(techId) })
@@ -516,7 +607,7 @@ function TechMain() {
     refetchInterval: 30000,
   })
 
-  const [activeTab, setActiveTab] = useState<'calls' | 'maint' | 'reports' | 'map'>('calls')
+  const [activeTab, setActiveTab] = useState<'calls' | 'maint' | 'reports' | 'map' | 'inventory'>('calls')
   const [resolveOpen, setResolveOpen] = useState(false)
   const [resolveCallId, setResolveCallId] = useState<string | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
@@ -646,7 +737,7 @@ function TechMain() {
 
       {/* Tab bar */}
       <div style={{ display: 'flex', background: '#fff', borderBottom: '1px solid #e5e7eb', overflowX: 'auto' }}>
-        {([['calls','🔧 קריאות'],['maint','🛠 תחזוקה'],['reports','📋 בודק'],['map','🗺 חמ"ל']] as const).map(([id, label]) => (
+        {([['calls','🔧 קריאות'],['maint','🛠 תחזוקה'],['reports','📋 בודק'],['map','🗺 חמ"ל'],['inventory','📦 מלאי']] as const).map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{ flex: 1, padding: '10px 4px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, fontWeight: activeTab === id ? 700 : 400, color: activeTab === id ? '#1a73e8' : '#555', borderBottom: activeTab === id ? '3px solid #1a73e8' : '3px solid transparent', whiteSpace: 'nowrap' }}>
             {label}
@@ -658,6 +749,7 @@ function TechMain() {
         {activeTab === 'maint' && techId && <MaintenanceTab techId={techId} />}
         {activeTab === 'reports' && <ReportsTab />}
         {activeTab === 'map' && techId && <MapTab techId={techId} />}
+        {activeTab === 'inventory' && techId && <TechInventoryTab techId={techId} />}
 
         {activeTab === 'calls' && (isLoading ? <Center h={200}><Loader /></Center> : (
           <>
