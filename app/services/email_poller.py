@@ -326,9 +326,11 @@ def _gemini_fuzzy_match(candidates, email_address: str, api_key: str):
             "ייתכנו שגיאות כתיב, קיצורים, או ניסוח שונה.\n"
             f"כתובת מהמייל: \"{email_address}\"\n"
             f"רשימת כתובות במערכת:\n{options}\n\n"
-            "אם אחת הכתובות ברשימה תואמת (גם עם שגיאת כתיב קלה), "
-            "החזר JSON בלבד: {\"match\": <מספר_שורה>, \"confidence\": \"HIGH\"|\"LOW\"}\n"
-            "אם אין התאמה סבירה, החזר: {\"match\": null}"
+            "כללים חשובים:\n"
+            "- HIGH רק אם שם הרחוב תואם (כולל שגיאות כתיב קלות) ומספר הבית זהה או לא קיים.\n"
+            "- אם מספרי הבית שונים (למשל 28 vs 21) — החזר LOW או null, לא HIGH.\n"
+            "- שגיאות כתיב בשם רחוב בלבד (ללא הבדל במספר) — HIGH מותר.\n"
+            "החזר JSON בלבד: {\"match\": <מספר_שורה_או_null>, \"confidence\": \"HIGH\"|\"LOW\"}"
         )
         resp = httpx.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
@@ -755,6 +757,37 @@ def poll_emails(db) -> int:
                     except Exception as exc:
                         logger.error("Failed to save pending unmatched call log: %s", exc)
                     _record_as_scanned(db, message_id)
+                    mail.store(mid, "+FLAGS", "\\Seen")
+                    continue
+
+                # Lead detection — skip service call creation for sales inquiries
+                _LEAD_KEYWORDS = ("מתעניין", "הצעת מחיר", "פגישה", "הדגמה", "ייעוץ")
+                _call_type_text = (fields.get("call_type") or "").strip()
+                if any(kw in _call_type_text for kw in _LEAD_KEYWORDS):
+                    logger.info("🔕 Lead call detected ('%s') — skipping service call", _call_type_text)
+                    try:
+                        from app.models.lead import Lead
+                        from app.services.whatsapp_service import notify_sales_managers
+                        _addr_str = " ".join(filter(None, [fields.get("address"), fields.get("city")]))
+                        _lead = Lead(
+                            name=fields.get("name") or fields.get("phone") or "ליד נכנס",
+                            phone=fields.get("phone") or None,
+                            source="PHONE",
+                            status="NEW",
+                            notes=f"כתובת: {_addr_str}\nסוג פניה: {_call_type_text}\n{fields.get('description') or ''}".strip(),
+                        )
+                        db.add(_lead)
+                        db.add(ServiceCallEmailScan(message_id=message_id))
+                        db.commit()
+                        notify_sales_managers(
+                            db,
+                            f"🆕 *ליד חדש נכנס*\n"
+                            f"👤 {fields.get('name') or ''} {fields.get('phone') or ''}\n"
+                            f"📍 {_addr_str}\n"
+                            f"💬 {_call_type_text}",
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to create lead from email: %s", exc)
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 

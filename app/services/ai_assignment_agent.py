@@ -19,6 +19,7 @@ Flow
 """
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -34,6 +35,12 @@ from app.services import maps_service, whatsapp_service
 from app.services.working_hours import is_working_hours
 
 logger = logging.getLogger(__name__)
+
+_INTERNAL_TAGS = re.compile(r'\s*\[(dispatcher_notified|maint_pending_notify|maint_notified)\]', re.IGNORECASE)
+
+def _clean_description(desc: str) -> str:
+    """Strip internal scheduler tags from description before sending to technicians."""
+    return _INTERNAL_TAGS.sub("", desc).strip()
 
 # Base coordinates for technician home cities (used before GPS is shared)
 _CITY_FALLBACK = maps_service.CITY_COORDS
@@ -291,7 +298,7 @@ def assign_with_confirmation(
         phone = tech.whatsapp_number or tech.phone
         if phone:
             ctx = _elevator_context(db, elevator.id)
-            desc = service_call.description or ""
+            desc = _clean_description(service_call.description or "")
             if ctx:
                 desc = f"{desc}\n{ctx}".strip() if desc else ctx
             whatsapp_service.notify_technician_auto_assigned(
@@ -345,7 +352,7 @@ def assign_with_confirmation(
         phone = tech.whatsapp_number or tech.phone
         if phone:
             ctx = _elevator_context(db, elevator.id)
-            desc = service_call.description or ""
+            desc = _clean_description(service_call.description or "")
             if ctx:
                 desc = f"{desc}\n{ctx}".strip() if desc else ctx
             _age_days = (datetime.now(timezone.utc) - service_call.created_at.replace(tzinfo=timezone.utc) if service_call.created_at.tzinfo is None else datetime.now(timezone.utc) - service_call.created_at).days
