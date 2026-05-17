@@ -84,6 +84,8 @@ export interface Elevator {
   customer_id: string | null
   responsible_technician_id: string | null
   responsible_technician_name: string | null
+  maintenance_technician_id: string | null
+  maintenance_technician_name: string | null
   consultant_id: string | null
   consultant_name: string | null
   lead_source: string | null

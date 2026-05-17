@@ -1290,6 +1290,22 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
+                  <Select
+                    label="טכנאי אחראי תחזוקה"
+                    placeholder="בחר טכנאי תחזוקה..."
+                    searchable clearable
+                    data={(techniciansList as any[])
+                      .filter((t: any) => t.role === 'MAINTENANCE_TECHNICIAN')
+                      .map((t: any) => ({ value: t.id, label: t.name }))}
+                    value={form.maintenance_technician_id ?? null}
+                    onChange={v => set('maintenance_technician_id', v || null)}
+                  />
+                ) : (
+                  <Field label="טכנאי אחראי תחזוקה" value={(elevator as any).maintenance_technician_name ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
                   <TextInput
                     label="נכנסה מ (מקור)"
                     placeholder="המלצה, טנדר, פנייה ישירה..."

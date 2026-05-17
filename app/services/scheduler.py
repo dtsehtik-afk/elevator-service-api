@@ -59,6 +59,45 @@ def _transcribe_voice(msg_data: dict, settings) -> str:
         return ""
 
 
+def _auto_assign_maintenance_tech(db, service_call, elevator):
+    """
+    Auto-assign a maintenance technician to a newly created MAINTENANCE call.
+    Priority: elevator.maintenance_technician_id → any MAINTENANCE_TECHNICIAN → leave OPEN.
+    """
+    from app.models.assignment import Assignment
+    from app.models.technician import Technician
+
+    tech = None
+
+    # 1. Dedicated maintenance technician for this elevator
+    if elevator.maintenance_technician_id:
+        tech = db.query(Technician).filter(
+            Technician.id == elevator.maintenance_technician_id,
+            Technician.is_active == True,  # noqa: E712
+        ).first()
+
+    # 2. Any available MAINTENANCE_TECHNICIAN
+    if not tech:
+        tech = db.query(Technician).filter(
+            Technician.role == "MAINTENANCE_TECHNICIAN",
+            Technician.is_active == True,  # noqa: E712
+            Technician.is_available == True,  # noqa: E712
+        ).first()
+
+    if not tech:
+        return  # leave OPEN for dispatcher
+
+    assignment = Assignment(
+        service_call_id=service_call.id,
+        technician_id=tech.id,
+        status="PENDING_CONFIRMATION",
+    )
+    db.add(assignment)
+    service_call.status = "ASSIGNED"
+    db.commit()
+    logger.info("Maintenance call %s auto-assigned to %s", service_call.id, tech.name)
+
+
 def _run_nightly_maintenance():
     """
     Nightly job: mark overdue maintenances + tiered maintenance call creation.
@@ -148,7 +187,12 @@ def _run_nightly_maintenance():
             )
             db.add(sc)
             db.commit()
+            db.refresh(sc)
             opened += 1
+
+            # Auto-assign maintenance technician if defined
+            _auto_assign_maintenance_tech(db, sc, elev)
+
 
         logger.info(
             "Nightly maintenance: %d overdue, %d calls opened, %d upgraded, %d notified",

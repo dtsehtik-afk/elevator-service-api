@@ -78,6 +78,7 @@ class ElevatorUpdate(BaseModel):
     # Grouping
     management_company_id: Optional[uuid.UUID] = None
     responsible_technician_id: Optional[uuid.UUID] = None
+    maintenance_technician_id: Optional[uuid.UUID] = None
     consultant_id: Optional[uuid.UUID] = None
     lead_source: Optional[str] = None
     # Extended technical specs (already in model, missing from schema)
@@ -207,6 +208,8 @@ class ElevatorResponse(BaseModel):
     management_company_name: Optional[str] = None
     responsible_technician_id: Optional[uuid.UUID] = None
     responsible_technician_name: Optional[str] = None
+    maintenance_technician_id: Optional[uuid.UUID] = None
+    maintenance_technician_name: Optional[str] = None
     consultant_id: Optional[uuid.UUID] = None
     consultant_name: Optional[str] = None
     lead_source: Optional[str] = None

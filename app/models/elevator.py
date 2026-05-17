@@ -166,6 +166,10 @@ class Elevator(Base):
     responsible_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # טכנאי אחראי תחזוקה — dedicated maintenance technician for this elevator
+    maintenance_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # יועץ — external consultant firm
     consultant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("consultants.id", ondelete="SET NULL"), nullable=True, index=True
@@ -184,6 +188,10 @@ class Elevator(Base):
     @property
     def responsible_technician_name(self) -> Optional[str]:
         return self.responsible_technician.name if self.responsible_technician else None
+
+    @property
+    def maintenance_technician_name(self) -> Optional[str]:
+        return self.maintenance_technician.name if self.maintenance_technician else None
 
     @property
     def consultant_name(self) -> Optional[str]:
@@ -218,6 +226,9 @@ class Elevator(Base):
     )
     responsible_technician: Mapped[Optional["Technician"]] = relationship(  # noqa: F821
         "Technician", foreign_keys=[responsible_technician_id]
+    )
+    maintenance_technician: Mapped[Optional["Technician"]] = relationship(  # noqa: F821
+        "Technician", foreign_keys=[maintenance_technician_id]
     )
     consultant: Mapped[Optional["Consultant"]] = relationship(  # noqa: F821
         "Consultant", back_populates="elevators", foreign_keys=[consultant_id]

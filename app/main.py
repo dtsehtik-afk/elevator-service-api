@@ -370,6 +370,8 @@ async def lifespan(app: FastAPI):
                 # ── Elevator new fields ───────────────────────────────────────
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS responsible_technician_id UUID REFERENCES technicians(id) ON DELETE SET NULL",
                 "CREATE INDEX IF NOT EXISTS ix_elevators_responsible_technician_id ON elevators (responsible_technician_id)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS maintenance_technician_id UUID REFERENCES technicians(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_maintenance_technician_id ON elevators (maintenance_technician_id)",
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS consultant_id UUID REFERENCES consultants(id) ON DELETE SET NULL",
                 "CREATE INDEX IF NOT EXISTS ix_elevators_consultant_id ON elevators (consultant_id)",
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS lead_source VARCHAR(100)",
