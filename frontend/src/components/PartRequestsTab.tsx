@@ -9,7 +9,7 @@ import {
   listPartRequests, createPartRequest, approvePartRequest,
   rejectPartRequest, issuePartRequest, returnFaultyPart,
 } from '../api/partRequests'
-import { useAuthStore } from '../store/authStore'
+import { useAuthStore } from '../stores/authStore'
 import type { PartRequest } from '../types'
 
 const STATUS_COLORS: Record<string, string> = {
