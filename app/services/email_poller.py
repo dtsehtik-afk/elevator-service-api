@@ -726,45 +726,11 @@ def poll_emails(db) -> int:
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
-                find_result = _find_elevator(db, fields["city"], fields["address"], fields)
-                elevator = find_result.elevator
-
-                if elevator is None:
-                    # No confirmed match — save to pending queue so dispatcher can assign manually
-                    logger.info(
-                        "📍 No elevator match for (%s %s) — saving to pending queue",
-                        fields.get("city"), fields.get("address"),
-                    )
-                    try:
-                        from app.models.incoming_call import IncomingCallLog
-                        _fault = fields.get("fault_type", "OTHER")
-                        _priority = fields.get("priority", "MEDIUM")
-                        pending_log = IncomingCallLog(
-                            raw_text=body,
-                            caller_name=fields.get("name") or None,
-                            caller_phone=fields.get("phone") or None,
-                            call_city=fields.get("city") or None,
-                            call_street=fields.get("address") or None,
-                            call_type=fields.get("call_type") or None,
-                            fault_type=_fault if _fault in ("STUCK","DOOR","ELECTRICAL","MECHANICAL","SOFTWARE","RESCUE","MAINTENANCE","OTHER") else "OTHER",
-                            priority=_priority if _priority in ("CRITICAL","HIGH","MEDIUM","LOW") else "MEDIUM",
-                            match_status=find_result.match_status,
-                            match_notes=find_result.match_notes,
-                            elevator_id=find_result.closest.id if find_result.closest else None,
-                        )
-                        db.add(pending_log)
-                        db.commit()
-                    except Exception as exc:
-                        logger.error("Failed to save pending unmatched call log: %s", exc)
-                    _record_as_scanned(db, message_id)
-                    mail.store(mid, "+FLAGS", "\\Seen")
-                    continue
-
-                # Lead detection — skip service call creation for sales inquiries
+                # Lead detection — must happen FIRST, before elevator lookup or pending queue
                 _LEAD_KEYWORDS = ("מתעניין", "הצעת מחיר", "פגישה", "הדגמה", "ייעוץ")
                 _call_type_text = (fields.get("call_type") or "").strip()
                 if any(kw in _call_type_text for kw in _LEAD_KEYWORDS):
-                    logger.info("🔕 Lead call detected ('%s') — skipping service call", _call_type_text)
+                    logger.info("🔕 Lead call detected ('%s') — routing to sales, skipping service call", _call_type_text)
                     try:
                         from app.models.lead import Lead
                         from app.services.whatsapp_service import notify_sales_managers
@@ -788,6 +754,38 @@ def poll_emails(db) -> int:
                         )
                     except Exception as exc:
                         logger.error("Failed to create lead from email: %s", exc)
+                    mail.store(mid, "+FLAGS", "\\Seen")
+                    continue
+
+                # Elevator lookup — after lead detection
+                find_result = _find_elevator(db, fields["city"], fields["address"], fields)
+                elevator = find_result.elevator
+
+                if elevator is None:
+                    logger.info("📍 No elevator match for (%s %s) — saving to pending queue",
+                                fields.get("city"), fields.get("address"))
+                    try:
+                        from app.models.incoming_call import IncomingCallLog
+                        _fault = fields.get("fault_type", "OTHER")
+                        _priority = fields.get("priority", "MEDIUM")
+                        pending_log = IncomingCallLog(
+                            raw_text=body,
+                            caller_name=fields.get("name") or None,
+                            caller_phone=fields.get("phone") or None,
+                            call_city=fields.get("city") or None,
+                            call_street=fields.get("address") or None,
+                            call_type=fields.get("call_type") or None,
+                            fault_type=_fault if _fault in ("STUCK","DOOR","ELECTRICAL","MECHANICAL","SOFTWARE","RESCUE","MAINTENANCE","OTHER") else "OTHER",
+                            priority=_priority if _priority in ("CRITICAL","HIGH","MEDIUM","LOW") else "MEDIUM",
+                            match_status=find_result.match_status,
+                            match_notes=find_result.match_notes,
+                            elevator_id=find_result.closest.id if find_result.closest else None,
+                        )
+                        db.add(pending_log)
+                        db.commit()
+                    except Exception as exc:
+                        logger.error("Failed to save pending unmatched call log: %s", exc)
+                    _record_as_scanned(db, message_id)
                     mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
