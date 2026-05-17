@@ -222,9 +222,16 @@ def update_checklist(
             checklist[idx] = entry
 
     report.deficiencies = checklist
-    all_done = all(item.get("done", False) for item in checklist)
-    any_done = any(item.get("done", False) for item in checklist)
-    report.report_status = "CLOSED" if all_done else ("PARTIAL" if any_done else "OPEN")
+    # Ignore null-entry deficiencies ("1. אין" etc.) when computing status
+    from app.services.inspection_service import _is_null_deficiency
+    real_items = [item for item in checklist if not _is_null_deficiency(item)]
+    if not real_items:
+        report.report_status = "CLOSED"
+    else:
+        all_done = all(item.get("done", False) for item in real_items)
+        any_done = any(item.get("done", False) for item in real_items)
+        report.report_status = "CLOSED" if all_done else ("PARTIAL" if any_done else "OPEN")
+    report.deficiency_count = len(real_items)
     db.commit()
     return {"ok": True, "report_status": report.report_status}
 

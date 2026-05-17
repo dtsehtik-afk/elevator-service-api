@@ -1499,6 +1499,7 @@ def _check_pending_assignment_timeouts():
                 if call and elevator:
                     from app.config import get_settings as _gs
                     from app.services.whatsapp_service import _send_message as _wa
+                    from app.services.working_hours import is_working_hours
                     base_url = getattr(_gs(), "app_base_url", "").rstrip("/")
 
                     # Determine recommended tech (lowest score from current rankings)
@@ -1774,18 +1775,20 @@ _DEFICIENCY_THRESHOLDS = [
 
 def _check_inspection_deficiency_escalation():
     """
-    Runs every 6 hours. For open inspection reports with deficiencies:
-    - 7+ days: yellow warning to dispatcher (WhatsApp)
-    - 14+ days: orange urgent to dispatcher (WhatsApp)
-    - 30+ days: red urgent to dispatcher (WhatsApp only — no auto service-call)
+    Runs every 6 hours. Escalates open inspection deficiencies:
 
-    Inspection deficiencies are tracked and resolved through the inspection-reports
-    dashboard, not through regular service calls.
+    Per-deficiency deadline (from 'תוך X יום' in description):
+    - 5 days before deadline: ⚠️ approaching warning
+    - On/after deadline:      🔴 overdue alert
+
+    Fallback (no parsed deadline):
+    - 7 / 14 / 30 days since inspection: yellow / orange / red
     """
-    from datetime import date
+    from datetime import date, timedelta
     from app.database import SessionLocal
     from app.models.inspection_report import InspectionReport
     from app.models.elevator import Elevator
+    from app.services.inspection_service import _is_null_deficiency
     from app.services.whatsapp_service import notify_dispatcher
 
     db = SessionLocal()
@@ -1802,32 +1805,72 @@ def _check_inspection_deficiency_escalation():
         )
 
         for report in open_reports:
-            days_since = (today - report.inspection_date).days
             elevator = db.query(Elevator).filter(Elevator.id == report.elevator_id).first()
             if not elevator:
                 continue
-
             addr = f"{elevator.address}, {elevator.city}"
+            last_note = report.notes or ""
+            changed = False
+
+            # ── Per-deficiency deadline alerts ────────────────────────────────
+            for idx, deficiency in enumerate((report.deficiencies or [])):
+                if deficiency.get("done") or _is_null_deficiency(deficiency):
+                    continue
+                deadline_days = deficiency.get("deadline_days")
+                if not deadline_days or not report.inspection_date:
+                    continue
+                deadline_date = report.inspection_date + timedelta(days=deadline_days)
+                days_left = (deadline_date - today).days
+                desc_short = (deficiency.get("description") or "")[:60]
+
+                if days_left <= 0:
+                    marker = f"[def_overdue_{idx}_{deadline_date}]"
+                    if marker not in last_note:
+                        notify_dispatcher(
+                            f"🔴 *ליקוי בוקר עבר מועד טיפול!*\n"
+                            f"📍 {addr}\n"
+                            f"📋 {desc_short}\n"
+                            f"⏰ מועד לטיפול היה: {deadline_date.strftime('%d/%m/%Y')} ({abs(days_left)} ימים באיחור)\n"
+                            f"🔗 טפל בדשבורד › דוחות בודק"
+                        )
+                        last_note = (last_note + f"\n{marker}").strip()
+                        changed = True
+                elif days_left <= 5:
+                    marker = f"[def_warn_{idx}_{deadline_date}]"
+                    if marker not in last_note:
+                        notify_dispatcher(
+                            f"⚠️ *ליקוי בוקר מתקרב לדד-ליין*\n"
+                            f"📍 {addr}\n"
+                            f"📋 {desc_short}\n"
+                            f"⏰ יש לטפל עד: {deadline_date.strftime('%d/%m/%Y')} (עוד {days_left} ימים)\n"
+                            f"🔗 טפל בדשבורד › דוחות בודק"
+                        )
+                        last_note = (last_note + f"\n{marker}").strip()
+                        changed = True
+
+            # ── Fallback: fixed-threshold escalation for reports without deadlines ─
+            days_since = (today - report.inspection_date).days
             matched_threshold = None
             for threshold_days, color, label in _DEFICIENCY_THRESHOLDS:
                 if days_since >= threshold_days:
                     matched_threshold = (threshold_days, color, label)
 
-            if not matched_threshold:
-                continue
+            if matched_threshold:
+                threshold_days, color, label = matched_threshold
+                marker = f"[escalation_{threshold_days}d]"
+                if marker not in last_note:
+                    notify_dispatcher(
+                        f"{color} *ליקויי בודק ממתינים* ב{addr}\n"
+                        f"⏳ {days_since} ימים ללא טיפול\n"
+                        f"🔧 {report.deficiency_count} ליקויים מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}\n"
+                        f"📊 {label}\n"
+                        f"🔗 טפל בדשבורד › דוחות בודק"
+                    )
+                    last_note = (last_note + f"\n{marker}").strip()
+                    changed = True
 
-            threshold_days, color, label = matched_threshold
-            last_note = report.notes or ""
-            marker = f"[escalation_{threshold_days}d]"
-            if marker not in last_note:
-                notify_dispatcher(
-                    f"{color} *ליקויי בודק ממתינים* ב{addr}\n"
-                    f"⏳ {days_since} ימים ללא טיפול\n"
-                    f"🔧 {report.deficiency_count} ליקויים מתסקיר {report.inspection_date.strftime('%d/%m/%Y')}\n"
-                    f"📊 {label}\n"
-                    f"🔗 טפל בדשבורד › דוחות בודק"
-                )
-                report.notes = (last_note + f"\n{marker}").strip()
+            if changed:
+                report.notes = last_note
                 db.commit()
 
     except Exception as exc:

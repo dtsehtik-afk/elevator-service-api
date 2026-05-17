@@ -20,6 +20,29 @@ _UPLOADS_DIR = Path("uploads/inspections")
 
 logger = logging.getLogger(__name__)
 
+# ── Deficiency helpers ────────────────────────────────────────────────────────
+
+# Matches empty / "אין" / "none" / "תקין" deficiency descriptions (nulls from Gemini)
+_NULL_DEF_RE = re.compile(
+    r'^\s*(\d+[\.\)]\s*)?(אין|none|n/a|לא\s+נמצאו|תקין|ok)\s*$',
+    re.IGNORECASE
+)
+
+# Matches "תוך X יום" or "לטפל תוך X יום" patterns in deficiency descriptions
+_DEADLINE_RE = re.compile(r'(?:לטפל|לתקן|לתקון|יש\s+לטפל)?\s*תוך\s+(\d+)\s+יום', re.IGNORECASE)
+
+
+def _is_null_deficiency(d: dict) -> bool:
+    """Return True if a deficiency entry is effectively empty (e.g. '1. אין')."""
+    desc = (d.get("description") or "").strip()
+    return not desc or bool(_NULL_DEF_RE.match(desc))
+
+
+def _parse_deadline_days(text: str) -> Optional[int]:
+    """Extract number of days from 'תוך X יום' in a deficiency description."""
+    m = _DEADLINE_RE.search(text)
+    return int(m.group(1)) if m else None
+
 _INSPECTION_PROMPT = """אתה מנתח דוחות ביקורת תקינות מעליות בישראל.
 קרא את המסמך המצורף וחלץ את המידע הבא. החזר JSON בלבד ללא כל טקסט נוסף, ללא markdown:
 
@@ -169,7 +192,14 @@ def process_inspection_report(
 
     inspection_date_str = parsed.get("inspection_date")
     result_str = parsed.get("result", "UNKNOWN").upper()
-    deficiencies = parsed.get("deficiencies") or []
+    raw_deficiencies = parsed.get("deficiencies") or []
+    # Strip null entries like "1. אין" that Gemini sometimes produces
+    deficiencies = [d for d in raw_deficiencies if not _is_null_deficiency(d)]
+    # Annotate each deficiency with parsed deadline_days ("תוך X יום")
+    for d in deficiencies:
+        days = _parse_deadline_days(d.get("description", ""))
+        if days:
+            d["deadline_days"] = days
     inspector_name = parsed.get("inspector_name")
     serial_number = parsed.get("serial_number")
     labor_file_number = (parsed.get("labor_file_number") or "").strip() or None
@@ -253,7 +283,8 @@ def process_inspection_report(
         result=result_str if result_str in ("PASS", "FAIL") else "UNKNOWN",
         inspector_name=inspector_name,
         deficiency_count=len(deficiencies),
-        deficiencies=deficiencies if deficiencies else None,
+        deficiencies=deficiencies or None,
+        report_status="NA" if not deficiencies else "OPEN",
         match_status=match_status,
         match_score=round(match_score, 3) if match_score is not None else None,
     )
