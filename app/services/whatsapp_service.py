@@ -96,6 +96,11 @@ def _normalize_phone(phone: str) -> Optional[str]:
 
 # ── Public helpers ────────────────────────────────────────────────────────────
 
+def send_whatsapp_message(phone: str, text: str) -> bool:
+    """Send a plain WhatsApp message to a phone number. Returns True on success."""
+    return bool(_send_message(phone, text))
+
+
 def _now_il() -> str:
     """Return current Israel date/time as 'DD/MM/YYYY HH:MM'."""
     return datetime.now(_IL_TZ).strftime("%d/%m/%Y %H:%M")
