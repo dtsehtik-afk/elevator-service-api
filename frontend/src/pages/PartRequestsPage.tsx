@@ -25,7 +25,7 @@ const STATUS_LABELS: Record<string, string> = {
 export default function PartRequestsPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const role = useAuthStore(s => s.role)
+  const role = useAuthStore(s => s.userRole)
   const isManager = role === 'ADMIN' || role === 'MANAGER' || role === 'DISPATCHER'
 
   // '' = all statuses
