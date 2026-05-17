@@ -373,6 +373,24 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS consultant_id UUID REFERENCES consultants(id) ON DELETE SET NULL",
                 "CREATE INDEX IF NOT EXISTS ix_elevators_consultant_id ON elevators (consultant_id)",
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS lead_source VARCHAR(100)",
+                # ── Deep technical specs ──────────────────────────────────
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS engine_serial VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS controller_serial VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS load_capacity_kg INTEGER",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS max_persons INTEGER",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS speed_m_s FLOAT",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS stops_count INTEGER",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS doors_count INTEGER",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS door_width_cm INTEGER",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS cabin_finish VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS floor_type VARCHAR(100)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS accessibility_compliant BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS fire_system_connected BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS generator_connected BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS iot_gateway_ip VARCHAR(50)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS installation_status VARCHAR(50) DEFAULT 'פעיל'",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS handover_date DATE",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS dismantle_date DATE",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

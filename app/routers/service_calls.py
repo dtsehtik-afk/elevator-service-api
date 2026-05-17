@@ -49,6 +49,8 @@ def list_calls(
     status: Optional[str] = Query(None, description="OPEN|ASSIGNED|IN_PROGRESS|RESOLVED|CLOSED"),
     priority: Optional[str] = Query(None, description="CRITICAL|HIGH|MEDIUM|LOW"),
     fault_type: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: str = Query("desc"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     db: Session = Depends(get_db),
@@ -56,7 +58,7 @@ def list_calls(
 ):
     """List service calls with optional filters."""
     return service_call_service.list_service_calls(
-        db, elevator_id, customer_id, status, priority, fault_type, skip, limit
+        db, elevator_id, customer_id, status, priority, fault_type, skip, limit, sort_by, sort_dir
     )
 
 

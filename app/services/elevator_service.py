@@ -180,9 +180,11 @@ def list_elevators(
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
+    sort_by: Optional[str] = None,
+    sort_dir: str = "asc",
 ) -> List[Elevator]:
     """Return a filtered, paginated list of elevators."""
-    from sqlalchemy import or_
+    from sqlalchemy import or_, asc, desc
     query = db.query(Elevator)
     if search:
         pattern = f"%{search}%"
@@ -203,6 +205,23 @@ def list_elevators(
         query = query.filter(Elevator.risk_score >= min_risk)
     if max_risk is not None:
         query = query.filter(Elevator.risk_score <= max_risk)
+
+    _SORT_MAP = {
+        "address": Elevator.address,
+        "city": Elevator.city,
+        "risk_score": Elevator.risk_score,
+        "next_service_date": Elevator.next_service_date,
+        "last_service_date": Elevator.last_service_date,
+        "status": Elevator.status,
+        "manufacturer": Elevator.manufacturer,
+        "floor_count": Elevator.floor_count,
+    }
+    col = _SORT_MAP.get(sort_by) if sort_by else None
+    if col is not None:
+        query = query.order_by(desc(col) if sort_dir == "desc" else asc(col))
+    else:
+        query = query.order_by(Elevator.address)
+
     return query.offset(skip).limit(min(limit, 2000)).all()
 
 

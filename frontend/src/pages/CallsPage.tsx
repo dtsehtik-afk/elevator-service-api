@@ -94,6 +94,8 @@ export default function CallsPage() {
   const [changeElevId, setChangeElevId] = useState<string | null>(null)
   const [locationPickerElevId, setLocationPickerElevId] = useState<string | null>(null)
   const [locationPickerOpen, setLocationPickerOpen] = useState(false)
+  const [sortBy, setSortBy] = useState<string | undefined>(undefined)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [addElevOpened, { open: openAddElev, close: closeAddElev }] = useDisclosure()
   const [addElevForm, setAddElevForm] = useState({
     address: '', city: '', contact_phone: '', building_name: '', floor_count: 1, notes: '',
@@ -118,8 +120,8 @@ export default function CallsPage() {
   const apiStatus = statusFilter === 'ALL' ? undefined : (statusFilter ?? 'OPEN,ASSIGNED,IN_PROGRESS')
 
   const { data: calls = [], isLoading } = useQuery({
-    queryKey: ['calls', apiStatus],
-    queryFn: () => listCalls(apiStatus ? { status: apiStatus } as any : {}),
+    queryKey: ['calls', apiStatus, sortBy, sortDir],
+    queryFn: () => listCalls({ ...(apiStatus ? { status: apiStatus } : {}), sort_by: sortBy, sort_dir: sortDir } as any),
     refetchInterval: 30_000,
   })
 
@@ -413,16 +415,30 @@ export default function CallsPage() {
             <Table highlightOnHover style={{ cursor: 'pointer' }}>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>#</Table.Th>
-                  <Table.Th>עדיפות</Table.Th>
-                  <Table.Th>כתובת</Table.Th>
-                  <Table.Th>תיאור</Table.Th>
-                  <Table.Th>סוג תקלה</Table.Th>
-                  <Table.Th>סטטוס</Table.Th>
-                  <Table.Th>SLA</Table.Th>
-                  <Table.Th>דווח ע"י</Table.Th>
-                  <Table.Th>תאריך</Table.Th>
-                  <Table.Th></Table.Th>
+                  {([
+                    { key: 'call_number', label: '#' },
+                    { key: null, label: 'עדיפות' },
+                    { key: null, label: 'כתובת' },
+                    { key: null, label: 'תיאור' },
+                    { key: 'fault_type', label: 'סוג תקלה' },
+                    { key: 'status', label: 'סטטוס' },
+                    { key: null, label: 'SLA' },
+                    { key: null, label: 'דווח ע"י' },
+                    { key: 'created_at', label: 'תאריך' },
+                    { key: null, label: '' },
+                  ] as { key: string | null; label: string }[]).map((col, i) => (
+                    <Table.Th
+                      key={i}
+                      style={col.key ? { cursor: 'pointer', userSelect: 'none' } : undefined}
+                      onClick={col.key ? () => {
+                        if (sortBy === col.key) { setSortDir(d => d === 'asc' ? 'desc' : 'asc') }
+                        else { setSortBy(col.key!); setSortDir('desc') }
+                        setPage(1)
+                      } : undefined}
+                    >
+                      {col.label}{col.key && sortBy === col.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                    </Table.Th>
+                  ))}
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>

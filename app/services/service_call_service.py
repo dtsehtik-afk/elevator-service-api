@@ -208,8 +208,11 @@ def list_service_calls(
     fault_type: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
+    sort_by: Optional[str] = None,
+    sort_dir: str = "desc",
 ) -> List[ServiceCall]:
     """Return a filtered list of service calls."""
+    from sqlalchemy import asc, desc
     from app.models.elevator import Elevator
     query = db.query(ServiceCall)
     if elevator_id:
@@ -228,7 +231,20 @@ def list_service_calls(
         query = query.filter(ServiceCall.priority == priority)
     if fault_type:
         query = query.filter(ServiceCall.fault_type == fault_type)
-    return query.order_by(ServiceCall.created_at.desc()).offset(skip).limit(min(limit, 1000)).all()
+
+    _SORT_MAP = {
+        "created_at": ServiceCall.created_at,
+        "status": ServiceCall.status,
+        "fault_type": ServiceCall.fault_type,
+        "call_number": ServiceCall.call_number,
+    }
+    sort_col = _SORT_MAP.get(sort_by) if sort_by else ServiceCall.created_at
+    if sort_dir == "asc":
+        query = query.order_by(asc(sort_col))
+    else:
+        query = query.order_by(desc(sort_col))
+
+    return query.offset(skip).limit(min(limit, 1000)).all()
 
 
 def update_service_call(

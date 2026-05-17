@@ -63,6 +63,8 @@ export default function ElevatorsPage() {
   const [importing, setImporting] = useState(false)
   const [importingXl, setImportingXl] = useState(false)
   const [viewMode, setViewMode] = useState<'list' | 'groups'>('list')
+  const [sortBy, setSortBy] = useState<string | undefined>(undefined)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   const [newElev, setNewElev] = useState<Record<string, any>>({
     // Basic
@@ -85,8 +87,8 @@ export default function ElevatorsPage() {
   })
 
   const { data: elevators = [], isLoading } = useQuery({
-    queryKey: ['elevators'],
-    queryFn: () => listElevators(),
+    queryKey: ['elevators', sortBy, sortDir],
+    queryFn: () => listElevators({ sort_by: sortBy, sort_dir: sortDir }),
   })
 
   const filtered = useMemo(() => {
@@ -255,7 +257,22 @@ export default function ElevatorsPage() {
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
-                  {visibleDefs.map(col => <Table.Th key={col.key}>{col.label}</Table.Th>)}
+                  {visibleDefs.map(col => {
+                    const sortable = ['address','city','risk_score','next_service_date','last_service_date','status','manufacturer','floor_count'].includes(col.key)
+                    return (
+                      <Table.Th
+                        key={col.key}
+                        style={sortable ? { cursor: 'pointer', userSelect: 'none' } : undefined}
+                        onClick={sortable ? () => {
+                          if (sortBy === col.key) { setSortDir(d => d === 'asc' ? 'desc' : 'asc') }
+                          else { setSortBy(col.key); setSortDir('asc') }
+                          setPage(1)
+                        } : undefined}
+                      >
+                        {col.label}{sortable && sortBy === col.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                      </Table.Th>
+                    )
+                  })}
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>

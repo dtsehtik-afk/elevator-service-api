@@ -956,6 +956,20 @@ export default function ElevatorDetailPage() {
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
+                  <TextInput label="מספר סידורי" value={form.serial_number ?? ''} onChange={e => set('serial_number', e.target.value || null)} />
+                ) : (
+                  <Field label="מספר סידורי" value={elevator.serial_number} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <DateInput label="תאריך התקנה" value={parseDate(form.installation_date)} onChange={d => dateSet('installation_date', d)} clearable locale="he" />
+                ) : (
+                  <Field label="תאריך התקנה" value={elevator.installation_date ? new Date(elevator.installation_date).toLocaleDateString('he-IL') : null} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
                   <TextInput label="יצרן" value={form.manufacturer ?? ''} onChange={e => set('manufacturer', e.target.value || null)} />
                 ) : (
                   <Field label="יצרן" value={elevator.manufacturer} />
@@ -1051,6 +1065,141 @@ export default function ElevatorDetailPage() {
                       )
                     })() : <Text fw={500} c="dimmed">—</Text>}
                   </Field>
+                )}
+              </Grid.Col>
+
+              {/* Deep tech specs */}
+              <Grid.Col span={12}>
+                <Divider label="מפרט תקני ועמידה בדרישות" labelPosition="right" mt="sm" mb="xs" />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label='משקל נשיאה (ק"ג)' value={form.load_capacity_kg ?? ''} onChange={v => set('load_capacity_kg', v || null)} min={0} />
+                ) : (
+                  <Field label='משקל נשיאה (ק"ג)' value={elevator.load_capacity_kg ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label="מספר נוסעים" value={form.max_persons ?? ''} onChange={v => set('max_persons', v || null)} min={0} />
+                ) : (
+                  <Field label="מספר נוסעים" value={elevator.max_persons ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label="מהירות (מ/ש)" value={form.speed_m_s ?? ''} onChange={v => set('speed_m_s', v || null)} min={0} step={0.1} />
+                ) : (
+                  <Field label="מהירות (מ/ש)" value={elevator.speed_m_s ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label="מספר תחנות" value={form.stops_count ?? ''} onChange={v => set('stops_count', v || null)} min={0} />
+                ) : (
+                  <Field label="מספר תחנות" value={elevator.stops_count ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label="מספר דלתות" value={form.doors_count ?? ''} onChange={v => set('doors_count', v || null)} min={0} />
+                ) : (
+                  <Field label="מספר דלתות" value={elevator.doors_count ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <NumberInput label='רוחב דלת (ס"מ)' value={form.door_width_cm ?? ''} onChange={v => set('door_width_cm', v || null)} min={0} />
+                ) : (
+                  <Field label='רוחב דלת (ס"מ)' value={elevator.door_width_cm ?? undefined} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="גימור תא" value={form.cabin_finish ?? ''} onChange={e => set('cabin_finish', e.target.value || null)} />
+                ) : (
+                  <Field label="גימור תא" value={elevator.cabin_finish} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <TextInput label="סוג רצפה" value={form.floor_type ?? ''} onChange={e => set('floor_type', e.target.value || null)} />
+                ) : (
+                  <Field label="סוג רצפה" value={elevator.floor_type} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 4 }}>
+                {editing ? (
+                  <TextInput label="מס׳ סידורי מנוע" value={form.engine_serial ?? ''} onChange={e => set('engine_serial', e.target.value || null)} />
+                ) : (
+                  <Field label="מס׳ סידורי מנוע" value={elevator.engine_serial} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 4 }}>
+                {editing ? (
+                  <TextInput label="מס׳ סידורי בקר" value={form.controller_serial ?? ''} onChange={e => set('controller_serial', e.target.value || null)} />
+                ) : (
+                  <Field label="מס׳ סידורי בקר" value={elevator.controller_serial} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 4 }}>
+                {editing ? (
+                  <TextInput label="כתובת IP/IoT" value={form.iot_gateway_ip ?? ''} onChange={e => set('iot_gateway_ip', e.target.value || null)} />
+                ) : (
+                  <Field label="כתובת IP/IoT" value={elevator.iot_gateway_ip} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 4 }}>
+                {editing ? (
+                  <Checkbox label="עומד בתקן נגישות" checked={form.accessibility_compliant ?? false} onChange={e => set('accessibility_compliant', e.target.checked)} mt="sm" />
+                ) : (
+                  <Field label="תקן נגישות">
+                    {elevator.accessibility_compliant ? <Badge color="green">כן</Badge> : <Text fw={500}>לא</Text>}
+                  </Field>
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 4 }}>
+                {editing ? (
+                  <Checkbox label="מחובר לגלאי אש" checked={form.fire_system_connected ?? false} onChange={e => set('fire_system_connected', e.target.checked)} mt="sm" />
+                ) : (
+                  <Field label="גלאי אש">
+                    {elevator.fire_system_connected ? <Badge color="green">מחובר</Badge> : <Text fw={500}>לא</Text>}
+                  </Field>
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 4 }}>
+                {editing ? (
+                  <Checkbox label="מחובר לגנרטור" checked={form.generator_connected ?? false} onChange={e => set('generator_connected', e.target.checked)} mt="sm" />
+                ) : (
+                  <Field label="גנרטור">
+                    {elevator.generator_connected ? <Badge color="green">מחובר</Badge> : <Text fw={500}>לא</Text>}
+                  </Field>
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                {editing ? (
+                  <Select label="סטטוס התקנה"
+                    data={[{value:'פעיל',label:'פעיל'},{value:'בבניה',label:'בבניה'},{value:'מושבת',label:'מושבת'},{value:'שיפוץ',label:'שיפוץ'}]}
+                    value={form.installation_status ?? null}
+                    onChange={v => set('installation_status', v)}
+                    clearable
+                  />
+                ) : (
+                  <Field label="סטטוס התקנה" value={elevator.installation_status} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <DateInput label="תאריך מסירה ללקוח" value={parseDate(form.handover_date)} onChange={d => dateSet('handover_date', d)} clearable locale="he" />
+                ) : (
+                  <Field label="תאריך מסירה" value={elevator.handover_date ? new Date(elevator.handover_date).toLocaleDateString('he-IL') : null} />
+                )}
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 3 }}>
+                {editing ? (
+                  <DateInput label="תאריך פירוק" value={parseDate(form.dismantle_date)} onChange={d => dateSet('dismantle_date', d)} clearable locale="he" />
+                ) : (
+                  <Field label="תאריך פירוק" value={elevator.dismantle_date ? new Date(elevator.dismantle_date).toLocaleDateString('he-IL') : null} />
                 )}
               </Grid.Col>
 

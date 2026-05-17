@@ -55,6 +55,26 @@ export interface Elevator {
   pit_depth_cm: number | null
   headroom_cm: number | null
   safety_certificate_expiry: string | null
+  // Deep technical specs
+  engine_serial: string | null
+  controller_serial: string | null
+  load_capacity_kg: number | null
+  max_persons: number | null
+  speed_m_s: number | null
+  stops_count: number | null
+  doors_count: number | null
+  door_width_cm: number | null
+  cabin_finish: string | null
+  floor_type: string | null
+  // Compliance
+  accessibility_compliant: boolean
+  fire_system_connected: boolean
+  generator_connected: boolean
+  iot_gateway_ip: string | null
+  // Status & lifecycle
+  installation_status: string | null
+  handover_date: string | null
+  dismantle_date: string | null
   // Status
   status: 'ACTIVE' | 'INACTIVE' | 'UNDER_REPAIR'
   risk_score: number
@@ -189,6 +209,8 @@ export interface ElevatorFilters {
   min_risk?: number
   skip?: number
   limit?: number
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
 }
 
 export interface CallFilters {

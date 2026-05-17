@@ -80,6 +80,30 @@ class ElevatorUpdate(BaseModel):
     responsible_technician_id: Optional[uuid.UUID] = None
     consultant_id: Optional[uuid.UUID] = None
     lead_source: Optional[str] = None
+    # Extended technical specs (already in model, missing from schema)
+    motor_type: Optional[str] = None
+    controller_model: Optional[str] = None
+    door_type: Optional[str] = None
+    pit_depth_cm: Optional[int] = None
+    headroom_cm: Optional[int] = None
+    safety_certificate_expiry: Optional[date] = None
+    engine_serial: Optional[str] = None
+    controller_serial: Optional[str] = None
+    load_capacity_kg: Optional[int] = None
+    max_persons: Optional[int] = None
+    speed_m_s: Optional[float] = None
+    stops_count: Optional[int] = None
+    doors_count: Optional[int] = None
+    door_width_cm: Optional[int] = None
+    cabin_finish: Optional[str] = None
+    floor_type: Optional[str] = None
+    accessibility_compliant: Optional[bool] = None
+    fire_system_connected: Optional[bool] = None
+    generator_connected: Optional[bool] = None
+    iot_gateway_ip: Optional[str] = None
+    installation_status: Optional[str] = None
+    handover_date: Optional[date] = None
+    dismantle_date: Optional[date] = None
 
     @field_validator(
         'address', 'city', 'building_name', 'notes', 'internal_number',
@@ -88,6 +112,9 @@ class ElevatorUpdate(BaseModel):
         'service_type', 'service_contract', 'drive_link', 'inspector_name',
         'inspector_phone', 'inspector_mobile', 'inspector_email',
         'last_inspection_report_url',
+        'motor_type', 'controller_model', 'door_type', 'engine_serial',
+        'controller_serial', 'cabin_finish', 'floor_type', 'iot_gateway_ip',
+        'installation_status',
         mode='before',
     )
     @classmethod
@@ -151,6 +178,30 @@ class ElevatorResponse(BaseModel):
     # Status
     status: str
     risk_score: float
+    # Extended technical specs
+    motor_type: Optional[str] = None
+    controller_model: Optional[str] = None
+    door_type: Optional[str] = None
+    pit_depth_cm: Optional[int] = None
+    headroom_cm: Optional[int] = None
+    safety_certificate_expiry: Optional[date] = None
+    engine_serial: Optional[str] = None
+    controller_serial: Optional[str] = None
+    load_capacity_kg: Optional[int] = None
+    max_persons: Optional[int] = None
+    speed_m_s: Optional[float] = None
+    stops_count: Optional[int] = None
+    doors_count: Optional[int] = None
+    door_width_cm: Optional[int] = None
+    cabin_finish: Optional[str] = None
+    floor_type: Optional[str] = None
+    accessibility_compliant: bool = False
+    fire_system_connected: bool = False
+    generator_connected: bool = False
+    iot_gateway_ip: Optional[str] = None
+    installation_status: Optional[str] = None
+    handover_date: Optional[date] = None
+    dismantle_date: Optional[date] = None
     # Grouping
     management_company_id: Optional[uuid.UUID] = None
     management_company_name: Optional[str] = None
