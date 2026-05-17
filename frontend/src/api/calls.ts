@@ -2,7 +2,7 @@ import client from './client'
 import { ServiceCall, CallDetail, AuditLogEntry, CallFilters } from '../types'
 
 export async function listCalls(filters: CallFilters = {}): Promise<ServiceCall[]> {
-  const { data } = await client.get<ServiceCall[]>('/calls', { params: { limit: 200, ...filters } })
+  const { data } = await client.get<ServiceCall[]>('/calls', { params: { limit: 500, ...filters } })
   return data
 }
 

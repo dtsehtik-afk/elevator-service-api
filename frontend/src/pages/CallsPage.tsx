@@ -9,7 +9,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { notifications } from '@mantine/notifications'
-import { listCalls, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall, resetAndReassignCall } from '../api/calls'
+import { listCalls, getCall, createCall, updateCall, getCallDetails, autoAssignCall, setCallMonitoring, manualAssignCall, resetAndReassignCall } from '../api/calls'
 import { listElevators, updateElevator } from '../api/elevators'
 import client from '../api/client'
 import LocationPickerModal from '../components/LocationPickerModal'
@@ -113,9 +113,12 @@ export default function CallsPage() {
     quote_needed: false,
   })
 
+  // null = default (active only), 'ALL' = all statuses, specific value = that status
+  const apiStatus = statusFilter === 'ALL' ? undefined : (statusFilter ?? 'OPEN,ASSIGNED,IN_PROGRESS')
+
   const { data: calls = [], isLoading } = useQuery({
-    queryKey: ['calls'],
-    queryFn: () => listCalls(),
+    queryKey: ['calls', apiStatus],
+    queryFn: () => listCalls(apiStatus ? { status: apiStatus } as any : {}),
     refetchInterval: 30_000,
   })
 
@@ -149,9 +152,7 @@ export default function CallsPage() {
     const q = searchText.trim().toLowerCase()
     return calls.filter(c => {
       if (c.fault_type === 'MAINTENANCE') return false
-      const matchStatus = !statusFilter || c.status === statusFilter
-      const matchPriority = !priorityFilter || c.priority === priorityFilter
-      if (!matchStatus || !matchPriority) return false
+      if (priorityFilter && c.priority !== priorityFilter) return false
       if (!q) return true
       const elev = elevatorMap[c.elevator_id]
       const addr = elev ? `${elev.address} ${elev.city} ${elev.building_name ?? ''}`.toLowerCase() : ''
@@ -162,18 +163,24 @@ export default function CallsPage() {
         (c.call_number ? `s${String(c.call_number).padStart(5, '0')}`.includes(q) : false)
       )
     })
-  }, [calls, statusFilter, priorityFilter, searchText, elevatorMap])
+  }, [calls, priorityFilter, searchText, elevatorMap])
 
   // Auto-open detail modal when ?callId= is in the URL (from dashboard / elevator page links)
   useEffect(() => {
     const callId = searchParams.get('callId')
-    if (!callId || calls.length === 0) return
+    if (!callId) return
     const target = calls.find(c => c.id === callId)
     if (target) {
       openDetailModal(target)
       setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('callId'); return next }, { replace: true })
+    } else if (calls.length > 0 || !isLoading) {
+      // Call not in current list (e.g. RESOLVED/CLOSED) — fetch it directly
+      getCall(callId).then(c => {
+        openDetailModal(c)
+        setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('callId'); return next }, { replace: true })
+      }).catch(() => {})
     }
-  }, [searchParams.get('callId'), calls.length])
+  }, [searchParams.get('callId'), calls.length, isLoading])
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -361,8 +368,9 @@ export default function CallsPage() {
           clearable
         />
         <Select
-          placeholder="סטטוס"
+          placeholder="פתוחות (ברירת מחדל)"
           data={[
+            { value: 'ALL', label: 'כל הקריאות' },
             { value: 'OPEN', label: 'פתוחה' },
             { value: 'ASSIGNED', label: 'שובצה' },
             { value: 'IN_PROGRESS', label: 'בטיפול' },
@@ -371,7 +379,7 @@ export default function CallsPage() {
           ]}
           value={statusFilter}
           onChange={v => { setStatusFilter(v); setPage(1) }}
-          clearable w={160}
+          clearable w={200}
         />
         <Select
           placeholder="עדיפות"

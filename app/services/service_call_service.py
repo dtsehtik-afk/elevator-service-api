@@ -218,12 +218,16 @@ def list_service_calls(
             Elevator.customer_id == customer_id
         )
     if status:
-        query = query.filter(ServiceCall.status == status)
+        statuses = [s.strip() for s in status.split(',') if s.strip()]
+        if len(statuses) == 1:
+            query = query.filter(ServiceCall.status == statuses[0])
+        else:
+            query = query.filter(ServiceCall.status.in_(statuses))
     if priority:
         query = query.filter(ServiceCall.priority == priority)
     if fault_type:
         query = query.filter(ServiceCall.fault_type == fault_type)
-    return query.order_by(ServiceCall.created_at.desc()).offset(skip).limit(min(limit, 200)).all()
+    return query.order_by(ServiceCall.created_at.desc()).offset(skip).limit(min(limit, 1000)).all()
 
 
 def update_service_call(
