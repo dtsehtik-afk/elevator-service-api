@@ -229,7 +229,7 @@ def _send_morning_location_requests():
 
             from app.config import get_settings
             base_url = get_settings().app_base_url
-            portal_link = f"{base_url}/app/tech/{tech.id}"
+            portal_link = f"{base_url}/tech"
             quote = random.choice(_MORNING_QUOTES)
             gemini_key = getattr(get_settings(), "gemini_api_key", "")
             personal = _generate_personal_motivation(tech.name, gemini_key) if gemini_key else ""
@@ -354,6 +354,22 @@ def _handle_technician_report(db, phone: str, text: str):
     logger.info("📋 %d call(s) resolved by %s", closed, tech.name)
 
 
+_route_sent_at: dict = {}  # phone → datetime of last route send
+
+def _send_route_throttled(db, tech, cooldown_minutes: int = 30) -> None:
+    """Send route to technician, but at most once per cooldown_minutes window."""
+    from datetime import datetime, timezone, timedelta
+    from app.services.route_service import send_route_to_technician
+    phone = tech.whatsapp_number or tech.phone or ""
+    last = _route_sent_at.get(phone)
+    if last and (datetime.now(timezone.utc) - last) < timedelta(minutes=cooldown_minutes):
+        logger.debug("Route throttled for %s (sent %.0f min ago)", tech.name,
+                     (datetime.now(timezone.utc) - last).total_seconds() / 60)
+        return
+    if send_route_to_technician(db, tech):
+        _route_sent_at[phone] = datetime.now(timezone.utc)
+
+
 def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_id: str = "") -> None:
     """
     Parse a technician's free-text reply using Gemini and accept/reject
@@ -383,17 +399,29 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
                 ai_assignment_agent.reject_assignment_by_id(db, phone, linked["assignment_id"])
             return
 
-    # Classic 1/2: act on the MOST RECENT pending assignment (LIFO — tech is likely replying to last message)
-    if text.strip() == "1":
-        newest = max(pending, key=lambda x: x["assigned_at"])
-        ai_assignment_agent.confirm_assignment_by_id(db, phone, newest["assignment_id"])
-        if tech:
-            from app.services.route_service import send_route_to_technician
-            send_route_to_technician(db, tech)
+    # Classic 1/2: only when exactly ONE pending assignment (unambiguous context)
+    if text.strip() in ("1", "2") and len(pending) == 1:
+        if text.strip() == "1":
+            ai_assignment_agent.confirm_assignment_by_id(db, phone, pending[0]["assignment_id"])
+            if tech:
+                from app.services.route_service import send_route_to_technician
+                _send_route_throttled(db, tech)
+        else:
+            ai_assignment_agent.reject_assignment_by_id(db, phone, pending[0]["assignment_id"])
         return
-    if text.strip() == "2":
-        newest = max(pending, key=lambda x: x["assigned_at"])
-        ai_assignment_agent.reject_assignment_by_id(db, phone, newest["assignment_id"])
+
+    # Multiple pending + bare "1"/"2" → ask tech to reply to the specific message
+    if text.strip() in ("1", "2") and len(pending) > 1:
+        from app.services.whatsapp_service import _send_message
+        lines = "\n".join(
+            f"• {p.get('address', 'כתובת לא ידועה')}"
+            for p in sorted(pending, key=lambda x: x["assigned_at"], reverse=True)[:8]
+        )
+        _send_message(phone,
+            f"יש לך {len(pending)} קריאות ממתינות לאישור:\n{lines}\n\n"
+            f"↩️ *השב ישירות על ההודעה* שאת/ה רוצה לקבל/לדחות,\n"
+            f"או שלח: *לקחתי* + כתובת (לדוגמה: לקחתי רוזמרין 9)"
+        )
         return
 
     # Gemini natural-language parsing
@@ -411,8 +439,7 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
         ai_assignment_agent.reject_assignment_by_id(db, phone, aid)
     
     if tech and result["accept"]:
-        from app.services.route_service import send_route_to_technician
-        send_route_to_technician(db, tech)
+        _send_route_throttled(db, tech)
 
 
 def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
@@ -543,8 +570,7 @@ def _poll_whatsapp_replies():
                                 # First location of the day → send daily route
                                 if not prev_lat:
                                     try:
-                                        from app.services.route_service import send_route_to_technician
-                                        send_route_to_technician(db, tech)
+                                        _send_route_throttled(db, tech)
                                     except Exception as exc:
                                         logger.error("Route build failed for %s: %s", tech.name, exc)
 
@@ -778,8 +804,7 @@ def _handle_self_assign(db, phone: str, text: str) -> None:
     logger.info("✋ %s self-assigned call %s at %s", tech.name, matched_call.id, addr)
 
     # Send updated route to technician
-    from app.services.route_service import send_route_to_technician
-    send_route_to_technician(db, tech)
+    _send_route_throttled(db, tech)
 
 
 def _handle_technician_defer(db, phone: str, text: str) -> None:
@@ -1430,6 +1455,8 @@ def _check_pending_assignment_timeouts():
             .all()
         )
 
+        _reminder_calls: list = []  # collected this run — sent as one batch after loop
+
         for assignment in pending:
             assigned_at = assignment.assigned_at
             if assigned_at.tzinfo is None:
@@ -1485,67 +1512,52 @@ def _check_pending_assignment_timeouts():
                     else:
                         logger.info("⏰ Off-hours — 180-min escalation for %s deferred to morning", addr)
 
-            # ── Stage 1: hourly reminder to ALL available technicians ─────────
+            # ── Stage 1: collect calls needing reminder (send consolidated below) ──
             elif age_minutes >= _REMINDER_AFTER_MINUTES and not assignment.reminder_sent_at:
-                logger.info(
-                    "🔔 Sending hourly reminder for call %s (%.0f min pending)",
-                    assignment.service_call_id, age_minutes,
-                )
-                # Mark this assignment's reminder sent so we don't repeat per-assignment
                 assignment.reminder_sent_at = now
                 db.commit()
-
-                # Send reminder to ALL currently available technicians
                 if call and elevator:
-                    from app.config import get_settings as _gs
-                    from app.services.whatsapp_service import _send_message as _wa
-                    from app.services.working_hours import is_working_hours
-                    base_url = getattr(_gs(), "app_base_url", "").rstrip("/")
+                    _reminder_calls.append((call, elevator, addr))
 
-                    # Determine recommended tech (lowest score from current rankings)
-                    try:
-                        ranked = ai_assignment_agent.rank_technicians(
-                            db, elevator, call.fault_type, call.priority
-                        )
-                        recommended_name = ranked[0].technician.name if ranked else ""
-                    except Exception:
-                        recommended_name = ""
+        # ── Send consolidated reminder to all available technicians ──────────
+        if _reminder_calls:
+            from app.config import get_settings as _gs
+            from app.services.whatsapp_service import _send_message as _wa
+            from app.services.working_hours import is_working_hours
+            base_url = getattr(_gs(), "app_base_url", "").rstrip("/")
+            portal_url = f"{base_url}/tech" if base_url else ""
 
-                    all_techs = (
-                        db.query(Technician).filter(
-                            Technician.is_active == True,  # noqa: E712
-                            Technician.is_available == True,
-                        ).all()
-                        if is_working_hours() else
-                        db.query(Technician).filter(
-                            Technician.is_active == True,  # noqa: E712
-                            Technician.is_on_call == True,
-                        ).all()
+            all_techs = (
+                db.query(Technician).filter(Technician.is_active == True, Technician.is_available == True).all()  # noqa: E712
+                if is_working_hours() else
+                db.query(Technician).filter(Technician.is_active == True, Technician.is_on_call == True).all()  # noqa: E712
+            )
+            for reminder_tech in all_techs:
+                r_phone = reminder_tech.whatsapp_number or reminder_tech.phone
+                if not r_phone:
+                    continue
+                if len(_reminder_calls) == 1:
+                    _c, _e, _addr = _reminder_calls[0]
+                    _num = f" S{_c.call_number:05d}" if _c.call_number else ""
+                    _wa(r_phone,
+                        f"🔔 *תזכורת — קריאה{_num} ממתינה לטיפול*\n"
+                        f"📍 {_addr}\n⚡ {_c.fault_type}\n"
+                        + (f"📱 {portal_url}\n" if portal_url else "")
+                        + f"↩️ השב על הודעת השיבוץ: *1* לקבלה | *2* לדחייה"
                     )
-                    for reminder_tech in all_techs:
-                        r_phone = reminder_tech.whatsapp_number or reminder_tech.phone
-                        if not r_phone:
-                            continue
-                        rec_line = (
-                            f"⭐ *טכנאי מומלץ:* {recommended_name}\n"
-                            if recommended_name and recommended_name != reminder_tech.name
-                            else f"⭐ *אתה הטכנאי המומלץ!*\n"
-                            if recommended_name == reminder_tech.name
-                            else ""
-                        )
-                        portal_url = f"{base_url}/app/tech/{reminder_tech.id}" if base_url else ""
-                        _call_age = max(0, int((now - call.created_at.replace(tzinfo=timezone.utc) if call.created_at.tzinfo is None else now - call.created_at).total_seconds() / 86400))
-                        _num_str = f" S{call.call_number:05d}" if call.call_number else ""
-                        _age_str = f" (מלפני {_call_age} ימים)" if _call_age > 0 else ""
-                        _wa(
-                            r_phone,
-                            f"🔔 *תזכורת — קריאה{_num_str}{_age_str} ממתינה לטיפול*\n"
-                            f"📍 {addr}\n"
-                            f"{rec_line}"
-                            f"⚡ {call.fault_type}\n"
-                            + (f"📱 {portal_url}\n" if portal_url else "")
-                            + f"השב *1* לקבלה ✅ | *2* לדחייה ❌ | *דחה למחר* לדחייה ליום הבא"
-                        )
+                else:
+                    lines = "\n".join(
+                        f"• {_addr} ({_c.fault_type})" + (f" [S{_c.call_number:05d}]" if _c.call_number else "")
+                        for _c, _e, _addr in _reminder_calls[:12]
+                    )
+                    _wa(r_phone,
+                        f"🔔 *{len(_reminder_calls)} קריאות ממתינות לטיפול*\n"
+                        f"────────────────────\n{lines}\n────────────────────\n"
+                        + (f"📱 {portal_url}\n" if portal_url else "")
+                        + f"↩️ כנס לפורטל לטיפול או השב על הודעת השיבוץ הרלוונטית"
+                    )
+            logger.info("🔔 Consolidated reminder sent for %d call(s) to %d technicians",
+                        len(_reminder_calls), len(all_techs))
 
     except Exception as exc:
         logger.error("Timeout checker error: %s", exc)

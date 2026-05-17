@@ -467,7 +467,7 @@ def confirm_assignment(db: Session, technician_phone: str) -> Optional[Assignmen
     whatsapp_service.notify_dispatcher(f"✅ *{tech.name}* אישר קבלת הקריאה ב{addr}")
     from app.config import get_settings as _gs2
     base_url = getattr(_gs2(), "app_base_url", "").rstrip("/")
-    tech_portal = f"{base_url}/app/tech/{tech.id}" if base_url else ""
+    tech_portal = f"{base_url}/tech" if base_url else ""
     _send_message(
         phone_out,
         f"✅ *קיבלת את הקריאה!*\n"
@@ -631,7 +631,7 @@ def confirm_assignment_by_id(db: Session, phone: str, assignment_id: str) -> Opt
 
     from app.config import get_settings as _gs3
     _base3 = getattr(_gs3(), "app_base_url", "").rstrip("/")
-    _portal3 = f"{_base3}/app/tech/{tech.id}" if _base3 else ""
+    _portal3 = f"{_base3}/tech" if _base3 else ""
     phone_out = tech.whatsapp_number or tech.phone
     _send_message(phone_out,
         f"✅ *קיבלת את הקריאה!*\n"

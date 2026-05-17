@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Stack, Title, Text, Button, Card, Badge, Group, Divider, Loader, Center, Modal, TextInput, Textarea, Checkbox, Collapse, ActionIcon, Select, Paper, NumberInput } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
+import { PartRequestsTab } from '../components/PartRequestsTab'
 import { notifications } from '@mantine/notifications'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -607,6 +608,15 @@ function TechMain() {
     refetchInterval: 30000,
   })
 
+  const { data: partsForSelect = [] } = useQuery({
+    queryKey: ['parts-select'],
+    queryFn: () => client.get('/inventory/parts', { params: { limit: 500 } }).then(r => r.data as any[]),
+  })
+  const { data: warehousesForSelect = [] } = useQuery({
+    queryKey: ['warehouses-select'],
+    queryFn: () => client.get('/inventory/warehouses').then(r => r.data as any[]),
+  })
+
   const [activeTab, setActiveTab] = useState<'calls' | 'maint' | 'reports' | 'map' | 'inventory'>('calls')
   const [resolveOpen, setResolveOpen] = useState(false)
   const [resolveCallId, setResolveCallId] = useState<string | null>(null)
@@ -619,6 +629,8 @@ function TechMain() {
   const [transferOpen, setTransferOpen] = useState(false)
   const [transferCallId, setTransferCallId] = useState<string | null>(null)
   const [transferNotes, setTransferNotes] = useState('')
+  const [partReqOpen, setPartReqOpen] = useState(false)
+  const [partReqCallId, setPartReqCallId] = useState<string | null>(null)
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
@@ -801,8 +813,23 @@ function TechMain() {
                     onClick={() => { setTransferCallId(call.call_id); setTransferNotes(''); setTransferOpen(true) }}>
                     🔧 העבר לצוות טכני</Button>
                 </Group>
+                <Button fullWidth size="sm" color="yellow" variant="light" mt="xs"
+                  onClick={() => { setPartReqCallId(call.call_id); setPartReqOpen(true) }}>
+                  🔩 החלפת חלק
+                </Button>
               </Card>
             ))}
+
+            {/* ── Part replacement modal ── */}
+            <Modal opened={partReqOpen} onClose={() => setPartReqOpen(false)} title="🔩 החלפת חלק" size="lg" dir="rtl">
+              {partReqCallId && (
+                <PartRequestsTab
+                  serviceCallId={partReqCallId}
+                  parts={partsForSelect.map((p: any) => ({ value: p.id, label: `${p.name}${p.sku ? ` (${p.sku})` : ''}` }))}
+                  warehouses={warehousesForSelect.map((w: any) => ({ value: w.id, label: w.name }))}
+                />
+              )}
+            </Modal>
 
             {/* ── Resolve call modal ── */}
             <Modal opened={resolveOpen} onClose={() => setResolveOpen(false)} title="✅ סגירת קריאה" size="md" dir="rtl">

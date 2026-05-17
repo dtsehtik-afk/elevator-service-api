@@ -182,8 +182,8 @@ def notify_technician_new_call(
         f"{_nav_links(address, city, lat, lng)}\n"
         f"────────────────────\n"
         f"{portal_line}"
-        f"השב *1* לקבלת הקריאה ✅\n"
-        f"השב *2* לדחייה ❌"
+        f"↩️ *השב על הודעה זו:* *1* לקבלה ✅ | *2* לדחייה ❌\n"
+        f"או שלח: *לקחתי* + כתובת (לדוגמה: לקחתי רוזמרין 9)"
     )
     return _send_message(phone, message)
 
