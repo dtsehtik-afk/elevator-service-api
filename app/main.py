@@ -489,7 +489,7 @@ async def spa_browser_fallback(request: Request, call_next):
         file = _FRONTEND_DIST / path.lstrip("/")
         if file.is_file():
             return FileResponse(str(file))
-        return FileResponse(str(_FRONTEND_DIST / "index.html"))
+        return FileResponse(str(_FRONTEND_DIST / "index.html"), headers={"Cache-Control": "no-store"})
     return await call_next(request)
 
 
@@ -550,4 +550,4 @@ if _FRONTEND_DIST.exists():
         file = _FRONTEND_DIST / full_path
         if file.exists() and file.is_file():
             return FileResponse(str(file))
-        return FileResponse(str(_FRONTEND_DIST / "index.html"))
+        return FileResponse(str(_FRONTEND_DIST / "index.html"), headers={"Cache-Control": "no-store"})
