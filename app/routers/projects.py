@@ -1,6 +1,8 @@
 """Router for the Construction/Projects module."""
 
+import logging
 import uuid
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.database import get_db
+from app.models.contract import Contract, ElevatorContract
+from app.models.elevator import Elevator
 from app.models.project import Project, ProjectTask
 from app.models.technician import Technician
 from app.schemas.project import (
@@ -15,7 +19,29 @@ from app.schemas.project import (
     ProjectTaskCreate, ProjectTaskResponse, ProjectTaskUpdate,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/projects", tags=["Projects"])
+
+
+def _activate_project_elevators(db: Session, project: Project) -> None:
+    """When a project is marked COMPLETED, activate all elevators linked via its contracts."""
+    today = date.today()
+    contracts = db.query(Contract).filter(Contract.project_id == project.id).all()
+    activated = 0
+    for contract in contracts:
+        for ec in db.query(ElevatorContract).filter(ElevatorContract.contract_id == contract.id).all():
+            elev = db.get(Elevator, ec.elevator_id)
+            if elev and elev.status != "ACTIVE":
+                elev.status = "ACTIVE"
+                if not elev.handover_date:
+                    elev.handover_date = today
+                if not elev.installation_date:
+                    elev.installation_date = today
+                activated += 1
+    if activated:
+        db.commit()
+        logger.info("Project %s completed → %d elevators activated", project.id, activated)
 
 
 def _enrich(p: Project) -> ProjectResponse:
@@ -75,10 +101,13 @@ def update_project(
     p = db.query(Project).filter(Project.id == project_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
+    prev_status = p.status
     for k, v in data.model_dump(exclude_none=True).items():
         setattr(p, k, v)
     db.commit()
     db.refresh(p)
+    if prev_status != "COMPLETED" and p.status == "COMPLETED":
+        _activate_project_elevators(db, p)
     return _enrich(p)
 
 

@@ -2011,12 +2011,95 @@ def _geocode_all_elevators():
         db.close()
 
 
+def _run_auto_invoicing():
+    """Daily 06:00 job: create invoices for contracts with auto_invoice=True."""
+    from datetime import date, timedelta
+    from app.database import SessionLocal
+    from app.models.contract import Contract
+    from app.models.invoice import Invoice
+    from sqlalchemy import func
+
+    FREQ_DAYS = {"MONTHLY": 30, "QUARTERLY": 90, "ANNUAL": 365}
+    FREQ_LABEL = {"MONTHLY": "חודשית", "QUARTERLY": "רבעונית", "ANNUAL": "שנתית"}
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        contracts = (
+            db.query(Contract)
+            .filter(
+                Contract.auto_invoice == True,  # noqa: E712
+                Contract.status == "ACTIVE",
+                Contract.invoice_frequency.isnot(None),
+                Contract.monthly_price.isnot(None),
+            )
+            .all()
+        )
+
+        created = 0
+        for contract in contracts:
+            freq_days = FREQ_DAYS.get(contract.invoice_frequency)
+            if not freq_days:
+                continue
+            if contract.last_invoiced_at:
+                if today < contract.last_invoiced_at + timedelta(days=freq_days):
+                    continue
+
+            monthly = float(contract.monthly_price)
+            multiplier = {"MONTHLY": 1, "QUARTERLY": 3, "ANNUAL": 12}.get(contract.invoice_frequency, 1)
+            subtotal = round(monthly * multiplier, 2)
+            vat_rate = float(contract.vat_percent or 18.0)
+            vat_amount = round(subtotal * vat_rate / 100, 2)
+            total = round(subtotal + vat_amount, 2)
+
+            year = today.year
+            count = db.query(func.count(Invoice.id)).filter(
+                func.extract("year", Invoice.created_at) == year
+            ).scalar() or 0
+            number = f"INV-{year}-{count + 1:04d}"
+
+            inv = Invoice(
+                customer_id=contract.customer_id,
+                contract_id=contract.id,
+                number=number,
+                issue_date=today,
+                due_date=today + timedelta(days=int(contract.payment_terms or 30)),
+                items=[{
+                    "description": f"חיוב {FREQ_LABEL.get(contract.invoice_frequency, '')} — חוזה {contract.number}",
+                    "quantity": 1,
+                    "unit_price": subtotal,
+                    "total": subtotal,
+                }],
+                subtotal=subtotal,
+                vat_rate=vat_rate,
+                vat_amount=vat_amount,
+                total=total,
+                status="DRAFT",
+                notes=f"חשבונית אוטומטית לחוזה {contract.number}",
+            )
+            db.add(inv)
+            contract.last_invoiced_at = today
+            db.commit()
+            created += 1
+            logger.info("Auto-invoice %s created for contract %s (₪%.0f)", number, contract.number, total)
+
+        if created:
+            logger.info("Auto-invoicing complete: %d invoices created", created)
+
+    except Exception as exc:
+        logger.error("_run_auto_invoicing failed: %s", exc)
+        db.rollback()
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
     global _scheduler
     # All cron times are in Israel local time (Asia/Jerusalem)
     _scheduler = BackgroundScheduler(timezone=ZoneInfo("Asia/Jerusalem"))
+    _scheduler.add_job(_run_auto_invoicing,               "cron", hour=6,  minute=0)
     _scheduler.add_job(_run_nightly_maintenance,         "cron", hour=0,  minute=5,  day_of_week="sun,mon,tue,wed,thu,fri")
     _scheduler.add_job(_send_morning_maintenance_alerts, "cron", hour=7,  minute=35, day_of_week="sun,mon,tue,wed,thu,fri")
     # Morning location requests disabled — technicians use the app now
