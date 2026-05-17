@@ -391,6 +391,23 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS installation_status VARCHAR(50) DEFAULT 'פעיל'",
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS handover_date DATE",
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS dismantle_date DATE",
+                # Fix system_settings schema: create_all may have created the table with ORM
+                # schema (id/key/modules) instead of the key/value schema used by _get_setting.
+                # Add value column if missing; make modules nullable so INSERTs without it work.
+                """DO $$ BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='system_settings' AND column_name='value'
+                    ) THEN
+                        ALTER TABLE system_settings ADD COLUMN value TEXT;
+                    END IF;
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='system_settings' AND column_name='modules'
+                    ) THEN
+                        ALTER TABLE system_settings ALTER COLUMN modules DROP NOT NULL;
+                    END IF;
+                END $$""",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()
