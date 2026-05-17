@@ -263,12 +263,12 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS ix_inventory_transactions_date ON inventory_transactions (date DESC)",
                 "CREATE INDEX IF NOT EXISTS ix_inventory_transactions_service_call_id ON inventory_transactions (service_call_id)",
                 # Ensure main warehouse exists
-                """INSERT INTO warehouses (name, warehouse_type)
-                   SELECT 'מחסן ראשי', 'MAIN'
+                """INSERT INTO warehouses (id, name, warehouse_type)
+                   SELECT gen_random_uuid(), 'מחסן ראשי', 'MAIN'
                    WHERE NOT EXISTS (SELECT 1 FROM warehouses WHERE warehouse_type = 'MAIN')""",
                 # Auto-create VEHICLE warehouse for each technician that lacks one
-                """INSERT INTO warehouses (name, warehouse_type, technician_id)
-                   SELECT 'רכב - ' || t.name, 'VEHICLE', t.id
+                """INSERT INTO warehouses (id, name, warehouse_type, technician_id)
+                   SELECT gen_random_uuid(), 'רכב - ' || t.name, 'VEHICLE', t.id
                    FROM technicians t
                    WHERE NOT EXISTS (
                        SELECT 1 FROM warehouses w WHERE w.technician_id = t.id AND w.warehouse_type = 'VEHICLE'
