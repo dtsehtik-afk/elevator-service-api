@@ -29,7 +29,7 @@ export default function PartRequestsPage() {
   const isManager = role === 'ADMIN' || role === 'MANAGER' || role === 'DISPATCHER'
 
   // '' = all statuses
-  const [statusFilter, setStatusFilter] = useState('PENDING_APPROVAL')
+  const [statusFilter, setStatusFilter] = useState<string>('PENDING_APPROVAL')
   const [rejectOpen, setRejectOpen] = useState(false)
   const [selectedPr, setSelectedPr] = useState<PartRequest | null>(null)
   const [rejectReason, setRejectReason] = useState('')
@@ -38,7 +38,7 @@ export default function PartRequestsPage() {
 
   const { data: requests = [], isLoading } = useQuery({
     queryKey: ['part-requests-all', statusFilter],
-    queryFn: () => listPartRequests({ status: statusFilter || undefined }),
+    queryFn: () => listPartRequests({ status: statusFilter === 'ALL' ? undefined : statusFilter }),
     refetchInterval: 30000,
   })
 
@@ -75,7 +75,7 @@ export default function PartRequestsPage() {
     onError: (e: any) => notifications.show({ message: e?.response?.data?.detail || 'שגיאה בהוצאת חלק', color: 'red' }),
   })
 
-  const pendingCount = statusFilter === ''
+  const pendingCount = statusFilter === 'ALL'
     ? requests.filter(r => r.status === 'PENDING_APPROVAL').length
     : (statusFilter === 'PENDING_APPROVAL' ? requests.length : 0)
 
@@ -94,13 +94,13 @@ export default function PartRequestsPage() {
         </Alert>
       )}
 
-      <Tabs value={statusFilter} onChange={v => setStatusFilter(v ?? '')}>
+      <Tabs value={statusFilter} onChange={v => setStatusFilter(v ?? 'ALL')}>
         <Tabs.List>
           <Tabs.Tab value="PENDING_APPROVAL">ממתין לאישור</Tabs.Tab>
           <Tabs.Tab value="APPROVED">אושר</Tabs.Tab>
           <Tabs.Tab value="ISSUED">הוצא</Tabs.Tab>
           <Tabs.Tab value="REJECTED">נדחה</Tabs.Tab>
-          <Tabs.Tab value="">הכל</Tabs.Tab>
+          <Tabs.Tab value="ALL">הכל</Tabs.Tab>
         </Tabs.List>
       </Tabs>
 
