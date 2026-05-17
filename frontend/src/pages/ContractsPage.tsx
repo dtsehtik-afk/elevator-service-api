@@ -166,7 +166,7 @@ export default function ContractsPage() {
               </Group>
               <Group grow>
                 <NumberInput label="הנחה (%)" value={form.discount_percent} min={0} max={100} onChange={v => setForm(f => ({ ...f, discount_percent: Number(v) || 0 }))} />
-                <NumberInput label="מע\"מ (%)" value={form.vat_percent} min={0} max={100} onChange={v => setForm(f => ({ ...f, vat_percent: Number(v) || 18 }))} />
+                <NumberInput label={'מע"מ (%)'} value={form.vat_percent} min={0} max={100} onChange={v => setForm(f => ({ ...f, vat_percent: Number(v) || 18 }))} />
               </Group>
               <Group grow>
                 <TextInput label="שולם עד" type="date" value={form.paid_until} onChange={e => setForm(f => ({ ...f, paid_until: e.target.value }))} />
