@@ -259,6 +259,94 @@ def assign_with_confirmation(
         logger.info("Call %s already assigned (status=%s), skipping", service_call.id, service_call.status)
         return None
 
+    # ── Responsible technician priority ──────────────────────────────────────
+    # If the elevator has a designated responsible technician, assign to them
+    # first (single recipient, no broadcast). They can reassign via the app.
+    if elevator.responsible_technician_id:
+        resp_tech = (
+            db.query(Technician)
+            .filter(Technician.id == elevator.responsible_technician_id, Technician.is_active == True)  # noqa: E712
+            .first()
+        )
+        if resp_tech and (exclude_tech_ids is None or resp_tech.id not in exclude_tech_ids):
+            daily = _daily_calls(db, resp_tech.id)
+            if daily < resp_tech.max_daily_calls:
+                origin_lat, origin_lng = _tech_location(resp_tech)
+                elev_lat, elev_lng = maps_service.ensure_elevator_coords(db, elevator)
+                travel = maps_service.travel_time_minutes(origin_lat, origin_lng, elev_lat, elev_lng)
+
+                assignment = Assignment(
+                    service_call_id=service_call.id,
+                    technician_id=resp_tech.id,
+                    assignment_type="AUTO",
+                    status="PENDING_CONFIRMATION" if needs_confirmation else "CONFIRMED",
+                    travel_minutes=travel,
+                    notes=f"Responsible technician | travel={travel}min",
+                )
+                db.add(assignment)
+                service_call.status = "ASSIGNED" if needs_confirmation else "IN_PROGRESS"
+                service_call.assigned_at = datetime.now(timezone.utc)
+                db.add(AuditLog(
+                    service_call_id=service_call.id,
+                    changed_by="ai_agent",
+                    old_status="OPEN",
+                    new_status=service_call.status,
+                    notes=f"Assigned to responsible technician: {resp_tech.name}",
+                ))
+                db.commit()
+                db.refresh(assignment)
+
+                phone = resp_tech.whatsapp_number or resp_tech.phone
+                if phone:
+                    ctx = _elevator_context(db, elevator.id)
+                    desc = _clean_description(service_call.description or "")
+                    if ctx:
+                        desc = f"{desc}\n{ctx}".strip() if desc else ctx
+                    if getattr(service_call, "is_elevator_stopped", False):
+                        desc = f"🚨 מעלית עומדת!\n{desc}".strip()
+                    if needs_confirmation:
+                        _age_days = (datetime.now(timezone.utc) - (service_call.created_at.replace(tzinfo=timezone.utc) if service_call.created_at.tzinfo is None else service_call.created_at)).days
+                        whatsapp_service.notify_technician_new_call(
+                            phone=phone,
+                            technician_name=resp_tech.name,
+                            call_id=str(service_call.id),
+                            address=elevator.address,
+                            city=elevator.city,
+                            fault_type=service_call.fault_type,
+                            priority=service_call.priority,
+                            caller_name=caller_name,
+                            caller_phone=caller_phone,
+                            travel_minutes=travel,
+                            description=desc,
+                            tech_id=str(resp_tech.id),
+                            recommended_tech_name=resp_tech.name,
+                            lat=elevator.latitude,
+                            lng=elevator.longitude,
+                            call_time=service_call.created_at,
+                            call_age_days=max(0, _age_days),
+                            call_number=service_call.call_number,
+                        )
+                    else:
+                        whatsapp_service.notify_technician_auto_assigned(
+                            phone=phone,
+                            technician_name=resp_tech.name,
+                            address=elevator.address,
+                            city=elevator.city,
+                            fault_type=service_call.fault_type,
+                            priority=service_call.priority,
+                            caller_name=caller_name,
+                            caller_phone=caller_phone,
+                            travel_minutes=travel,
+                            description=desc,
+                        )
+                logger.info("Assigned to responsible technician %s for elevator %s", resp_tech.name, elevator.id)
+                return assignment
+            else:
+                logger.info(
+                    "Responsible technician %s is at max daily calls (%d), falling back to AI assignment",
+                    resp_tech.name, daily,
+                )
+
     candidates = rank_technicians(db, elevator, service_call.fault_type, service_call.priority)
 
     if exclude_tech_ids:
