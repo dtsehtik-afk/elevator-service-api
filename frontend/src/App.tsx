@@ -33,6 +33,7 @@ import HRPage from './pages/HRPage'
 import ProjectsPage from './pages/ProjectsPage'
 import WhatsAppAgentPage from './pages/WhatsAppAgentPage'
 import SupportPage from './pages/SupportPage'
+import PartRequestsPage from './pages/PartRequestsPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -79,6 +80,7 @@ export default function App() {
                   <Route path="/invoices" element={<InvoicesPage />} />
                   <Route path="/invoices/:id" element={<InvoicesPage />} />
                   <Route path="/inventory" element={<InventoryPage />} />
+                  <Route path="/part-requests" element={<PartRequestsPage />} />
                   <Route path="/leads" element={<LeadsPage />} />
                   {/* Reports & Settings */}
                   <Route path="/reports" element={<ReportsPage />} />

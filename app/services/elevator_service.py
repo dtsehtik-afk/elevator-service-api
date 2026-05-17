@@ -185,7 +185,8 @@ def list_elevators(
 ) -> List[Elevator]:
     """Return a filtered, paginated list of elevators."""
     from sqlalchemy import or_, asc, desc
-    query = db.query(Elevator)
+    from sqlalchemy.orm import joinedload
+    query = db.query(Elevator).options(joinedload(Elevator.contacts))
     if search:
         pattern = f"%{search}%"
         query = query.filter(

@@ -211,6 +211,7 @@ class ElevatorResponse(BaseModel):
     consultant_name: Optional[str] = None
     lead_source: Optional[str] = None
     customer_id: Optional[uuid.UUID] = None
+    vaad_phone: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

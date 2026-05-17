@@ -20,10 +20,10 @@ const PAGE_SIZE = 20
 // ── Column definitions ────────────────────────────────────────────────────────
 
 const ALL_COLUMNS = [
-  { key: 'serial_number',    label: 'מס׳',          defaultVisible: true  },
+  { key: 'id_numbers',       label: 'מספרים',        defaultVisible: true  },
   { key: 'address',          label: 'כתובת',         defaultVisible: true  },
   { key: 'city',             label: 'עיר',           defaultVisible: true  },
-  { key: 'contact_phone',    label: 'טלפון',         defaultVisible: true  },
+  { key: 'contact_phone',    label: 'טלפון ועד',     defaultVisible: true  },
   { key: 'status',           label: 'סטטוס',         defaultVisible: true  },
   { key: 'risk_score',       label: 'סיכון',         defaultVisible: true  },
   { key: 'next_service_date',label: 'שירות הבא',     defaultVisible: true  },
@@ -117,8 +117,12 @@ export default function ElevatorsPage() {
         ungrouped.push(e)
       }
     }
+    // Only real groups (2+ elevators); singles go to ungrouped
+    for (const [, list] of Object.entries(byBuilding)) {
+      if (list.length === 1) ungrouped.push(list[0])
+    }
     const groups = Object.entries(byBuilding)
-      .filter(([, list]) => list.length >= 1)
+      .filter(([, list]) => list.length >= 2)
       .sort(([, a], [, b]) => b.length - a.length)
     return { groups, ungrouped }
   }, [elevators, viewMode])
@@ -284,7 +288,15 @@ export default function ElevatorsPage() {
                   </Table.Tr>
                 ) : paginated.map(e => (
                   <Table.Tr key={e.id} onClick={() => navigate(`/elevators/${e.id}`)} style={{ cursor: 'pointer' }}>
-                    {show('serial_number') && <Table.Td><Text size="sm" fw={500}>{e.serial_number ?? '—'}</Text></Table.Td>}
+                    {show('id_numbers') && (
+                      <Table.Td>
+                        <Stack gap={0}>
+                          {e.labor_file_number && <Text size="sm" fw={600}>{e.labor_file_number}</Text>}
+                          {e.internal_number && <Text size="xs" c="dimmed">מסד: {e.internal_number}</Text>}
+                          {!e.labor_file_number && !e.internal_number && <Text size="sm" c="dimmed">—</Text>}
+                        </Stack>
+                      </Table.Td>
+                    )}
                     {show('address') && (
                       <Table.Td>
                         <Stack gap={0}>
@@ -296,8 +308,8 @@ export default function ElevatorsPage() {
                     {show('city') && <Table.Td><Text size="sm">{e.city}</Text></Table.Td>}
                     {show('contact_phone') && (
                       <Table.Td>
-                        {e.contact_phone
-                          ? <Text size="sm" dir="ltr">{e.contact_phone}</Text>
+                        {(e.vaad_phone || e.contact_phone)
+                          ? <Text size="sm" dir="ltr">{e.vaad_phone || e.contact_phone}</Text>
                           : <Text size="sm" c="dimmed">—</Text>}
                       </Table.Td>
                     )}

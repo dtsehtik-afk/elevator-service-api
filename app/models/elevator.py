@@ -189,6 +189,14 @@ class Elevator(Base):
     def consultant_name(self) -> Optional[str]:
         return self.consultant.name if self.consultant else None
 
+    @property
+    def vaad_phone(self) -> Optional[str]:
+        """Phone of the first VAAD (ועד בית) contact linked to this elevator."""
+        for c in (self.contacts or []):
+            if c.role == "VAAD" and c.phone:
+                return c.phone
+        return self.contact_phone  # fallback to legacy field
+
     # ── Relationships ─────────────────────────────────────────────────────────
     building: Mapped[Optional["Building"]] = relationship(  # noqa: F821
         "Building", back_populates="elevators", foreign_keys=[building_id]

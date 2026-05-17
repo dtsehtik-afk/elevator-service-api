@@ -67,6 +67,7 @@ const SECTIONS: Section[] = [
       { label: 'חוזים', path: '/contracts', icon: '📋' },
       { label: 'חשבוניות', path: '/invoices', icon: '💰' },
       { label: 'מלאי', path: '/inventory', icon: '📦' },
+      { label: 'בקשות חלפים', path: '/part-requests', icon: '🔩' },
     ],
   },
   {

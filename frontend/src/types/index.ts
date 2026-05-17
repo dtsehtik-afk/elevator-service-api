@@ -87,6 +87,7 @@ export interface Elevator {
   consultant_id: string | null
   consultant_name: string | null
   lead_source: string | null
+  vaad_phone: string | null
   created_at: string
   updated_at: string
 }
