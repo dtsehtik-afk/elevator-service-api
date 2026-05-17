@@ -224,17 +224,37 @@ def process_inspection_report(
     suggested_elevator = None
     match_score = None
     match_status = "UNMATCHED"
+    _lfn_mismatch = False  # labor_file_number found but address conflicts
 
     # Tier 0: Labor Ministry file number — definitive, unique per elevator
-    # Only labor_file_number is trusted for auto-match.
-    # Serial numbers vary between companies and are unreliable.
+    # Only labor_file_number is trusted for auto-match, BUT we still verify the
+    # address in the report roughly matches the elevator on record.  A low
+    # similarity score flags a likely typo in the labor_file_number field of the
+    # inspection report and triggers a dispatcher alert instead of silent match.
     if labor_file_number:
-        elevator = db.query(Elevator).filter(Elevator.labor_file_number == labor_file_number).first()
-        if elevator:
-            match_status = "AUTO_MATCHED"
-            match_score = 1.0
+        _lfn_elevator = db.query(Elevator).filter(Elevator.labor_file_number == labor_file_number).first()
+        if _lfn_elevator:
+            if street or city:
+                from difflib import SequenceMatcher
+                _elev_addr = f"{_lfn_elevator.address or ''} {_lfn_elevator.city or ''}".strip().lower()
+                _report_addr = f"{street or ''} {city or ''}".strip().lower()
+                _addr_sim = SequenceMatcher(None, _report_addr, _elev_addr).ratio() if (_elev_addr and _report_addr) else 1.0
+                if _addr_sim < 0.40:
+                    # Suspicious: same labor_file_number but very different address
+                    suggested_elevator = _lfn_elevator
+                    match_score = _addr_sim
+                    match_status = "PENDING_REVIEW"
+                    _lfn_mismatch = True
+                else:
+                    elevator = _lfn_elevator
+                    match_status = "AUTO_MATCHED"
+                    match_score = 1.0
+            else:
+                elevator = _lfn_elevator
+                match_status = "AUTO_MATCHED"
+                match_score = 1.0
 
-    if not elevator and street:
+    if not elevator and not _lfn_mismatch and street:
         # Extract house number from street string (trailing digits) so the
         # penalty/bonus logic in _score_elevator applies correctly.
         import re as _re
@@ -298,8 +318,17 @@ def process_inspection_report(
     # ── PENDING_REVIEW: notify dispatcher to confirm ──────────────────────────
     if match_status == "PENDING_REVIEW":
         suggested_addr = f"{suggested_elevator.address}, {suggested_elevator.city}" if suggested_elevator else "—"
-        # Explain why confirmation is needed
-        if suggested_elevator and house_number and house_number not in (suggested_elevator.address or ""):
+        if _lfn_mismatch:
+            reason = (
+                f"⚠️ *חשד לטעות במספר תיק משרד העבודה*\n"
+                f"מספר *{labor_file_number}* רשום במערכת תחת: *{suggested_addr}*\n"
+                f"הכתובת בדוח: *{address or 'לא ידוע'}* — שונה מהותית"
+            )
+            logger.warning(
+                "Inspection LFN mismatch: labor_file_number=%s is registered under '%s' but report address is '%s'",
+                labor_file_number, suggested_addr, address,
+            )
+        elif suggested_elevator and house_number and house_number not in (suggested_elevator.address or ""):
             reason = f"מספר בית בדוח: *{house_number}* — לא תואם לכתובת המוצעת"
         else:
             reason = f"ציון התאמה: {match_score:.0%} — מתחת לסף הוודאות"
@@ -311,7 +340,8 @@ def process_inspection_report(
             f"בודק: {inspector_name or 'לא ידוע'}\n"
             f"אנא אשר/דחה בדשבורד תחת 'דוחות ביקורת'."
         )
-        logger.warning("Inspection PENDING_REVIEW: %s → suggested %s (%.0f%%)", address, suggested_addr, (match_score or 0) * 100)
+        if not _lfn_mismatch:
+            logger.warning("Inspection PENDING_REVIEW: %s → suggested %s (%.0f%%)", address, suggested_addr, (match_score or 0) * 100)
         db.commit()
         db.refresh(report)
         for num in (settings.dispatcher_whatsapp or "").split(","):
