@@ -459,7 +459,7 @@ export default function DashboardPage() {
                 <PriorityCallCard
                   call={call}
                   faultLabels={faultLabels}
-                  onClick={() => navigate(`/calls`)}
+                  onClick={() => navigate(`/calls?callId=${call.id}`)}
                 />
               </Grid.Col>
             ))}
@@ -496,7 +496,7 @@ export default function DashboardPage() {
                       <Table.Tr
                         key={call.id}
                         style={{ cursor: 'pointer' }}
-                        onClick={() => navigate(`/calls/${call.id}`)}
+                        onClick={() => navigate(`/calls?callId=${call.id}`)}
                       >
                         <Table.Td>
                           <Badge color={PRIORITY_COLORS[call.priority]} size="xs">

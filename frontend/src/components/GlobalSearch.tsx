@@ -8,6 +8,8 @@ const TYPE_ICON: Record<string, string> = {
   customer: '🏢',
   call: '📞',
   technician: '👷',
+  invoice: '🧾',
+  management_company: '🏗️',
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -15,6 +17,8 @@ const TYPE_LABEL: Record<string, string> = {
   customer: 'לקוח',
   call: 'קריאה',
   technician: 'טכנאי',
+  invoice: 'חשבונית',
+  management_company: 'חברת ניהול',
 }
 
 const TYPE_COLOR: Record<string, string> = {
@@ -22,6 +26,8 @@ const TYPE_COLOR: Record<string, string> = {
   customer: 'teal',
   call: 'orange',
   technician: 'violet',
+  invoice: 'green',
+  management_company: 'gray',
 }
 
 function useDebounce<T>(value: T, delay: number): T {

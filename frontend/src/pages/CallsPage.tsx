@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { AIRefineButton } from '../components/AIRefineButton'
 import {
   Stack, Title, Group, Select, Badge, Text, Button, Paper, TextInput,
@@ -72,9 +72,10 @@ export default function CallsPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const userName = useAuthStore(s => s.userName)
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [statusFilter, setStatusFilter] = useState<string | null>(searchParams.get('status'))
   const [priorityFilter, setPriorityFilter] = useState<string | null>(searchParams.get('priority'))
+  const [searchText, setSearchText] = useState('')
   const [page, setPage] = useState(1)
   const [newOpened, { open: openNew, close: closeNew }] = useDisclosure()
   const [updateOpened, { open: openUpdate, close: closeUpdate }] = useDisclosure()
@@ -139,14 +140,40 @@ export default function CallsPage() {
     label: `${e.internal_number ? `#${e.internal_number} — ` : ''}${e.address}, ${e.city}`,
   }))
 
+  const elevatorMap = useMemo(() =>
+    Object.fromEntries(elevators.map(e => [e.id, e])),
+    [elevators]
+  )
+
   const filtered = useMemo(() => {
+    const q = searchText.trim().toLowerCase()
     return calls.filter(c => {
       if (c.fault_type === 'MAINTENANCE') return false
       const matchStatus = !statusFilter || c.status === statusFilter
       const matchPriority = !priorityFilter || c.priority === priorityFilter
-      return matchStatus && matchPriority
+      if (!matchStatus || !matchPriority) return false
+      if (!q) return true
+      const elev = elevatorMap[c.elevator_id]
+      const addr = elev ? `${elev.address} ${elev.city} ${elev.building_name ?? ''}`.toLowerCase() : ''
+      return (
+        (c.description ?? '').toLowerCase().includes(q) ||
+        (c.reported_by ?? '').toLowerCase().includes(q) ||
+        addr.includes(q) ||
+        (c.call_number ? `s${String(c.call_number).padStart(5, '0')}`.includes(q) : false)
+      )
     })
-  }, [calls, statusFilter, priorityFilter])
+  }, [calls, statusFilter, priorityFilter, searchText, elevatorMap])
+
+  // Auto-open detail modal when ?callId= is in the URL (from dashboard / elevator page links)
+  useEffect(() => {
+    const callId = searchParams.get('callId')
+    if (!callId || calls.length === 0) return
+    const target = calls.find(c => c.id === callId)
+    if (target) {
+      openDetailModal(target)
+      setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('callId'); return next }, { replace: true })
+    }
+  }, [searchParams.get('callId'), calls.length])
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -326,6 +353,13 @@ export default function CallsPage() {
       </Group>
 
       <Group>
+        <TextInput
+          placeholder="🔍 חיפוש — כתובת, תיאור, מתקשר, מספר קריאה..."
+          value={searchText}
+          onChange={e => { setSearchText(e.currentTarget.value); setPage(1) }}
+          w={320}
+          clearable
+        />
         <Select
           placeholder="סטטוס"
           data={[
@@ -363,6 +397,7 @@ export default function CallsPage() {
                 <Table.Tr>
                   <Table.Th>#</Table.Th>
                   <Table.Th>עדיפות</Table.Th>
+                  <Table.Th>כתובת</Table.Th>
                   <Table.Th>תיאור</Table.Th>
                   <Table.Th>סוג תקלה</Table.Th>
                   <Table.Th>סטטוס</Table.Th>
@@ -375,7 +410,7 @@ export default function CallsPage() {
               <Table.Tbody>
                 {paginated.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={8}><Center h={100}><Text c="dimmed">לא נמצאו קריאות</Text></Center></Table.Td>
+                    <Table.Td colSpan={10}><Center h={100}><Text c="dimmed">לא נמצאו קריאות</Text></Center></Table.Td>
                   </Table.Tr>
                 ) : paginated.map(c => {
                   const isRescue = c.fault_type === 'RESCUE'
@@ -395,6 +430,13 @@ export default function CallsPage() {
                           {isRescue && <Text size="sm">🚨</Text>}
                           <Badge color={PRIORITY_COLORS[c.priority]} size="sm">{PRIORITY_LABELS[c.priority]}</Badge>
                         </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        {(() => { const e = elevatorMap[c.elevator_id]; return e ? (
+                          <Text size="xs" lineClamp={1} style={{ maxWidth: 160 }}>
+                            {e.address}{e.city ? `, ${e.city}` : ''}
+                          </Text>
+                        ) : <Text size="xs" c="dimmed">—</Text> })()}
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={0}>

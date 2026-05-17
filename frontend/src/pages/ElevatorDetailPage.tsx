@@ -1351,7 +1351,11 @@ export default function ElevatorDetailPage() {
                 </Table.Thead>
                 <Table.Tbody>
                   {(calls as any[]).map((call: any) => (
-                    <Table.Tr key={call.id}>
+                    <Table.Tr
+                      key={call.id}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/calls?callId=${call.id}`)}
+                    >
                       <Table.Td><Badge color={PRIORITY_COLORS[call.priority]} size="sm">{PRIORITY_LABELS[call.priority]}</Badge></Table.Td>
                       <Table.Td><Text size="sm" lineClamp={2}>{call.description}</Text></Table.Td>
                       <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[call.fault_type]}</Text></Table.Td>
