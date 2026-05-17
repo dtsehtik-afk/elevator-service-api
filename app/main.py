@@ -273,6 +273,50 @@ async def lifespan(app: FastAPI):
                    WHERE NOT EXISTS (
                        SELECT 1 FROM warehouses w WHERE w.technician_id = t.id AND w.warehouse_type = 'VEHICLE'
                    ) AND t.id IS NOT NULL""",
+                # ── ERP Extended Fields ──────────────────────────────────────
+                # parts
+                "ALTER TABLE parts ADD COLUMN IF NOT EXISTS is_inventory_managed BOOLEAN NOT NULL DEFAULT TRUE",
+                "ALTER TABLE parts ADD COLUMN IF NOT EXISTS is_serial_managed BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE parts ADD COLUMN IF NOT EXISTS image_url TEXT",
+                "ALTER TABLE parts ADD COLUMN IF NOT EXISTS foreign_description VARCHAR(500)",
+                "ALTER TABLE parts ADD COLUMN IF NOT EXISTS product_family VARCHAR(100)",
+                "ALTER TABLE parts ADD COLUMN IF NOT EXISTS erp_metadata JSONB",
+                # customers
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS creation_date DATE",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS fax VARCHAR(30)",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS industry_type VARCHAR(100)",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS territory VARCHAR(100)",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS delivery_route VARCHAR(100)",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS website VARCHAR(255)",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS sales_target NUMERIC(14,2)",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS employee_count INTEGER",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS erp_metadata JSONB",
+                # contracts
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS customer_type_ref VARCHAR(100)",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS contact_person VARCHAR(100)",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS paid_until DATE",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS renewal_years INTEGER",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5,2)",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS vat_percent NUMERIC(5,2) DEFAULT 18",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS sales_rep_id UUID REFERENCES technicians(id) ON DELETE SET NULL",
+                "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS erp_metadata JSONB",
+                "CREATE INDEX IF NOT EXISTS ix_contracts_project_id ON contracts (project_id)",
+                "CREATE INDEX IF NOT EXISTS ix_contracts_sales_rep_id ON contracts (sales_rep_id)",
+                # service_calls
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS parent_call_id UUID REFERENCES service_calls(id) ON DELETE SET NULL",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS warranty_end_date DATE",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS customer_rma VARCHAR(50)",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS caller_name VARCHAR(150)",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS contact_phone_sms VARCHAR(30)",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS contact_email VARCHAR(100)",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS downtime_minutes INTEGER",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS total_price NUMERIC(12,2)",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS discount NUMERIC(12,2)",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS is_elevator_stopped BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS station_count INTEGER",
+                "ALTER TABLE service_calls ADD COLUMN IF NOT EXISTS erp_metadata JSONB",
+                "CREATE INDEX IF NOT EXISTS ix_service_calls_parent_call_id ON service_calls (parent_call_id)",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

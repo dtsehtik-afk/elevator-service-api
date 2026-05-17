@@ -523,6 +523,53 @@ export default function CallsPage() {
                   <Text size="sm" c="dimmed" w={100}>👤 דווח ע"י</Text>
                   <Text size="sm">{detail.reported_by}</Text>
                 </Group>
+                {detail.caller_name && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>👤 שם מתקשר</Text>
+                    <Text size="sm">{detail.caller_name}</Text>
+                  </Group>
+                )}
+                {detail.contact_phone_sms && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>📱 טלפון קשר</Text>
+                    <Text size="sm">{detail.contact_phone_sms}</Text>
+                  </Group>
+                )}
+                {detail.contact_email && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>📧 מייל קשר</Text>
+                    <Text size="sm">{detail.contact_email}</Text>
+                  </Group>
+                )}
+                {detail.is_elevator_stopped && (
+                  <Group gap="xs">
+                    <Badge color="red" variant="filled" size="sm">🚨 מעלית עומדת</Badge>
+                  </Group>
+                )}
+                {detail.customer_rma && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>🔖 מס' קריאה לקוח</Text>
+                    <Text size="sm" ff="monospace">{detail.customer_rma}</Text>
+                  </Group>
+                )}
+                {detail.warranty_end_date && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>🛡 אחריות עד</Text>
+                    <Text size="sm">{new Date(detail.warranty_end_date).toLocaleDateString('he-IL')}</Text>
+                  </Group>
+                )}
+                {detail.downtime_minutes != null && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>⏱ השבתה</Text>
+                    <Text size="sm">{detail.downtime_minutes} דקות</Text>
+                  </Group>
+                )}
+                {detail.station_count != null && (
+                  <Group gap="xs">
+                    <Text size="sm" c="dimmed" w={100}>🏢 תחנות</Text>
+                    <Text size="sm">{detail.station_count}</Text>
+                  </Group>
+                )}
                 {detail.call_number && (
                   <Group gap="xs">
                     <Text size="sm" c="dimmed" w={100}>🔢 מס' קריאה</Text>

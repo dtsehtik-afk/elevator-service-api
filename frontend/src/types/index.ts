@@ -84,6 +84,19 @@ export interface ServiceCall {
   created_at: string
   assigned_at: string | null
   resolved_at: string | null
+  // ERP
+  caller_name: string | null
+  contact_phone_sms: string | null
+  contact_email: string | null
+  is_elevator_stopped: boolean
+  customer_rma: string | null
+  warranty_end_date: string | null
+  downtime_minutes: number | null
+  total_price: number | null
+  discount: number | null
+  station_count: number | null
+  parent_call_id: string | null
+  erp_metadata: Record<string, unknown> | null
 }
 
 export interface AssignmentDetail {
@@ -194,6 +207,16 @@ export interface Customer {
   open_invoices: number
   created_at: string
   updated_at: string
+  // ERP
+  creation_date: string | null
+  fax: string | null
+  industry_type: string | null
+  territory: string | null
+  delivery_route: string | null
+  website: string | null
+  sales_target: number | null
+  employee_count: number | null
+  erp_metadata: Record<string, unknown> | null
 }
 
 export interface CustomerDetail extends Customer {
@@ -247,6 +270,17 @@ export interface Contract {
   elevator_count: number
   created_at: string
   updated_at: string
+  // ERP
+  customer_type_ref: string | null
+  contact_person: string | null
+  paid_until: string | null
+  renewal_years: number | null
+  project_id: string | null
+  discount_percent: number | null
+  vat_percent: number | null
+  sales_rep_id: string | null
+  sales_rep_name: string | null
+  erp_metadata: Record<string, unknown> | null
 }
 
 export interface Invoice {
@@ -301,6 +335,13 @@ export interface Part {
   notes: string | null
   created_at: string
   updated_at: string
+  // ERP
+  is_inventory_managed: boolean
+  is_serial_managed: boolean
+  image_url: string | null
+  foreign_description: string | null
+  product_family: string | null
+  erp_metadata: Record<string, unknown> | null
 }
 
 export interface Lead {

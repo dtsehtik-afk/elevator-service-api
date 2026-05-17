@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel
 
@@ -21,6 +21,12 @@ class PartCreate(BaseModel):
     supplier_phone: Optional[str] = None
     supplier_email: Optional[str] = None
     notes: Optional[str] = None
+    is_inventory_managed: bool = True
+    is_serial_managed: bool = False
+    image_url: Optional[str] = None
+    foreign_description: Optional[str] = None
+    product_family: Optional[str] = None
+    erp_metadata: Optional[Dict[str, Any]] = None
 
 
 class PartUpdate(BaseModel):
@@ -38,6 +44,12 @@ class PartUpdate(BaseModel):
     supplier_email: Optional[str] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
+    is_inventory_managed: Optional[bool] = None
+    is_serial_managed: Optional[bool] = None
+    image_url: Optional[str] = None
+    foreign_description: Optional[str] = None
+    product_family: Optional[str] = None
+    erp_metadata: Optional[Dict[str, Any]] = None
 
 
 class PartResponse(BaseModel):
@@ -57,6 +69,12 @@ class PartResponse(BaseModel):
     is_active: bool
     is_low_stock: bool = False
     notes: Optional[str] = None
+    is_inventory_managed: bool = True
+    is_serial_managed: bool = False
+    image_url: Optional[str] = None
+    foreign_description: Optional[str] = None
+    product_family: Optional[str] = None
+    erp_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}

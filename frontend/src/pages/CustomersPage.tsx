@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Title, Table, Badge, Button, Group, TextInput, Select, Modal,
   Stack, Text, ActionIcon, Tooltip, Paper, SimpleGrid, Card, NumberInput, Textarea,
+  Collapse, Divider,
 } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
@@ -33,10 +34,13 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [erpOpen, setErpOpen] = useState(false)
   const [form, setForm] = useState({
     name: '', customer_type: 'PRIVATE', phone: '', email: '',
     address: '', city: '', contact_person: '', vat_number: '',
     payment_terms: 30, notes: '', parent_id: '',
+    fax: '', industry_type: '', territory: '', delivery_route: '',
+    website: '', sales_target: 0, employee_count: 0,
   })
   const [allCustomers, setAllCustomers] = useState<Customer[]>([])
 
@@ -61,7 +65,7 @@ export default function CustomersPage() {
       } as any)
       notifications.show({ message: 'לקוח נוצר בהצלחה', color: 'green' })
       setCreateOpen(false)
-      setForm({ name: '', customer_type: 'PRIVATE', phone: '', email: '', address: '', city: '', contact_person: '', vat_number: '', payment_terms: 30, notes: '', parent_id: '' })
+      setForm({ name: '', customer_type: 'PRIVATE', phone: '', email: '', address: '', city: '', contact_person: '', vat_number: '', payment_terms: 30, notes: '', parent_id: '', fax: '', industry_type: '', territory: '', delivery_route: '', website: '', sales_target: 0, employee_count: 0 })
       load()
     } catch {
       notifications.show({ message: 'שגיאה ביצירת לקוח', color: 'red' })
@@ -179,6 +183,27 @@ export default function CustomersPage() {
           </Group>
           <NumberInput label="ימי תשלום" value={form.payment_terms} onChange={v => setForm(f => ({ ...f, payment_terms: Number(v) || 30 }))} min={0} />
           <Textarea label="הערות" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rightSection={<AIRefineButton value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />} rightSectionPointerEvents="all" />
+          <Divider
+            label={<Button variant="subtle" size="xs" onClick={() => setErpOpen(o => !o)}>{erpOpen ? '▲' : '▼'} מידע נוסף (ERP)</Button>}
+            labelPosition="center"
+          />
+          <Collapse in={erpOpen}>
+            <Stack gap="xs">
+              <Group grow>
+                <TextInput label="פקס" value={form.fax} onChange={e => setForm(f => ({ ...f, fax: e.target.value }))} />
+                <TextInput label="אתר אינטרנט" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} />
+              </Group>
+              <Group grow>
+                <TextInput label="תחום עיסוק" value={form.industry_type} onChange={e => setForm(f => ({ ...f, industry_type: e.target.value }))} />
+                <TextInput label="אזור / טריטוריה" value={form.territory} onChange={e => setForm(f => ({ ...f, territory: e.target.value }))} />
+              </Group>
+              <Group grow>
+                <TextInput label="קו חלוקה" value={form.delivery_route} onChange={e => setForm(f => ({ ...f, delivery_route: e.target.value }))} />
+                <NumberInput label="מס' עובדים" value={form.employee_count} min={0} onChange={v => setForm(f => ({ ...f, employee_count: Number(v) || 0 }))} />
+              </Group>
+              <NumberInput label="יעד מכירות (₪)" value={form.sales_target} min={0} onChange={v => setForm(f => ({ ...f, sales_target: Number(v) || 0 }))} />
+            </Stack>
+          </Collapse>
           <Button onClick={handleCreate} disabled={!form.name}>צור לקוח</Button>
         </Stack>
       </Modal>

@@ -1,12 +1,12 @@
 """Customer model — CRM client with optional parent hierarchy (לקוח / לקוח אב)."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import JSON, Uuid
 
 from app.database import Base
 
@@ -39,6 +39,17 @@ class Customer(Base):
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # ── ERP Extended Fields ──────────────────────────────────────────────────
+    creation_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)   # תאריך פתיחה היסטורי מה-ERP
+    fax: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    industry_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # תחום עיסוק
+    territory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)      # אזור / טריטוריה
+    delivery_route: Mapped[Optional[str]] = mapped_column(String(100), nullable=True) # קו חלוקה / מסלול
+    website: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    sales_target: Mapped[Optional[float]] = mapped_column(Numeric(14, 2), nullable=True)  # יעד מכירות
+    employee_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    erp_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

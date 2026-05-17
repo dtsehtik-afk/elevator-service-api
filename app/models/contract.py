@@ -6,7 +6,7 @@ from typing import Optional
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import JSON, Uuid
 
 from app.database import Base
 
@@ -44,11 +44,32 @@ class Contract(Base):
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ── ERP Extended Fields ──────────────────────────────────────────────────
+    customer_type_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # סוג לקוח מהחוזה
+    contact_person: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)     # איש קשר לחוזה
+    paid_until: Mapped[Optional[date]] = mapped_column(Date, nullable=True)               # שולם עד
+    renewal_years: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)          # חידוש בשנים
+    project_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    discount_percent: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
+    vat_percent: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True, default=18.0)
+    sales_rep_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True
+    )
+    erp_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     customer: Mapped["Customer"] = relationship(  # noqa: F821
         "Customer", back_populates="contracts", foreign_keys=[customer_id]
+    )
+    project: Mapped[Optional["Project"]] = relationship(  # noqa: F821
+        "Project", foreign_keys=[project_id]
+    )
+    sales_rep: Mapped[Optional["Technician"]] = relationship(  # noqa: F821
+        "Technician", foreign_keys=[sales_rep_id]
     )
     quotes: Mapped[list["Quote"]] = relationship(  # noqa: F821
         "Quote", back_populates="contract", foreign_keys="Quote.contract_id"

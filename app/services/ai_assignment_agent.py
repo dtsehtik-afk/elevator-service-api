@@ -268,8 +268,8 @@ def assign_with_confirmation(
         logger.warning("No available technicians for call %s", service_call.id)
         return None
 
-    caller_name  = _extract_caller(service_call.reported_by)
-    caller_phone = _extract_phone(service_call.reported_by)
+    caller_name  = service_call.caller_name or _extract_caller(service_call.reported_by)
+    caller_phone = service_call.contact_phone_sms or _extract_phone(service_call.reported_by)
 
     if not needs_confirmation:
         # Email-originated: auto-assign top candidate directly (no broadcast)
@@ -355,6 +355,8 @@ def assign_with_confirmation(
             desc = _clean_description(service_call.description or "")
             if ctx:
                 desc = f"{desc}\n{ctx}".strip() if desc else ctx
+            if getattr(service_call, "is_elevator_stopped", False):
+                desc = f"🚨 מעלית עומדת!\n{desc}".strip()
             _age_days = (datetime.now(timezone.utc) - service_call.created_at.replace(tzinfo=timezone.utc) if service_call.created_at.tzinfo is None else datetime.now(timezone.utc) - service_call.created_at).days
             _wa_msg_id = whatsapp_service.notify_technician_new_call(
                 phone=phone,

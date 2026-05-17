@@ -1,8 +1,8 @@
 """Pydantic schemas for service call endpoints."""
 
 import uuid
-from datetime import datetime
-from typing import List, Optional
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,13 @@ class ServiceCallCreate(BaseModel):
     description: str = Field(..., min_length=5)
     priority: str = Field("MEDIUM", pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
     fault_type: str = Field("OTHER", pattern="^(MECHANICAL|ELECTRICAL|SOFTWARE|STUCK|DOOR|RESCUE|MAINTENANCE|OTHER)$")
+    # ERP
+    caller_name: Optional[str] = None
+    contact_phone_sms: Optional[str] = None
+    contact_email: Optional[str] = None
+    is_elevator_stopped: bool = False
+    customer_rma: Optional[str] = None
+    parent_call_id: Optional[uuid.UUID] = None
 
 
 class ServiceCallUpdate(BaseModel):
@@ -24,6 +31,19 @@ class ServiceCallUpdate(BaseModel):
     description: Optional[str] = Field(None, min_length=1)
     resolution_notes: Optional[str] = None
     quote_needed: Optional[bool] = None
+    # ERP
+    caller_name: Optional[str] = None
+    contact_phone_sms: Optional[str] = None
+    contact_email: Optional[str] = None
+    is_elevator_stopped: Optional[bool] = None
+    customer_rma: Optional[str] = None
+    warranty_end_date: Optional[date] = None
+    downtime_minutes: Optional[int] = None
+    total_price: Optional[float] = None
+    discount: Optional[float] = None
+    station_count: Optional[int] = None
+    parent_call_id: Optional[uuid.UUID] = None
+    erp_metadata: Optional[Dict[str, Any]] = None
 
 
 class ServiceCallResponse(BaseModel):
@@ -44,6 +64,19 @@ class ServiceCallResponse(BaseModel):
     created_at: datetime
     assigned_at: Optional[datetime]
     resolved_at: Optional[datetime]
+    # ERP
+    caller_name: Optional[str] = None
+    contact_phone_sms: Optional[str] = None
+    contact_email: Optional[str] = None
+    is_elevator_stopped: bool = False
+    customer_rma: Optional[str] = None
+    warranty_end_date: Optional[date] = None
+    downtime_minutes: Optional[int] = None
+    total_price: Optional[float] = None
+    discount: Optional[float] = None
+    station_count: Optional[int] = None
+    parent_call_id: Optional[uuid.UUID] = None
+    erp_metadata: Optional[Dict[str, Any]] = None
 
     model_config = {"from_attributes": True}
 

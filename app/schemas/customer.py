@@ -1,8 +1,8 @@
 """Pydantic schemas for customer endpoints."""
 
 import uuid
-from datetime import datetime
-from typing import List, Optional
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -21,6 +21,16 @@ class CustomerBase(BaseModel):
     credit_limit: Optional[float] = None
     notes: Optional[str] = None
     is_active: bool = True
+    # ERP
+    creation_date: Optional[date] = None
+    fax: Optional[str] = None
+    industry_type: Optional[str] = None
+    territory: Optional[str] = None
+    delivery_route: Optional[str] = None
+    website: Optional[str] = None
+    sales_target: Optional[float] = None
+    employee_count: Optional[int] = None
+    erp_metadata: Optional[Dict[str, Any]] = None
 
 
 class CustomerCreate(CustomerBase):
@@ -41,6 +51,16 @@ class CustomerUpdate(BaseModel):
     credit_limit: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    # ERP
+    creation_date: Optional[date] = None
+    fax: Optional[str] = None
+    industry_type: Optional[str] = None
+    territory: Optional[str] = None
+    delivery_route: Optional[str] = None
+    website: Optional[str] = None
+    sales_target: Optional[float] = None
+    employee_count: Optional[int] = None
+    erp_metadata: Optional[Dict[str, Any]] = None
 
 
 class CustomerRef(BaseModel):

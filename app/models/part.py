@@ -6,7 +6,7 @@ from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.types import Uuid
+from sqlalchemy.types import JSON, Uuid
 
 from app.database import Base
 
@@ -52,6 +52,15 @@ class Part(Base):
     currency: Mapped[str] = mapped_column(String(10), nullable=False, default="ILS")
     last_purchase_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)  # מחיר קנייה אחרון
     average_cost: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)  # מחיר ממוצע נע (מעודכן בכל RECEIPT)
+
+    # ── ERP Extended Fields ──────────────────────────────────────────────────
+    is_inventory_managed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_serial_managed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    foreign_description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # תאור לועזי
+    product_family: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # משפחת מוצר
+    # Flexible bag for ERP-specific fields (conversion rates, shelf sizes, picking order, etc.)
+    erp_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Title, Table, Badge, Button, Group, Select, Modal, Stack, Text,
-  Paper, TextInput, NumberInput, Textarea, Switch, Checkbox,
+  Paper, TextInput, NumberInput, Textarea, Switch, Collapse, Divider,
 } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
@@ -27,11 +27,14 @@ export default function ContractsPage() {
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [erpOpen, setErpOpen] = useState(false)
   const [form, setForm] = useState({
     customer_id: '', contract_type: 'SERVICE', status: 'PENDING',
     start_date: '', end_date: '', monthly_price: 0, total_value: 0,
     payment_terms: 30, auto_invoice: false, invoice_frequency: '',
     notes: '',
+    customer_type_ref: '', contact_person: '', paid_until: '',
+    renewal_years: 0, discount_percent: 0, vat_percent: 18,
   })
 
   const load = () => {
@@ -151,6 +154,26 @@ export default function ContractsPage() {
             onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
             rightSection={<AIRefineButton value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />}
             rightSectionPointerEvents="all" />
+          <Divider
+            label={<Button variant="subtle" size="xs" onClick={() => setErpOpen(o => !o)}>{erpOpen ? '▲' : '▼'} פרטי ERP נוספים</Button>}
+            labelPosition="center"
+          />
+          <Collapse in={erpOpen}>
+            <Stack gap="xs">
+              <Group grow>
+                <TextInput label="סוג לקוח (ERP)" value={form.customer_type_ref} onChange={e => setForm(f => ({ ...f, customer_type_ref: e.target.value }))} />
+                <TextInput label="איש קשר לחוזה" value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} />
+              </Group>
+              <Group grow>
+                <NumberInput label="הנחה (%)" value={form.discount_percent} min={0} max={100} onChange={v => setForm(f => ({ ...f, discount_percent: Number(v) || 0 }))} />
+                <NumberInput label="מע\"מ (%)" value={form.vat_percent} min={0} max={100} onChange={v => setForm(f => ({ ...f, vat_percent: Number(v) || 18 }))} />
+              </Group>
+              <Group grow>
+                <TextInput label="שולם עד" type="date" value={form.paid_until} onChange={e => setForm(f => ({ ...f, paid_until: e.target.value }))} />
+                <NumberInput label="חידוש (שנים)" value={form.renewal_years} min={0} onChange={v => setForm(f => ({ ...f, renewal_years: Number(v) || 0 }))} />
+              </Group>
+            </Stack>
+          </Collapse>
           <Button onClick={handleCreate} disabled={!form.customer_id}>צור חוזה</Button>
         </Stack>
       </Modal>

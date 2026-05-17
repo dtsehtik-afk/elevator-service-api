@@ -31,6 +31,7 @@ def _enrich(c: Contract, db: Session) -> ContractResponse:
     r = ContractResponse.model_validate(c)
     r.customer_name = c.customer.name if c.customer else None
     r.elevator_count = db.query(ElevatorContract).filter(ElevatorContract.contract_id == c.id).count()
+    r.sales_rep_name = c.sales_rep.name if c.sales_rep else None
     return r
 
 
