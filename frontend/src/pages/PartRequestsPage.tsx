@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  Stack, Title, Text, Badge, Button, Group, Select, Textarea,
+  Stack, Title, Text, Badge, Button, Group, Textarea,
   Table, Paper, Center, Loader, Modal, Tabs, Alert,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
@@ -28,7 +28,8 @@ export default function PartRequestsPage() {
   const role = useAuthStore(s => s.role)
   const isManager = role === 'ADMIN' || role === 'MANAGER' || role === 'DISPATCHER'
 
-  const [statusFilter, setStatusFilter] = useState<string | null>('PENDING_APPROVAL')
+  // '' = all statuses
+  const [statusFilter, setStatusFilter] = useState('PENDING_APPROVAL')
   const [rejectOpen, setRejectOpen] = useState(false)
   const [selectedPr, setSelectedPr] = useState<PartRequest | null>(null)
   const [rejectReason, setRejectReason] = useState('')
@@ -37,7 +38,7 @@ export default function PartRequestsPage() {
 
   const { data: requests = [], isLoading } = useQuery({
     queryKey: ['part-requests-all', statusFilter],
-    queryFn: () => listPartRequests({ status: statusFilter ?? undefined }),
+    queryFn: () => listPartRequests({ status: statusFilter || undefined }),
     refetchInterval: 30000,
   })
 
@@ -74,7 +75,9 @@ export default function PartRequestsPage() {
     onError: (e: any) => notifications.show({ message: e?.response?.data?.detail || 'שגיאה בהוצאת חלק', color: 'red' }),
   })
 
-  const pendingCount = requests.filter(r => r.status === 'PENDING_APPROVAL').length
+  const pendingCount = statusFilter === ''
+    ? requests.filter(r => r.status === 'PENDING_APPROVAL').length
+    : (statusFilter === 'PENDING_APPROVAL' ? requests.length : 0)
 
   return (
     <Stack gap="md" p="md">
@@ -85,21 +88,19 @@ export default function PartRequestsPage() {
         )}
       </Group>
 
-      {statusFilter === 'PENDING_APPROVAL' && pendingCount > 0 && (
+      {pendingCount > 0 && statusFilter === 'PENDING_APPROVAL' && (
         <Alert color="orange" title="בקשות הממתינות לאישור שלך">
-          {pendingCount} בקשות חלפים מטכנאים מחכות לאישורך. אשר או דחה כל בקשה.
+          {pendingCount} בקשות חלפים מטכנאים מחכות לאישורך.
         </Alert>
       )}
 
-      <Tabs value={statusFilter} onChange={setStatusFilter}>
+      <Tabs value={statusFilter} onChange={v => setStatusFilter(v ?? '')}>
         <Tabs.List>
-          <Tabs.Tab value="PENDING_APPROVAL">
-            ממתין לאישור {statusFilter !== 'PENDING_APPROVAL' && pendingCount > 0 && `(${pendingCount})`}
-          </Tabs.Tab>
+          <Tabs.Tab value="PENDING_APPROVAL">ממתין לאישור</Tabs.Tab>
           <Tabs.Tab value="APPROVED">אושר</Tabs.Tab>
           <Tabs.Tab value="ISSUED">הוצא</Tabs.Tab>
           <Tabs.Tab value="REJECTED">נדחה</Tabs.Tab>
-          <Tabs.Tab value={null as any}>הכל</Tabs.Tab>
+          <Tabs.Tab value="">הכל</Tabs.Tab>
         </Tabs.List>
       </Tabs>
 
