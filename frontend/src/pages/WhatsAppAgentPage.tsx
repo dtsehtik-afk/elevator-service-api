@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   Stack, Title, Tabs, Textarea, Button, Group, Text, Paper, Badge,
   TextInput, ScrollArea, Timeline, Box, Loader, Center, Divider,
-  ActionIcon, Tooltip, ThemeIcon, SimpleGrid, Card,
+  ActionIcon, Tooltip, ThemeIcon, SimpleGrid, Card, Table, Switch, Modal,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
@@ -333,6 +333,174 @@ function StatsTab() {
   )
 }
 
+// ── Bot QA Tab ────────────────────────────────────────────────────────────────
+
+interface BotQA {
+  id: string
+  question: string
+  answer: string
+  tags: string | null
+  use_count: number
+  active: boolean
+  created_at: string
+}
+
+function BotQATab() {
+  const qc = useQueryClient()
+  const [search, setSearch] = useState('')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState<BotQA | null>(null)
+  const [form, setForm] = useState({ question: '', answer: '', tags: '' })
+
+  const { data: pairs = [], isLoading } = useQuery<BotQA[]>({
+    queryKey: ['bot-qa'],
+    queryFn: () => client.get('/bot-qa?active_only=false').then(r => r.data),
+  })
+
+  const createMut = useMutation({
+    mutationFn: (body: object) => client.post('/bot-qa', body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bot-qa'] }); setModalOpen(false) },
+    onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
+  })
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: object }) => client.put(`/bot-qa/${id}`, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bot-qa'] }); setModalOpen(false) },
+    onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => client.delete(`/bot-qa/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bot-qa'] }),
+  })
+
+  function openNew() {
+    setEditing(null)
+    setForm({ question: '', answer: '', tags: '' })
+    setModalOpen(true)
+  }
+
+  function openEdit(qa: BotQA) {
+    setEditing(qa)
+    setForm({ question: qa.question, answer: qa.answer, tags: qa.tags ?? '' })
+    setModalOpen(true)
+  }
+
+  function save() {
+    const body = { question: form.question, answer: form.answer, tags: form.tags || null }
+    if (editing) updateMut.mutate({ id: editing.id, body })
+    else createMut.mutate(body)
+  }
+
+  const filtered = pairs.filter(p =>
+    !search || p.question.includes(search) || p.answer.includes(search)
+  )
+
+  return (
+    <Stack gap="md">
+      <Group justify="space-between">
+        <Text size="sm" c="dimmed">
+          שאלות ותשובות שהסוכן לומד מהן — מוצגות כהקשר כשהשאלה רלוונטית.
+        </Text>
+        <Button size="xs" onClick={openNew}>+ הוסף Q&A</Button>
+      </Group>
+      <TextInput
+        placeholder="חיפוש..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        w={260}
+      />
+      {isLoading ? <Loader /> : (
+        <Table striped highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>שאלה</Table.Th>
+              <Table.Th>תשובה</Table.Th>
+              <Table.Th>תגיות</Table.Th>
+              <Table.Th>שימושים</Table.Th>
+              <Table.Th>פעיל</Table.Th>
+              <Table.Th></Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {filtered.map(qa => (
+              <Table.Tr key={qa.id}>
+                <Table.Td style={{ maxWidth: 220 }}>
+                  <Text size="sm" lineClamp={2} title={qa.question}>{qa.question}</Text>
+                </Table.Td>
+                <Table.Td style={{ maxWidth: 260 }}>
+                  <Text size="sm" lineClamp={2} c="dimmed" title={qa.answer}>{qa.answer}</Text>
+                </Table.Td>
+                <Table.Td>
+                  {qa.tags ? <Badge size="xs" variant="light">{qa.tags}</Badge> : null}
+                </Table.Td>
+                <Table.Td><Text size="sm">{qa.use_count}</Text></Table.Td>
+                <Table.Td>
+                  <Switch
+                    size="xs"
+                    checked={qa.active}
+                    onChange={e => updateMut.mutate({ id: qa.id, body: { active: e.currentTarget.checked } })}
+                  />
+                </Table.Td>
+                <Table.Td>
+                  <Group gap={4}>
+                    <ActionIcon size="sm" variant="subtle" onClick={() => openEdit(qa)}>✏️</ActionIcon>
+                    <ActionIcon
+                      size="sm" variant="subtle" color="red"
+                      onClick={() => { if (confirm('למחוק?')) deleteMut.mutate(qa.id) }}
+                    >🗑️</ActionIcon>
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
+
+      <Modal
+        opened={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editing ? 'עריכת Q&A' : 'Q&A חדש'}
+        dir="rtl"
+        size="lg"
+      >
+        <Stack gap="sm">
+          <Textarea
+            label="שאלה"
+            placeholder="מה הטכנאי כתב / שאל?"
+            value={form.question}
+            onChange={e => setForm(f => ({ ...f, question: e.target.value }))}
+            autosize
+            minRows={2}
+          />
+          <Textarea
+            label="תשובה"
+            placeholder="מה הסוכן צריך להגיד / לעשות?"
+            value={form.answer}
+            onChange={e => setForm(f => ({ ...f, answer: e.target.value }))}
+            autosize
+            minRows={2}
+          />
+          <TextInput
+            label="תגיות (אופציונלי)"
+            placeholder="intent,assign,info"
+            value={form.tags}
+            onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+          />
+          <Group justify="flex-end" mt="sm">
+            <Button variant="subtle" onClick={() => setModalOpen(false)}>ביטול</Button>
+            <Button
+              loading={createMut.isPending || updateMut.isPending}
+              disabled={!form.question || !form.answer}
+              onClick={save}
+            >שמור</Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Stack>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function WhatsAppAgentPage() {
@@ -354,6 +522,9 @@ export default function WhatsAppAgentPage() {
           <Tabs.Tab value="stats" leftSection={<span>📊</span>}>
             סטטיסטיקות
           </Tabs.Tab>
+          <Tabs.Tab value="qa" leftSection={<span>🧠</span>}>
+            בסיס ידע QA
+          </Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="conversations" pt="md">
@@ -364,6 +535,9 @@ export default function WhatsAppAgentPage() {
         </Tabs.Panel>
         <Tabs.Panel value="stats" pt="md">
           <StatsTab />
+        </Tabs.Panel>
+        <Tabs.Panel value="qa" pt="md">
+          <BotQATab />
         </Tabs.Panel>
       </Tabs>
     </Stack>

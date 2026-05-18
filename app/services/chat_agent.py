@@ -898,7 +898,22 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי של חברת אקורד מע
 השתמש בכלים כדי לשלוף מידע חי מהמסד. אל תמציא תשובות.
 ענה בעברית קצרה וישירה — ווצאפ, לא דוח. תאריכים בפורמט DD/MM/YYYY.
 
-לפני פעולה שמשנה נתונים (סגירה, שיבוץ, העברה להצעת מחיר) — בקש אישור מפורש תחילה.
+══ כלל אינטנט — קרדינלי ══
+לא כל פניה היא בקשת ביצוע. נתח את כוונת המשתמש לפני כל פעולה:
+
+בקשות מידע בלבד (השב עם נתונים — אל תבצע שום פעולה):
+• "הקפץ לי קריאה X" / "הראה לי" / "מה הפרטים" / "מה קורה ב" / "תן לי פרטים" / "איפה" / "מתי" / "כמה" / "מי" → השתמש בכלי קריאה בלבד והצג מידע.
+
+בקשות ביצוע (שינוי נתונים — מחייב אישור מפורש תחילה):
+• "סגור קריאה" / "העבר לטכנאי" / "שבץ אותי" / "אני לוקח את הקריאה" / "תקצה לי" → בקש אישור לפני ביצוע.
+
+דוגמאות:
+❌ "הקפץ לי את קריאה 42" — המשמעות: הצג לי את פרטי קריאה 42. אל תשבץ אותה.
+✓ "תשבץ אותי לקריאה 42" — המשמעות: בקש אישור, ואחר כך בצע שיבוץ.
+❌ "מה יש לי היום?" — הצג קריאות. אל תשנה כלום.
+✓ "סיימתי עם קריאה 42, פגם נפתר" — בקש אישור סגירה, ובצע.
+
+כלל אישור: לפני פעולה שמשנה נתונים (סגירה, שיבוץ, העברה להצעת מחיר) — שאל "האם לבצע?" והמתן לתשובה חד-משמעית: כן/לא/1/2/אישור/ביטול. הודעה עמומה אינה אישור.
 
 אם המשתמש מבקש משהו שאין לך כלי עבורו — ענה בעברית ציין מה חסר, למשל: "פעולה זו אינה זמינה כרגע במערכת (חסר: [תיאור הפונקציונליות החסרה])"."""
 
@@ -940,6 +955,35 @@ def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list
         return []
 
 
+def _load_qa_context(db: Session, question: str, limit: int = 5) -> str:
+    """Return a block of relevant Q&A pairs to prepend to the system prompt."""
+    try:
+        from app.models.bot_qa import BotQA
+        from sqlalchemy import or_
+        words = [w for w in question.split() if len(w) > 2][:6]
+        if not words:
+            return ""
+        filters = [BotQA.question.ilike(f"%{w}%") for w in words]
+        pairs = (
+            db.query(BotQA)
+            .filter(BotQA.active == True, or_(*filters))
+            .order_by(BotQA.use_count.desc())
+            .limit(limit)
+            .all()
+        )
+        if not pairs:
+            return ""
+        lines = ["══ דוגמאות מהניסיון (QA) ══"]
+        for p in pairs:
+            lines.append(f"ש: {p.question}\nת: {p.answer}")
+            p.use_count = (p.use_count or 0) + 1
+        db.commit()
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("Could not load bot QA context: %s", exc)
+        return ""
+
+
 def answer_question(db: Session, question: str, asker_name: str = "טכנאי", phone: str = "", with_history: bool = False) -> str:
     """
     Answer a free-text Hebrew question about the system using Gemini + tool use.
@@ -968,10 +1012,13 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     else:
         contents = history + [current]
 
+    # Inject relevant Q&A pairs into system prompt
+    qa_ctx = _load_qa_context(db, question)
+
     # Try Gemini first (with tool use), fall back to Anthropic if unavailable
     if s.gemini_api_key:
         try:
-            return _answer_gemini(db, s, contents)
+            return _answer_gemini(db, s, contents, extra_system=qa_ctx)
         except Exception as exc:
             logger.warning("Gemini unavailable (%s) — trying Anthropic fallback", exc)
 
@@ -984,12 +1031,13 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     return "השירות אינו זמין כרגע — נסה שוב בעוד מספר דקות."
 
 
-def _answer_gemini(db, s, contents: list) -> str:
+def _answer_gemini(db, s, contents: list, extra_system: str = "") -> str:
     """Run the Gemini tool-use loop and return Hebrew answer."""
+    system_text = _SYSTEM_PROMPT + ("\n\n" + extra_system if extra_system else "")
     with httpx.Client(timeout=30) as client:
         for _iteration in range(6):
             payload = {
-                "system_instruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
+                "system_instruction": {"parts": [{"text": system_text}]},
                 "tools": _GEMINI_TOOLS,
                 "contents": contents,
                 "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1200},

@@ -30,6 +30,7 @@ from app.models.inventory_transaction import InventoryTransaction
 from app.models.whatsapp_message import WhatsAppMessage
 from app.models.consultant import Consultant
 from app.models.part_request import PartRequest
+from app.models.bot_qa import BotQA
 
 __all__ = [
     "Building",
@@ -68,4 +69,5 @@ __all__ = [
     "WhatsAppMessage",
     "Consultant",
     "PartRequest",
+    "BotQA",
 ]

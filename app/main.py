@@ -22,6 +22,7 @@ from app.routers import part_requests as part_requests_router
 from app.routers import consultants as consultants_router
 from app.routers import activity_log as activity_log_router
 from app.routers import ai as ai_router
+from app.routers import bot_qa as bot_qa_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
 from app.routers import search as search_router
@@ -343,6 +344,18 @@ async def lifespan(app: FastAPI):
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_activity_log_created_at ON activity_log (created_at DESC)",
                 "CREATE INDEX IF NOT EXISTS ix_activity_log_category ON activity_log (category)",
+                # bot_qa
+                """CREATE TABLE IF NOT EXISTS bot_qa (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    question TEXT NOT NULL,
+                    answer TEXT NOT NULL,
+                    tags VARCHAR(500),
+                    use_count INTEGER DEFAULT 0,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    created_by VARCHAR(100)
+                )""",
                 # customers
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS creation_date DATE",
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS fax VARCHAR(30)",
@@ -551,12 +564,14 @@ app.include_router(reports_router.router)
 app.include_router(custom_fields_router.router)
 app.include_router(hr_router.router)
 app.include_router(ai_router.router)
+app.include_router(bot_qa_router.router)
 app.include_router(projects_router.router)
 app.include_router(admin_console_router.router)
 app.include_router(search_router.router)
 app.include_router(consultants_router.router)
 app.include_router(part_requests_router.router, prefix="/part-requests", tags=["Part Requests"])
 app.include_router(activity_log_router.router)
+app.include_router(bot_qa_router.router)
 
 
 @app.get("/health", tags=["Health"])
