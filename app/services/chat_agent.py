@@ -175,6 +175,7 @@ _GEMINI_TOOLS = [{
             "parameters": {"type": "OBJECT", "properties": {
                 "days_ahead": {"type": "INTEGER", "description": "כמה ימים קדימה לבדוק (ברירת מחדל: 14)"},
                 "overdue_only": {"type": "BOOLEAN", "description": "אם True — רק תחזוקות שעברו את התאריך"},
+                "city": {"type": "STRING", "description": "סינון לפי עיר ספציפית"},
             }, "required": []},
         },
         {
@@ -357,6 +358,7 @@ def _get_recent_calls(
                 tech_name_found = tech.name if tech else None
 
         result.append({
+            "מספר_קריאה": f"S{c.call_number:05d}" if c.call_number else str(c.id)[:8],
             "תאריך": c.created_at.strftime("%d/%m/%Y %H:%M") if c.created_at else "",
             "כתובת": f"{elevator.address}, {elevator.city}" if elevator else "לא ידוע",
             "בניין": elevator.building_name or "" if elevator else "",
@@ -365,6 +367,8 @@ def _get_recent_calls(
             "סטטוס": c.status,
             "טכנאי": tech_name_found or "לא שובץ",
             "תיאור": c.description or "",
+            "נסגר_על_ידי": c.resolved_by or "",
+            "הערות_סגירה": c.resolution_notes or "",
         })
 
         if len(result) >= limit:
@@ -811,7 +815,7 @@ def _get_elevator_inspections(db: Session, elevator_id: str, limit: int = 5) -> 
     return result
 
 
-def _get_upcoming_maintenance(db: Session, days_ahead: int = 14, overdue_only: bool = False) -> list:
+def _get_upcoming_maintenance(db: Session, days_ahead: int = 14, overdue_only: bool = False, city: str = None) -> list:
     """Return upcoming or overdue maintenance schedules."""
     now = datetime.now(timezone.utc).date()
     future = now + timedelta(days=days_ahead)
@@ -823,6 +827,10 @@ def _get_upcoming_maintenance(db: Session, days_ahead: int = 14, overdue_only: b
             MaintenanceRecord.status.in_(["SCHEDULED", "OVERDUE"]),
             MaintenanceRecord.scheduled_date <= future,
         )
+    
+    if city:
+        q = q.join(Elevator, MaintenanceRecord.elevator_id == Elevator.id).filter(Elevator.city.ilike(f"%{city}%"))
+        
     records = q.order_by(MaintenanceRecord.scheduled_date).limit(20).all()
     if not records:
         return [{"תוצאה": "אין תחזוקות ממתינות בטווח הזמן הזה"}]
@@ -951,7 +959,7 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
     elif tool_name == "get_elevator_inspections":
         return _get_elevator_inspections(db, tool_input["elevator_id"], tool_input.get("limit", 5))
     elif tool_name == "get_upcoming_maintenance":
-        return _get_upcoming_maintenance(db, tool_input.get("days_ahead", 14), tool_input.get("overdue_only", False))
+        return _get_upcoming_maintenance(db, tool_input.get("days_ahead", 14), tool_input.get("overdue_only", False), tool_input.get("city"))
     elif tool_name == "get_pending_unmatched_calls":
         return _get_pending_unmatched_calls(db, tool_input.get("limit", 10))
     elif tool_name == "get_document_analysis":
@@ -968,14 +976,19 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 השתמש בכלים לשליפת מידע חי. אל תמציא תשובות.
 ענה בעברית קצרה וישירה. תאריכים בפורמט DD/MM/YYYY.
 
-══ כלל ריצה מיידית ══
-שאלות מידע: קרא כלי → ענה מיד. אל תשאל "האם לבצע?" — פשוט תחפש.
+══ כלל ריצה מיידית ויוזמה ══
+שאלות מידע או בקשות עזרה כלליות ("מה יש לי לעשות בעפולה?"): אל תשאל "האם תרצה שאבדוק X או Y?". קח יוזמה! קרא לכל הכלים הרלוונטיים (למשל גם קריאות וגם תחזוקה), ואז תן תשובה מסכמת של מה שמצאת.
+שלוף מידע מיד, לעולם אל תשאל אישור לשלוף נתונים.
 • "רשימת מעליות בעיר X" → search_elevators(city=X, limit=100)
 • "הקפץ לי קריאה 42" → get_call_by_number → הצג פרטים
 • "מה יש לי היום?" → get_my_calls → הצג רשימה
 
+══ כלל מיקוד בהודעה האחרונה ══
+חובה! ענה אך ורק על הבקשה האחרונה של המשתמש. אל תחזור על שאלות או בקשות ישנות מהיסטוריית השיחה ואל תציף במידע שלא נתבקשת (כמו מיקומי טכנאים או תוצאות חיפוש ישנות). היסטוריית השיחה נועדה אך ורק להקשר רציף.
+
 ══ מענה על שיבוצים ומיקום ══
-• אם שואלים איפה טכנאי נמצא (למשל: "באיזה אזור X נמצא?") — חובה להשתמש בכלי get_technician_location לפני שעונים. לעולם אל תגיד שאינך יודע לפני שתבדוק.
+• אם שואלים איפה טכנאי נמצא (למשל: "באיזה אזור X נמצא?") — חובה להשתמש בכלי get_technician_location. 
+• כאשר אתה מציג מיקום של טכנאי, לעולם אל תרשום קואורדינטות מספריות (קו רוחב/אורך). הצג תמיד אך ורק את קישור המפה (Google Maps) שהתקבל מהכלי, או ציין עיר/רחוב אם ידוע.
 • אם שואלים למה טכנאי הומלץ או שובץ לקריאה — הסבר במדויק שמערכת השיבוץ האוטומטית (AI) מחשבת זמן הגעה חי (פקקים, מרחק), עומס קריאות פתוחות לטכנאי, ורמות מיומנות ספציפיות הנדרשות לאותה מעלית/תקלה.
 
 ══ הפרדה בין תקלות לתחזוקה ══
@@ -985,6 +998,9 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 אם חיפוש מחזיר "מוצגות X מתוך Y" — הרץ שוב עם limit גדול יותר.
 אל תאמר "הנה הרשימה" לפני שמשכת את הכל.
 כאשר מבקשים רשימה מפורטת (למשל רשימת מעליות בעיר מסוימת), עליך להציג את התוצאות שהתקבלו מהכלי בתשובה שלך (רשימה עם פרטים), ולא רק לומר "יש X תוצאות".
+
+══ הצגת פרטי קריאות ══
+חובה! כאשר אתה מציג קריאה או רשימת קריאות למשתמש, תמיד כלול את מספר הקריאה (למשל S00123) בתשובתך. זה קריטי כדי שבשאלות המשך המשתמש ואתה תוכלו להתייחס לקריאה ספציפית דרך get_call_by_number.
 
 ══ כלל אישור — לכל פעולה שמשנה נתונים ══
 כל פעולה שמשנה, יוצרת או מוחקת נתונים חייבת אישור מפורש לפני הביצוע.
