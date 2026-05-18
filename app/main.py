@@ -24,6 +24,7 @@ from app.routers import activity_log as activity_log_router
 from app.routers import ai as ai_router
 from app.routers import bot_qa as bot_qa_router
 from app.routers import documents as documents_router
+from app.routers import addresses as addresses_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
 from app.routers import search as search_router
@@ -614,6 +615,7 @@ app.include_router(part_requests_router.router, prefix="/part-requests", tags=["
 app.include_router(activity_log_router.router)
 app.include_router(bot_qa_router.router)
 app.include_router(documents_router.router)
+app.include_router(addresses_router.router)
 
 
 @app.get("/health", tags=["Health"])

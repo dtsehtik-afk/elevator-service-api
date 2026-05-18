@@ -8,6 +8,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.elevator import Elevator
+from app.services.address_service import correct_street_name
 
 
 # ── Fault-type keyword mapping ──────────────────────────────────────────────
@@ -105,11 +106,17 @@ def parse_email(email_body: str) -> ParsedCall:
         parts.append(f"טל׳: {phone}")
     description = " | ".join(parts) if parts else (context or "קריאת שירות")
 
+    # Autocorrect street typos via GovMap data
+    parsed_city = fields.get("city", "")
+    parsed_street = fields.get("street", "")
+    if parsed_city and parsed_street:
+        parsed_street = correct_street_name(parsed_city, parsed_street)
+
     return ParsedCall(
         name=fields.get("name", ""),
         phone=fields.get("phone", ""),
-        city=fields.get("city", ""),
-        street=fields.get("street", ""),
+        city=parsed_city,
+        street=parsed_street,
         house_number=fields.get("house_number", ""),
         floor=fields.get("floor", ""),
         call_type=call_type,
