@@ -17,6 +17,7 @@ import { Elevator } from '../types'
 import LocationPickerModal from '../components/LocationPickerModal'
 import RelatedPanel from '../components/RelatedPanel'
 import { DocumentUploadPanel } from '../components/DocumentUploadPanel'
+import { CustomerSearchSelect } from '../components/CustomerSearchSelect'
 import {
   ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS,
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -518,23 +519,21 @@ export default function ElevatorDetailPage() {
     enabled: !!elevator?.management_company_id,
   })
 
+  const effectiveCustomerId = (form.customer_id ?? elevator?.customer_id) as string | undefined
+  const effectiveSecondaryCustomerId = (form.secondary_customer_id ?? elevator?.secondary_customer_id) as string | undefined
+
   const { data: customerDetail } = useQuery({
-    queryKey: ['customer-detail', elevator?.customer_id],
-    queryFn: async () => (await client.get(`/customers/${elevator!.customer_id}`)).data,
-    enabled: !!elevator?.customer_id,
+    queryKey: ['customer-detail', effectiveCustomerId],
+    queryFn: async () => (await client.get(`/customers/${effectiveCustomerId}`)).data,
+    enabled: !!effectiveCustomerId,
   })
 
   const { data: secondaryCustomerDetail } = useQuery({
-    queryKey: ['customer-detail', elevator?.secondary_customer_id],
-    queryFn: async () => (await client.get(`/customers/${elevator!.secondary_customer_id}`)).data,
-    enabled: !!elevator?.secondary_customer_id,
+    queryKey: ['customer-detail', effectiveSecondaryCustomerId],
+    queryFn: async () => (await client.get(`/customers/${effectiveSecondaryCustomerId}`)).data,
+    enabled: !!effectiveSecondaryCustomerId,
   })
 
-  const { data: customersList = [] } = useQuery<any[]>({
-    queryKey: ['customers-list'],
-    queryFn: async () => (await client.get('/customers?limit=500')).data,
-    staleTime: 5 * 60 * 1000,
-  })
 
   const { data: potentialSiblings = [] } = useQuery<any[]>({
     queryKey: ['potential-siblings', id],
@@ -1910,14 +1909,11 @@ export default function ElevatorDetailPage() {
               </Group>
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6 }}>
-                  <Select
+                  <CustomerSearchSelect
                     label="לקוח"
-                    placeholder="בחר או חפש לקוח..."
-                    data={customersList.map((c: any) => ({ value: c.id, label: c.name }))}
-                    value={form.customer_id ?? elevator.customer_id ?? null}
+                    value={(form.customer_id ?? elevator.customer_id ?? null) as string | null}
                     onChange={v => set('customer_id', v)}
-                    searchable
-                    clearable
+                    hidePreview
                   />
                 </Grid.Col>
                 {customerDetail && (
@@ -1997,16 +1993,11 @@ export default function ElevatorDetailPage() {
               </Group>
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6 }}>
-                  <Select
+                  <CustomerSearchSelect
                     label="לקוח אב נוסף"
-                    placeholder="בחר לקוח נוסף..."
-                    data={customersList
-                      .filter((c: any) => c.id !== (form.customer_id ?? elevator.customer_id))
-                      .map((c: any) => ({ value: c.id, label: c.name }))}
-                    value={form.secondary_customer_id ?? elevator.secondary_customer_id ?? null}
+                    value={(form.secondary_customer_id ?? elevator.secondary_customer_id ?? null) as string | null}
                     onChange={v => set('secondary_customer_id', v)}
-                    searchable
-                    clearable
+                    hidePreview
                   />
                 </Grid.Col>
                 {secondaryCustomerDetail && (

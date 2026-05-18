@@ -11,6 +11,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { listElevators, createElevator, importElevatorsFromPdf, importElevatorsFromExcel } from '../api/elevators'
+import { CustomerSearchSelect } from '../components/CustomerSearchSelect'
 import { EditViewDrawer } from '../components/EditViewDrawer'
 import { ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS } from '../utils/constants'
 import { formatDate } from '../utils/dates'
@@ -93,14 +94,6 @@ export default function ElevatorsPage() {
     queryFn: () => listElevators({ sort_by: sortBy, sort_dir: sortDir }),
   })
 
-  const { data: customersList = [] } = useQuery<any[]>({
-    queryKey: ['customers-list'],
-    queryFn: async () => {
-      const { default: client } = await import('../api/client')
-      return (await client.get('/customers?limit=500')).data
-    },
-    staleTime: 5 * 60 * 1000,
-  })
 
   const filtered = useMemo(() => {
     return elevators.filter(e => {
@@ -451,38 +444,19 @@ export default function ElevatorsPage() {
             </Grid>
 
             <Divider label="לקוח" labelPosition="right" mt="xs" />
-            <Grid>
-              <Grid.Col span={8}>
-                <Select
-                  label="לקוח"
-                  placeholder="בחר לקוח (אופציונלי)..."
-                  data={(customersList as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
-                  value={newElev.customer_id}
-                  onChange={v => setNewElev((s: any) => ({ ...s, customer_id: v }))}
-                  searchable
-                  clearable
-                />
-              </Grid.Col>
-              <Grid.Col span={4}>
-                <Select
-                  label="תנאי תשלום"
-                  data={[
-                    { value: 'CASH', label: 'מזומן' },
-                    { value: 'NET_5', label: 'שוטף +5' },
-                    { value: 'NET_10', label: 'שוטף +10' },
-                    { value: 'NET_15', label: 'שוטף +15' },
-                    { value: 'NET_30', label: 'שוטף +30' },
-                    { value: 'NET_45', label: 'שוטף +45' },
-                    { value: 'NET_60', label: 'שוטף +60' },
-                    { value: 'OTHER', label: 'אחר' },
-                  ]}
-                  value={newElev.payment_terms_type ?? null}
-                  onChange={v => setNewElev((s: any) => ({ ...s, payment_terms_type: v }))}
-                  clearable
-                  disabled={!newElev.customer_id}
-                />
-              </Grid.Col>
-            </Grid>
+            <CustomerSearchSelect
+              label="לקוח"
+              placeholder="בחר לקוח (אופציונלי)..."
+              value={newElev.customer_id ?? null}
+              onChange={v => setNewElev((s: any) => ({ ...s, customer_id: v }))}
+              onSelect={c => {
+                if (!c) return
+                setNewElev((s: any) => ({
+                  ...s,
+                  contact_phone: s.contact_phone || c.phone || s.contact_phone,
+                }))
+              }}
+            />
 
             <Divider label="מזהים" labelPosition="right" mt="xs" />
             <Grid>

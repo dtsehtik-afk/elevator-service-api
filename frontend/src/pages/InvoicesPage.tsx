@@ -8,6 +8,7 @@ import {
 import { notifications } from '@mantine/notifications'
 import { invoicesApi } from '../api/invoices'
 import { customersApi } from '../api/customers'
+import { CustomerSearchSelect } from '../components/CustomerSearchSelect'
 import type { Invoice, Customer } from '../types'
 import { EditViewDrawer } from '../components/EditViewDrawer'
 
@@ -141,9 +142,12 @@ export default function InvoicesPage() {
 
       <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="חשבונית חדשה" size="xl" dir="rtl">
         <Stack>
-          <Select label="לקוח" required searchable value={form.customer_id}
+          <CustomerSearchSelect
+            label="לקוח"
+            required
+            value={form.customer_id || null}
             onChange={v => setForm(f => ({ ...f, customer_id: v || '' }))}
-            data={customers.map(c => ({ value: c.id, label: c.name }))} />
+          />
           <Group grow>
             <input type="date" value={form.issue_date} onChange={e => setForm(f => ({ ...f, issue_date: e.target.value }))} style={{ padding: 8, border: '1px solid #ccc', borderRadius: 6 }} />
             <input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} style={{ padding: 8, border: '1px solid #ccc', borderRadius: 6 }} placeholder="לתשלום עד" />

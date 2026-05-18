@@ -7,6 +7,7 @@ import {
 import { notifications } from '@mantine/notifications'
 import { quotesApi } from '../api/quotes'
 import { customersApi } from '../api/customers'
+import { CustomerSearchSelect } from '../components/CustomerSearchSelect'
 import type { Quote, Customer } from '../types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -115,13 +116,11 @@ export default function QuotesPage() {
 
       <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="הצעת מחיר חדשה" size="xl" dir="rtl">
         <Stack>
-          <Select
+          <CustomerSearchSelect
             label="לקוח"
             required
-            searchable
-            value={form.customer_id}
+            value={form.customer_id || null}
             onChange={v => setForm(f => ({ ...f, customer_id: v || '' }))}
-            data={customers.map(c => ({ value: c.id, label: c.name }))}
           />
           <Text size="sm" fw={600}>פריטים</Text>
           {form.items.map((item, idx) => (

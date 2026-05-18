@@ -8,6 +8,7 @@ import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
 import { contractsApi } from '../api/contracts'
 import { customersApi } from '../api/customers'
+import { CustomerSearchSelect } from '../components/CustomerSearchSelect'
 import type { Contract, Customer } from '../types'
 import { DocumentUploadPanel } from '../components/DocumentUploadPanel'
 
@@ -121,9 +122,16 @@ export default function ContractsPage() {
 
       <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="חוזה חדש" size="lg" dir="rtl">
         <Stack>
-          <Select label="לקוח" required searchable value={form.customer_id}
+          <CustomerSearchSelect
+            label="לקוח"
+            required
+            value={form.customer_id || null}
             onChange={v => setForm(f => ({ ...f, customer_id: v || '' }))}
-            data={customers.map(c => ({ value: c.id, label: c.name }))} />
+            onSelect={c => {
+              if (c?.contact_person && !form.contact_person)
+                setForm(f => ({ ...f, contact_person: c.contact_person }))
+            }}
+          />
           <Group grow>
             <Select label="סוג חוזה" value={form.contract_type}
               onChange={v => setForm(f => ({ ...f, contract_type: v || 'SERVICE' }))}
