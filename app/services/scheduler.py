@@ -400,20 +400,10 @@ def _handle_technician_report(db, phone: str, text: str):
     logger.info("📋 %d call(s) resolved by %s", closed, tech.name)
 
 
-_route_sent_at: dict = {}  # phone → datetime of last route send
-
 def _send_route_throttled(db, tech, cooldown_minutes: int = 30) -> None:
-    """Send route to technician, but at most once per cooldown_minutes window."""
-    from datetime import datetime, timezone, timedelta
+    """Send route with a longer cooldown for morning location triggers."""
     from app.services.route_service import send_route_to_technician
-    phone = tech.whatsapp_number or tech.phone or ""
-    last = _route_sent_at.get(phone)
-    if last and (datetime.now(timezone.utc) - last) < timedelta(minutes=cooldown_minutes):
-        logger.debug("Route throttled for %s (sent %.0f min ago)", tech.name,
-                     (datetime.now(timezone.utc) - last).total_seconds() / 60)
-        return
-    if send_route_to_technician(db, tech):
-        _route_sent_at[phone] = datetime.now(timezone.utc)
+    send_route_to_technician(db, tech, cooldown_minutes=cooldown_minutes)
 
 
 def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_id: str = "") -> None:
@@ -434,15 +424,6 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
     from datetime import timedelta
     from app.services import ai_assignment_agent
     from app.services.whatsapp_service import _send_message
-    from app.models.technician import Technician
-
-    digits = "".join(c for c in phone if c.isdigit())
-    if digits.startswith("972"):
-        digits = "0" + digits[3:]
-    tech = (db.query(Technician)
-            .filter(Technician.phone.contains(digits[-9:]) |
-                    Technician.whatsapp_number.contains(digits[-9:]))
-            .first())
 
     clean = text.strip()
 
@@ -455,8 +436,6 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
                 _PENDING_NLP_CONFIRMATION.pop(phone, None)
                 if aid:
                     ai_assignment_agent.confirm_assignment_by_id(db, phone, aid)
-                    if tech:
-                        _send_route_throttled(db, tech)
                 return
             elif clean in ("לא", "no", "2", "ביטול", "בטל", "נסה שוב"):
                 _PENDING_NLP_CONFIRMATION.pop(phone, None)
@@ -471,9 +450,6 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
         if linked:
             if clean == "1":
                 ai_assignment_agent.confirm_assignment_by_id(db, phone, linked["assignment_id"])
-                if tech:
-                    from app.services.route_service import send_route_to_technician
-                    send_route_to_technician(db, tech)
             else:
                 ai_assignment_agent.reject_assignment_by_id(db, phone, linked["assignment_id"])
             return
@@ -482,8 +458,6 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
     if clean in ("1", "2") and len(pending) == 1:
         if clean == "1":
             ai_assignment_agent.confirm_assignment_by_id(db, phone, pending[0]["assignment_id"])
-            if tech:
-                _send_route_throttled(db, tech)
         else:
             ai_assignment_agent.reject_assignment_by_id(db, phone, pending[0]["assignment_id"])
         return

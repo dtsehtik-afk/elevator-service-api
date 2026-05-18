@@ -98,7 +98,7 @@ def build_route(
     }
     for call_id in assigned_call_ids:
         call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
-        if call and call.status not in ("CLOSED", "RESOLVED"):
+        if call and call.status not in ("CLOSED", "RESOLVED", "MONITORING"):
             candidates.append({"call": call, "assigned": True})
 
     # 2. Unassigned OPEN calls nearby (as suggestions)
@@ -269,19 +269,34 @@ def format_route_message(technician_name: str, stops: list[RouteStop], suggestio
     return "\n".join(lines)
 
 
-def send_route_to_technician(db: Session, technician: Technician) -> bool:
-    """Build and send the daily route WhatsApp to a technician."""
+_route_sent_at: dict[str, object] = {}  # phone → datetime of last route send
+
+
+def send_route_to_technician(db: Session, technician: Technician, cooldown_minutes: int = 2) -> bool:
+    """Build and send the daily route WhatsApp to a technician.
+
+    Built-in cooldown (default 2 min) prevents duplicate sends when multiple
+    callers trigger route updates in quick succession (e.g. confirm + handler).
+    """
+    from datetime import datetime, timezone, timedelta
     from app.services.whatsapp_service import _send_message
 
     phone = technician.whatsapp_number or technician.phone
     if not phone:
         return False
 
+    last = _route_sent_at.get(phone)
+    if last and (datetime.now(timezone.utc) - last) < timedelta(minutes=cooldown_minutes):  # type: ignore[operator]
+        logger.debug("Route throttled for %s (sent %.0f s ago)", technician.name,
+                     (datetime.now(timezone.utc) - last).total_seconds())  # type: ignore[operator]
+        return False
+
     stops, suggestions = build_route(db, technician)
-    msg   = format_route_message(technician.name, stops, suggestions)
-    sent  = _send_message(phone, msg)
+    msg  = format_route_message(technician.name, stops, suggestions)
+    sent = _send_message(phone, msg)
 
     if sent:
+        _route_sent_at[phone] = datetime.now(timezone.utc)
         logger.info("🗺️ Route sent to %s (%d stops)", technician.name, len(stops))
     return sent
 
