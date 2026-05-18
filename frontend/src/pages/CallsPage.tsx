@@ -55,8 +55,17 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-function SlaBadge({ deadline, status }: { deadline: string | null; status: string }) {
-  if (!deadline || ['RESOLVED', 'CLOSED'].includes(status)) return null
+function SlaBadge({ deadline, status, resolvedAt, createdAt }: {
+  deadline: string | null; status: string; resolvedAt?: string | null; createdAt?: string
+}) {
+  if (['RESOLVED', 'CLOSED'].includes(status)) {
+    if (!resolvedAt || !createdAt) return null
+    const mins = Math.round((new Date(resolvedAt).getTime() - new Date(createdAt).getTime()) / 60000)
+    if (mins < 0) return null
+    const label = mins < 60 ? `${mins} דק'` : `${(mins / 60).toFixed(1)} ש'`
+    return <Badge color="gray" size="xs" variant="light" title="משך טיפול">⏱ {label}</Badge>
+  }
+  if (!deadline) return null
   const msLeft = new Date(deadline).getTime() - Date.now()
   const hLeft = msLeft / 3600000
   if (msLeft < 0) {
@@ -466,15 +475,15 @@ export default function CallsPage() {
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        {(() => { const e = elevatorMap[c.elevator_id]; return e ? (
-                          <Text size="xs" lineClamp={1} style={{ maxWidth: 160 }}>
-                            {e.address}{e.city ? `, ${e.city}` : ''}
+                        {(() => { const e = elevatorMap[c.elevator_id]; const addr = e ? `${e.address}${e.city ? `, ${e.city}` : ''}` : null; return addr ? (
+                          <Text size="xs" lineClamp={1} style={{ maxWidth: 160 }} title={addr}>
+                            {addr}
                           </Text>
                         ) : <Text size="xs" c="dimmed">—</Text> })()}
                       </Table.Td>
                       <Table.Td>
                         <Stack gap={0}>
-                          <Text size="sm" lineClamp={1} fw={isRescue ? 700 : undefined}>{c.description}</Text>
+                          <Text size="sm" lineClamp={1} fw={isRescue ? 700 : undefined} title={c.description}>{c.description}</Text>
                           <Group gap={4}>
                             {isRescue && <Text size="xs" c="red" fw={700}>🚨 חילוץ</Text>}
                             {c.is_recurring && <Text size="xs" c="orange">🔁 חוזרת</Text>}
@@ -484,8 +493,8 @@ export default function CallsPage() {
                       </Table.Td>
                       <Table.Td><Text size="sm">{FAULT_TYPE_LABELS[c.fault_type]}</Text></Table.Td>
                       <Table.Td><StatusBadge status={c.status} /></Table.Td>
-                      <Table.Td><SlaBadge deadline={c.sla_deadline} status={c.status} /></Table.Td>
-                      <Table.Td><Text size="sm">{c.reported_by}</Text></Table.Td>
+                      <Table.Td><SlaBadge deadline={c.sla_deadline} status={c.status} resolvedAt={c.resolved_at} createdAt={c.created_at} /></Table.Td>
+                      <Table.Td><Text size="sm" title={c.reported_by}>{c.reported_by}</Text></Table.Td>
                       <Table.Td><Text size="xs" c="dimmed">{formatDateTime(c.created_at)}</Text></Table.Td>
                       <Table.Td onClick={e => e.stopPropagation()}>
                         <Group gap="xs">

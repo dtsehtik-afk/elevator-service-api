@@ -152,22 +152,92 @@ function ElevatorLog({
 }: {
   calls: any[]; maintenance: any[]; inspections: any[]; elevatorId: string
 }) {
-  const navigate = useNavigate()
+  const [dateFrom, setDateFrom] = useState<Date | null>(null)
+  const [dateTo, setDateTo] = useState<Date | null>(null)
 
-  const entries: LogEntry[] = [
+  const allEntries: LogEntry[] = [
     ...calls.map(c => ({ date: c.created_at, type: 'call' as const, raw: c })),
     ...maintenance.map(m => ({ date: m.scheduled_date || m.created_at, type: 'maintenance' as const, raw: m })),
     ...inspections.map(i => ({ date: i.inspection_date || i.created_at, type: 'inspection' as const, raw: i })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
-  const handleExport = () => {
-    const token = localStorage.getItem('token') || ''
-    const base = (window as any).__API_BASE__ || '/api'
-    // Export service calls for this elevator via reports
-    navigate(`/reports`)
+  const entries = allEntries.filter(e => {
+    const d = new Date(e.date)
+    if (dateFrom && d < dateFrom) return false
+    if (dateTo) { const end = new Date(dateTo); end.setHours(23,59,59,999); if (d > end) return false }
+    return true
+  })
+
+  function applyPreset(days: number) {
+    const from = new Date(); from.setDate(from.getDate() - days)
+    from.setHours(0, 0, 0, 0)
+    setDateFrom(from); setDateTo(null)
   }
 
-  if (entries.length === 0) {
+  function exportCsv() {
+    const rows = [['סוג', 'תאריך', 'תיאור', 'סטטוס', 'עדיפות', 'פותח']]
+    entries.forEach(e => {
+      if (e.type === 'call') {
+        const c = e.raw
+        rows.push(['קריאת שירות', new Date(c.created_at).toLocaleDateString('he-IL'),
+          c.description ?? '', c.status ?? '', c.priority ?? '', c.reported_by ?? ''])
+      } else if (e.type === 'maintenance') {
+        const m = e.raw
+        rows.push(['תחזוקה', m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString('he-IL') : '',
+          m.notes ?? '', m.status ?? '', '', m.technician_name ?? ''])
+      } else {
+        const r = e.raw
+        rows.push(['דוח בודק', r.inspection_date ? new Date(r.inspection_date).toLocaleDateString('he-IL') : '',
+          `${r.deficiency_count ?? 0} ליקויים`, r.result ?? '', '', r.inspector_name ?? ''])
+      }
+    })
+    const bom = '﻿'
+    const csv = bom + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    a.download = `יומן-מעלית-${elevatorId.slice(0,8)}.csv`
+    a.click()
+  }
+
+  function printLog() {
+    const TYPE_LABEL: Record<string, string> = { call: '🔧 קריאת שירות', maintenance: '📅 תחזוקה', inspection: '🔍 דוח בודק' }
+    const rows = entries.map(e => {
+      let date = '', desc = '', status = '', extra = ''
+      if (e.type === 'call') {
+        const c = e.raw
+        date = new Date(c.created_at).toLocaleDateString('he-IL')
+        desc = c.description ?? ''
+        status = c.status ?? ''
+        extra = c.priority ?? ''
+      } else if (e.type === 'maintenance') {
+        const m = e.raw
+        date = m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString('he-IL') : ''
+        desc = m.notes ?? ''
+        status = m.status ?? ''
+        extra = m.technician_name ?? ''
+      } else {
+        const r = e.raw
+        date = r.inspection_date ? new Date(r.inspection_date).toLocaleDateString('he-IL') : ''
+        desc = `${r.deficiency_count ?? 0} ליקויים`
+        status = r.result ?? ''
+        extra = r.inspector_name ?? ''
+      }
+      return `<tr><td>${date}</td><td>${TYPE_LABEL[e.type]}</td><td>${desc}</td><td>${status}</td><td>${extra}</td></tr>`
+    }).join('')
+
+    const html = `<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>יומן מעלית</title>
+<style>body{font-family:Arial,sans-serif;direction:rtl;font-size:12px;padding:16px}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;text-align:right}
+th{background:#f0f0f0;font-weight:bold}h2{font-size:15px;margin-bottom:10px}</style></head>
+<body><h2>יומן מעלית — ${entries.length} רשומות</h2>
+<table><thead><tr><th>תאריך</th><th>סוג</th><th>תיאור</th><th>סטטוס</th><th>נוסף</th></tr></thead>
+<tbody>${rows}</tbody></table></body></html>`
+
+    const w = window.open('', '_blank', 'width=900,height=700')
+    if (w) { w.document.write(html); w.document.close(); setTimeout(() => { w.print() }, 300) }
+  }
+
+  if (allEntries.length === 0) {
     return (
       <Paper withBorder p="xl" radius="md">
         <Center><Text c="dimmed">אין רשומות ביומן</Text></Center>
@@ -177,13 +247,55 @@ function ElevatorLog({
 
   return (
     <Stack gap="md">
+      {/* Date filters */}
+      <Paper withBorder p="sm" radius="md">
+        <Group gap="sm" align="flex-end" wrap="wrap">
+          <DateInput
+            label="מתאריך"
+            value={dateFrom}
+            onChange={setDateFrom}
+            clearable
+            valueFormat="DD/MM/YYYY"
+            size="xs"
+            w={130}
+          />
+          <DateInput
+            label="עד תאריך"
+            value={dateTo}
+            onChange={setDateTo}
+            clearable
+            valueFormat="DD/MM/YYYY"
+            size="xs"
+            w={130}
+          />
+          <Group gap={4}>
+            {[
+              { label: 'שבוע', days: 7 },
+              { label: 'חודש', days: 30 },
+              { label: 'רבעון', days: 90 },
+              { label: 'שנה', days: 365 },
+            ].map(p => (
+              <Button key={p.label} size="xs" variant="light" onClick={() => applyPreset(p.days)}>
+                {p.label}
+              </Button>
+            ))}
+            {(dateFrom || dateTo) && (
+              <Button size="xs" variant="subtle" color="gray" onClick={() => { setDateFrom(null); setDateTo(null) }}>
+                נקה
+              </Button>
+            )}
+          </Group>
+        </Group>
+      </Paper>
+
       <Group justify="space-between">
         <Text fw={700} size="sm" c="dimmed">
-          {entries.length} רשומות · קריאות {calls.length} · תחזוקה {maintenance.length} · בודק {inspections.length}
+          {entries.length} רשומות מוצגות · סה"כ {allEntries.length} · קריאות {calls.length} · תחזוקה {maintenance.length} · בודק {inspections.length}
         </Text>
-        <Button size="xs" variant="light" color="blue" onClick={() => navigate(`/reports`)}>
-          📊 ייצוא לאקסל
-        </Button>
+        <Group gap="xs">
+          <Button size="xs" variant="light" color="blue" onClick={exportCsv}>📊 ייצוא Excel</Button>
+          <Button size="xs" variant="light" color="gray" onClick={printLog}>🖨️ PDF</Button>
+        </Group>
       </Group>
 
       <ScrollArea h={600}>
