@@ -1193,7 +1193,22 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
 
 def _answer_gemini(db, s, contents: list, extra_system: str = "") -> str:
     """Run the Gemini tool-use loop and return Hebrew answer."""
-    system_text = _SYSTEM_PROMPT + ("\n\n" + extra_system if extra_system else "")
+    from sqlalchemy import text
+    import json
+    
+    # Try to load prompt from DB
+    system_text = _SYSTEM_PROMPT
+    try:
+        row = db.execute(text("SELECT value FROM system_settings WHERE key = 'wa_agent_config'")).fetchone()
+        if row and row[0]:
+            config = json.loads(row[0])
+            if config.get("system_prompt"):
+                system_text = config["system_prompt"]
+    except Exception as exc:
+        logger.warning("Could not load system prompt from DB: %s", exc)
+
+    if extra_system:
+        system_text += f"\n\n{extra_system}"
     with httpx.Client(timeout=30) as client:
         for _iteration in range(6):
             payload = {
