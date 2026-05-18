@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Stack, Title, Paper, Table, Switch, TextInput, Button, Group, Text, Tabs,
-  SegmentedControl, SimpleGrid, Card, useMantineColorScheme,
+  SegmentedControl, SimpleGrid, Card, useMantineColorScheme, Badge, Alert,
+  PinInput, Loader,
 } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
 import { DEFAULT_NAV_ITEMS } from '../components/layout/Shell'
+import { totpSetup, totpConfirm, totpDisable, totpStatus, loginHistory } from '../api/auth'
 
 const FONT_SIZES: Record<string, string> = { small: '13px', normal: '15px', large: '17px' }
 const FONTS = [
@@ -130,6 +132,7 @@ export default function SettingsPage() {
           <Tabs.Tab value="hours">🕐 שעות עבודה</Tabs.Tab>
           <Tabs.Tab value="nav">🗂️ עריכת תפריט</Tabs.Tab>
           <Tabs.Tab value="display">🎨 תצוגה</Tabs.Tab>
+          <Tabs.Tab value="security">🔐 אבטחה</Tabs.Tab>
         </Tabs.List>
 
         {/* Working hours */}
@@ -248,6 +251,11 @@ export default function SettingsPage() {
             </Group>
           </Paper>
         </Tabs.Panel>
+        {/* Security */}
+        <Tabs.Panel value="security">
+          <SecurityTab />
+        </Tabs.Panel>
+
         {/* Display settings */}
         <Tabs.Panel value="display">
           <Stack gap="md" maw={520}>
@@ -311,6 +319,212 @@ export default function SettingsPage() {
           </Stack>
         </Tabs.Panel>
       </Tabs>
+    </Stack>
+  )
+}
+
+function SecurityTab() {
+  const qc = useQueryClient()
+
+  const { data: status, isLoading: statusLoading } = useQuery({
+    queryKey: ['totp-status'],
+    queryFn: totpStatus,
+  })
+
+  const { data: history } = useQuery({
+    queryKey: ['login-history'],
+    queryFn: loginHistory,
+  })
+
+  // Setup flow
+  const [setupData, setSetupData] = useState<{ secret: string; otpauth_uri: string } | null>(null)
+  const [qrUrl, setQrUrl] = useState<string | null>(null)
+  const [setupCode, setSetupCode] = useState('')
+  const [setupLoading, setSetupLoading] = useState(false)
+
+  useEffect(() => {
+    if (!setupData) { setQrUrl(null); return }
+    client.get('/auth/totp/qr', { responseType: 'blob' }).then(r => {
+      setQrUrl(URL.createObjectURL(r.data))
+    }).catch(() => {})
+    return () => { if (qrUrl) URL.revokeObjectURL(qrUrl) }
+  }, [setupData])
+
+  // Disable flow
+  const [disableCode, setDisableCode] = useState('')
+  const [disableLoading, setDisableLoading] = useState(false)
+  const [showDisable, setShowDisable] = useState(false)
+
+  async function handleSetup() {
+    setSetupLoading(true)
+    try {
+      const data = await totpSetup()
+      setSetupData(data)
+      setSetupCode('')
+    } catch {
+      notifications.show({ message: 'שגיאה בהכנת אימות דו-שלבי', color: 'red' })
+    } finally {
+      setSetupLoading(false)
+    }
+  }
+
+  async function handleConfirm() {
+    setSetupLoading(true)
+    try {
+      await totpConfirm(setupCode)
+      notifications.show({ message: '✅ אימות דו-שלבי הופעל', color: 'green' })
+      setSetupData(null)
+      setSetupCode('')
+      qc.invalidateQueries({ queryKey: ['totp-status'] })
+    } catch (err: any) {
+      notifications.show({ message: err?.response?.data?.detail ?? 'קוד שגוי', color: 'red' })
+    } finally {
+      setSetupLoading(false)
+    }
+  }
+
+  async function handleDisable() {
+    setDisableLoading(true)
+    try {
+      await totpDisable(disableCode)
+      notifications.show({ message: 'אימות דו-שלבי בוטל', color: 'orange' })
+      setShowDisable(false)
+      setDisableCode('')
+      qc.invalidateQueries({ queryKey: ['totp-status'] })
+    } catch (err: any) {
+      notifications.show({ message: err?.response?.data?.detail ?? 'קוד שגוי', color: 'red' })
+    } finally {
+      setDisableLoading(false)
+    }
+  }
+
+  if (statusLoading) return <Loader />
+
+  const totpEnabled = status?.totp_enabled ?? false
+
+  return (
+    <Stack gap="md" maw={560}>
+      {/* TOTP Section */}
+      <Paper withBorder radius="md" p="lg">
+        <Group justify="space-between" mb="sm">
+          <div>
+            <Text fw={600}>🔑 אימות דו-שלבי (Google Authenticator)</Text>
+            <Text size="sm" c="dimmed">הגן על חשבונך עם קוד חד-פעמי בנוסף לסיסמה</Text>
+          </div>
+          <Badge color={totpEnabled ? 'green' : 'gray'} size="lg">
+            {totpEnabled ? 'פעיל' : 'לא פעיל'}
+          </Badge>
+        </Group>
+
+        {!totpEnabled && !setupData && (
+          <Button onClick={handleSetup} loading={setupLoading}>
+            הפעל אימות דו-שלבי
+          </Button>
+        )}
+
+        {setupData && (
+          <Stack gap="md">
+            <Alert color="blue" variant="light">
+              סרוק את קוד ה-QR עם Google Authenticator, ואז הזן את הקוד בן 6 הספרות שמוצג באפליקציה לאישור.
+            </Alert>
+            <Group justify="center">
+              {qrUrl && (
+                <img src={qrUrl} width={200} height={200} alt="TOTP QR Code" style={{ borderRadius: 8 }} />
+              )}
+            </Group>
+            <Text size="xs" c="dimmed" ta="center" style={{ fontFamily: 'monospace' }}>
+              {setupData.secret}
+            </Text>
+            <Stack gap="xs">
+              <Text size="sm" fw={500}>הזן קוד לאישור:</Text>
+              <Group justify="center">
+                <PinInput
+                  length={6}
+                  type="number"
+                  value={setupCode}
+                  onChange={setSetupCode}
+                  dir="ltr"
+                />
+              </Group>
+              <Group>
+                <Button
+                  onClick={handleConfirm}
+                  loading={setupLoading}
+                  disabled={setupCode.length < 6}
+                >
+                  אשר והפעל
+                </Button>
+                <Button variant="subtle" color="gray" onClick={() => setSetupData(null)}>
+                  ביטול
+                </Button>
+              </Group>
+            </Stack>
+          </Stack>
+        )}
+
+        {totpEnabled && !showDisable && (
+          <Button color="red" variant="light" onClick={() => setShowDisable(true)}>
+            בטל אימות דו-שלבי
+          </Button>
+        )}
+
+        {totpEnabled && showDisable && (
+          <Stack gap="xs">
+            <Text size="sm">הזן קוד מ-Google Authenticator לביטול:</Text>
+            <Group>
+              <PinInput
+                length={6}
+                type="number"
+                value={disableCode}
+                onChange={setDisableCode}
+                dir="ltr"
+              />
+              <Button
+                color="red"
+                onClick={handleDisable}
+                loading={disableLoading}
+                disabled={disableCode.length < 6}
+              >
+                בטל
+              </Button>
+              <Button variant="subtle" color="gray" onClick={() => { setShowDisable(false); setDisableCode('') }}>
+                חזרה
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Paper>
+
+      {/* Login history */}
+      <Paper withBorder radius="md" p="lg">
+        <Text fw={600} mb="sm">🕓 היסטוריית התחברויות אחרונות</Text>
+        {!history || history.length === 0 ? (
+          <Text size="sm" c="dimmed">אין רישומים</Text>
+        ) : (
+          <Table fz="xs">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>IP</Table.Th>
+                <Table.Th>סטטוס</Table.Th>
+                <Table.Th>תאריך</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {history.map((h, i) => (
+                <Table.Tr key={i}>
+                  <Table.Td style={{ fontFamily: 'monospace' }}>{h.ip_address}</Table.Td>
+                  <Table.Td>
+                    <Badge size="xs" color={h.success ? 'green' : 'red'}>
+                      {h.success ? 'הצלחה' : 'כישלון'}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>{new Date(h.created_at).toLocaleString('he-IL')}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </Paper>
     </Stack>
   )
 }

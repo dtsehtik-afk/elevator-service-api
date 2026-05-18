@@ -10,6 +10,7 @@ import Shell from './components/Shell'
 import LoginPage from './pages/LoginPage'
 import TenantsPage from './pages/TenantsPage'
 import TenantDetailPage from './pages/TenantDetailPage'
+import SecurityPage from './pages/SecurityPage'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1 } } })
 
@@ -28,6 +29,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/" element={<RequireAuth><Shell /></RequireAuth>}>
               <Route index element={<TenantsPage />} />
               <Route path="tenants/:id" element={<TenantDetailPage />} />
+              <Route path="security" element={<SecurityPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

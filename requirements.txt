@@ -26,6 +26,8 @@ openai>=1.30.0                     # Whisper voice transcription fallback
 google-api-python-client>=2.130.0  # Google Drive API
 google-auth>=2.29.0                # Service account credentials
 python-dateutil>=2.9.0             # contract_renewal date math
+pyotp>=2.9.0                       # TOTP 2FA (Google Authenticator)
+qrcode[pil]>=7.4.0                 # QR code generation for TOTP setup
 
 # Test dependencies
 pytest>=8.0.0

@@ -5,11 +5,11 @@ import {
   Button, Alert, Anchor, PinInput, Group,
 } from '@mantine/core'
 import { useAuthStore } from '../stores/authStore'
-import { login, forgotPassword, resetPassword } from '../api/auth'
+import { login, verifyTotp, forgotPassword, resetPassword } from '../api/auth'
 import client from '../api/client'
 import { industryIcon } from '../utils/industry'
 
-type Screen = 'login' | 'forgot' | 'reset'
+type Screen = 'login' | 'totp' | 'forgot' | 'reset'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -32,6 +32,12 @@ export default function LoginPage() {
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
 
+  // MFA state
+  const [pendingToken, setPendingToken] = useState('')
+  const [totpCode, setTotpCode] = useState('')
+  const [totpLoading, setTotpLoading] = useState(false)
+  const [totpError, setTotpError] = useState('')
+
   // Forgot password state
   const [phone, setPhone] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
@@ -44,21 +50,47 @@ export default function LoginPage() {
   const [resetError, setResetError] = useState('')
   const [resetSuccess, setResetSuccess] = useState(false)
 
+  function completeLogin(token: string) {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    const name = payload.sub?.split('@')[0] ?? 'משתמש'
+    const role = payload.role ?? 'TECHNICIAN'
+    setAuth(token, name, role)
+    navigate(role === 'TECHNICIAN' ? '/tech' : '/')
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoginError('')
     setLoginLoading(true)
     try {
-      const token = await login(email, password)
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      const name = payload.sub?.split('@')[0] ?? 'משתמש'
-      const role = payload.role ?? 'TECHNICIAN'
-      setAuth(token, name, role)
-      navigate(role === 'TECHNICIAN' ? '/tech' : '/')
+      const result = await login(email, password)
+      if (result.mfa_required) {
+        setPendingToken(result.pending_token)
+        setTotpCode('')
+        setTotpError('')
+        setScreen('totp')
+      } else {
+        completeLogin(result.access_token)
+      }
     } catch {
       setLoginError('פרטי התחברות שגויים. אנא נסה שנית.')
     } finally {
       setLoginLoading(false)
+    }
+  }
+
+  async function handleTotpVerify(e: React.FormEvent) {
+    e.preventDefault()
+    setTotpError('')
+    setTotpLoading(true)
+    try {
+      const token = await verifyTotp(pendingToken, totpCode)
+      completeLogin(token)
+    } catch {
+      setTotpError('קוד שגוי — בדוק את האפליקציה ונסה שנית.')
+      setTotpCode('')
+    } finally {
+      setTotpLoading(false)
     }
   }
 
@@ -135,6 +167,42 @@ export default function LoginPage() {
                   <Text ta="center" size="sm">
                     <Anchor component="button" type="button" onClick={() => { setScreen('forgot'); setForgotError('') }}>
                       שכחתי סיסמה
+                    </Anchor>
+                  </Text>
+                </Stack>
+              </form>
+            </>
+          )}
+
+          {/* ── TOTP MFA step ── */}
+          {screen === 'totp' && (
+            <>
+              <Stack gap={4} align="center">
+                <Text size="2rem">🔐</Text>
+                <Text fw={600} ta="center">אימות דו-שלבי</Text>
+                <Text size="sm" c="dimmed" ta="center">
+                  פתח את Google Authenticator והזן את הקוד בן 6 הספרות
+                </Text>
+              </Stack>
+              {totpError && <Alert color="red" variant="light">{totpError}</Alert>}
+              <form onSubmit={handleTotpVerify}>
+                <Stack gap="sm">
+                  <Group justify="center">
+                    <PinInput
+                      length={6}
+                      type="number"
+                      value={totpCode}
+                      onChange={setTotpCode}
+                      dir="ltr"
+                      autoFocus
+                    />
+                  </Group>
+                  <Button type="submit" fullWidth loading={totpLoading} disabled={totpCode.length < 6}>
+                    אמת
+                  </Button>
+                  <Text ta="center" size="sm">
+                    <Anchor component="button" type="button" onClick={() => { setScreen('login'); setTotpCode('') }}>
+                      חזרה להתחברות
                     </Anchor>
                   </Text>
                 </Stack>

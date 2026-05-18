@@ -74,6 +74,9 @@ class Technician(Base):
     # Timestamp of last successful live location update (for reminder logic)
     last_location_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_on_call: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

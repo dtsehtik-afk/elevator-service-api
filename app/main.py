@@ -459,6 +459,20 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS installation_status VARCHAR(50) DEFAULT 'פעיל'",
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS handover_date DATE",
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS dismantle_date DATE",
+                # MFA — TOTP fields on technicians
+                "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64)",
+                "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+                # MFA — login history
+                """CREATE TABLE IF NOT EXISTS login_history (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    technician_id UUID NOT NULL REFERENCES technicians(id) ON DELETE CASCADE,
+                    ip_address VARCHAR(50) NOT NULL,
+                    user_agent VARCHAR(500),
+                    success BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_login_history_technician_id ON login_history (technician_id)",
+                "CREATE INDEX IF NOT EXISTS ix_login_history_created_at ON login_history (created_at DESC)",
                 # Fix system_settings schema: create_all may have created the table with ORM
                 # schema (id/key/modules) instead of the key/value schema used by _get_setting.
                 # Add value column if missing; make modules nullable so INSERTs without it work.

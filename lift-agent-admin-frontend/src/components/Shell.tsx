@@ -4,6 +4,7 @@ import { Outlet, NavLink as RouterLink, useNavigate } from 'react-router-dom'
 
 const NAV = [
   { label: 'דיירים', path: '/' },
+  { label: '🔐 אבטחה', path: '/security' },
 ]
 
 export default function Shell() {

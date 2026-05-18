@@ -14,11 +14,24 @@ async def lifespan(app: FastAPI):
     # Incremental migrations for existing SQLite/PostgreSQL databases
     from sqlalchemy import text as _text
     with engine.connect() as conn:
-        try:
-            conn.execute(_text("ALTER TABLE tenants ADD COLUMN industry VARCHAR(50)"))
-            conn.commit()
-        except Exception:
-            pass  # column already exists
+        for _sql in [
+            "ALTER TABLE tenants ADD COLUMN industry VARCHAR(50)",
+            "ALTER TABLE admin_users ADD COLUMN totp_secret VARCHAR(64)",
+            "ALTER TABLE admin_users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+            """CREATE TABLE IF NOT EXISTS admin_login_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id TEXT NOT NULL,
+                ip_address VARCHAR(50) NOT NULL,
+                user_agent VARCHAR(500),
+                success INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""",
+        ]:
+            try:
+                conn.execute(_text(_sql))
+                conn.commit()
+            except Exception:
+                pass
     yield
 
 
