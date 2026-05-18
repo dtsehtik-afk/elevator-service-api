@@ -82,7 +82,7 @@ _GEMINI_TOOLS = [{
         },
         {
             "name": "get_technician_location",
-            "description": "מחזיר את המיקום הנוכחי של טכנאי (אם שיתף מיקום חי). יכול גם למצוא את הטכנאי הקרוב ביותר לאזור מסוים.",
+            "description": "מחזיר את המיקום הנוכחי של טכנאי (אם שיתף מיקום חי). יכול גם למצוא את הטכנאי הקרוב ביותר לאזור מסוים. חובה להשתמש בכלי זה כשנשאלים איפה טכנאי נמצא או מי קרוב.",
             "parameters": {"type": "OBJECT", "properties": {
                 "technician_name": {"type": "STRING", "description": "שם הטכנאי (אופציונלי)"},
                 "near_address": {"type": "STRING", "description": "כתובת לחפש טכנאי קרוב (אופציונלי)"},
@@ -97,7 +97,7 @@ _GEMINI_TOOLS = [{
         },
         {
             "name": "close_service_call",
-            "description": "סוגר קריאת שירות ומזין הערות פתרון. השתמש רק לאחר קבלת אישור מפורש מהמשתמש.",
+            "description": "סוגר קריאת שירות ומזין הערות פתרון. השתמש רק לאחר קבלת אישור מפורש מהמשתמש לגבי קריאה ספציפית בודדת. אזהרה חמורה: חל איסור לסגור מספר קריאות ביחד.",
             "parameters": {"type": "OBJECT", "properties": {
                 "call_id": {"type": "STRING", "description": "UUID של הקריאה לסגירה"},
                 "resolution_notes": {"type": "STRING", "description": "הערות תיקון/פתרון"},
@@ -207,12 +207,26 @@ def _search_elevators(db: Session, query: str = "", city: str = "", limit: int =
     if city:
         q = q.filter(Elevator.city.ilike(f"%{city}%"))
     if query:
-        q = q.filter(
-            Elevator.address.ilike(f"%{query}%")
-            | Elevator.city.ilike(f"%{query}%")
-            | Elevator.building_name.ilike(f"%{query}%")
-            | Elevator.serial_number.ilike(f"%{query}%")
-        )
+        terms = [t for t in query.split() if t not in ('רחוב', 'רח', 'בניין', 'לקוח', 'אצל')]
+        if terms:
+            from sqlalchemy import or_
+            for term in terms:
+                term_q = f"%{term}%"
+                q = q.filter(
+                    or_(
+                        Elevator.address.ilike(term_q),
+                        Elevator.city.ilike(term_q),
+                        Elevator.building_name.ilike(term_q),
+                        Elevator.serial_number.ilike(term_q)
+                    )
+                )
+        else:
+            q = q.filter(
+                Elevator.address.ilike(f"%{query}%")
+                | Elevator.city.ilike(f"%{query}%")
+                | Elevator.building_name.ilike(f"%{query}%")
+                | Elevator.serial_number.ilike(f"%{query}%")
+            )
     if not query and not city:
         return [{"שגיאה": "יש לציין query או city לחיפוש"}]
     total = q.count()
@@ -960,15 +974,23 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 • "הקפץ לי קריאה 42" → get_call_by_number → הצג פרטים
 • "מה יש לי היום?" → get_my_calls → הצג רשימה
 
+══ מענה על שיבוצים ומיקום ══
+• אם שואלים איפה טכנאי נמצא (למשל: "באיזה אזור X נמצא?") — חובה להשתמש בכלי get_technician_location לפני שעונים. לעולם אל תגיד שאינך יודע לפני שתבדוק.
+• אם שואלים למה טכנאי הומלץ או שובץ לקריאה — הסבר במדויק שמערכת השיבוץ האוטומטית (AI) מחשבת זמן הגעה חי (פקקים, מרחק), עומס קריאות פתוחות לטכנאי, ורמות מיומנות ספציפיות הנדרשות לאותה מעלית/תקלה.
+
+══ הפרדה בין תקלות לתחזוקה ══
+שים לב היטב לבקשות של "קריאות שירות" (תקלות - השתמש ב-get_recent_calls או get_elevator_calls) לעומת "קריאות תחזוקה/טיפול מונע" (השתמש ב-get_upcoming_maintenance או get_elevator_maintenance).
+
 ══ כלל תוצאות חלקיות ══
 אם חיפוש מחזיר "מוצגות X מתוך Y" — הרץ שוב עם limit גדול יותר.
 אל תאמר "הנה הרשימה" לפני שמשכת את הכל.
+כאשר מבקשים רשימה מפורטת (למשל רשימת מעליות בעיר מסוימת), עליך להציג את התוצאות שהתקבלו מהכלי בתשובה שלך (רשימה עם פרטים), ולא רק לומר "יש X תוצאות".
 
 ══ כלל אישור — לכל פעולה שמשנה נתונים ══
 כל פעולה שמשנה, יוצרת או מוחקת נתונים חייבת אישור מפורש לפני הביצוע.
 כולל: סגירת קריאה, שיבוץ טכנאי, העברה להצעת מחיר, ועוד.
+אזהרה חמורה לגבי סגירת קריאות: לעולם אל תסגור מספר קריאות במקביל, גם אם נראה לך שהתבקשת. סגור אך ורק קריאה בודדת אחת, לאחר וידוא זהותה (מס' קריאה), ולעולם אל תשתמש בהודעה הקולית כ"הערות סגירה" אלא אם התבקשת מפורשות!
 אישור תקף: כן / לא / 1 / 2 / אישור / ביטול. הודעה עמומה — המתן.
-"הקפץ לי" / "הראה לי" / "כמה" / "מתי" / "מי" = מידע בלבד, ללא אישור.
 
 ══ כלל הרשאות ══
 פרטי ההרשאות של המשתמש יסופקו בהקשר. הצג רק מידע שהתפקיד שלו מורשה לראות.

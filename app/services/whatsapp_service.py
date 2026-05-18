@@ -355,16 +355,14 @@ def notify_customer_outside_hours(caller_phone: str, caller_name: str) -> None:
     from app.services.working_hours import get_working_hours_str, get_time_greeting
     greeting = get_time_greeting()
     name_str = caller_name.strip() if caller_name and caller_name.strip() else "לקוח יקר"
-    hours_str = get_working_hours_str()
+    hours_str = get_working_hours_str().replace('\n', ' ')
 
     msg = (
-        f"{greeting} *{name_str}*,\n\n"
-        f"קיבלנו את פנייתך — תודה שפנית אלינו.\n\n"
-        f"שעות הפעילות שלנו:\n{hours_str}\n\n"
-        f"קריאת שירות מחוץ לשעות הפעילות כרוכה בתשלום נוסף.\n"
-        f"במה תרצה לטפל?\n\n"
-        f"*1* — דחה את הטיפול לשעות הפעילות הקרובות\n"
-        f"*2* — אשר טיפול דחוף (בתשלום נוסף)"
+        f"{greeting} {name_str},\n\n"
+        f"קיבלנו את פנייתך ונפתחה קריאה שירות במערכת.\n\n"
+        f"שעות הפעילות שלנו: {hours_str}\n\n"
+        f"קריאת שירות מחוץ לשעות הפעילות כרוכה בתשלום נוסף. כיצד לפעול?\n\n"
+        f"1 — דחה את הטיפול לשעות הפעילות הקרובות 2 — אשר טיפול דחוף (בתשלום נוסף)"
     )
     # Testing redirect — replace _CUSTOMER_TEST_PHONE with caller_phone when ready
     _send_message(_CUSTOMER_TEST_PHONE, f"[בדיקה — יועבר ל-{caller_phone}]\n\n{msg}")
@@ -422,14 +420,17 @@ def notify_dispatcher_elevator_not_found(
 
 def send_after_hours_confirmation(caller_phone: str, caller_name: str, address: str, city: str) -> bool:
     """Ask caller outside working hours if they approve the extra charge or want to defer."""
-    name_part = f" {caller_name}" if caller_name else ""
+    from app.services.working_hours import get_time_greeting, get_working_hours_str
+    greeting = get_time_greeting()
+    name_str = caller_name.strip() if caller_name and caller_name.strip() else "לקוח יקר"
+    hours_str = get_working_hours_str().replace('\n', ' ')
+    
     message = (
-        f"היי{name_part} 👋\n"
-        f"קיבלנו קריאת שירות עבור המעלית ב-{address}, {city}.\n\n"
-        f"⏰ שים לב — הגעת טכנאי *מחוץ לשעות העבודה* כרוכה בתשלום נוסף.\n\n"
-        f"בחר:\n"
-        f"1️⃣ *אני מאשר* — שלח טכנאי עכשיו (בתשלום)\n"
-        f"2️⃣ *דחה למחר* — נטפל בכך מחר בבוקר"
+        f"{greeting} {name_str},\n\n"
+        f"קיבלנו את פנייתך ונפתחה קריאה שירות במערכת.\n\n"
+        f"שעות הפעילות שלנו: {hours_str}\n\n"
+        f"קריאת שירות מחוץ לשעות הפעילות כרוכה בתשלום נוסף. כיצד לפעול?\n\n"
+        f"1 — דחה את הטיפול לשעות הפעילות הקרובות 2 — אשר טיפול דחוף (בתשלום נוסף)"
     )
     return _send_message(caller_phone, message)
 
