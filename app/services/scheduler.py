@@ -11,6 +11,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 _location_reminder_sent: dict[str, datetime] = {}  # tech_id → last reminder time
+# phone → {assignment_id, address, city, expires_at} — NLP-inferred action awaiting explicit confirmation
+_PENDING_NLP_CONFIRMATION: dict[str, dict] = {}
 
 
 def _transcribe_voice(msg_data: dict, settings) -> str:
@@ -416,12 +418,24 @@ def _send_route_throttled(db, tech, cooldown_minutes: int = 30) -> None:
 
 def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_id: str = "") -> None:
     """
-    Parse a technician's free-text reply using Gemini and accept/reject
-    the relevant pending assignments.
-    Falls back to classic 1/2 if only one pending call or Gemini unavailable.
+    Route a technician's incoming message to the correct assignment handler.
+
+    Priority order:
+    1. Confirm/cancel a pending NLP-inferred action (requires explicit "כן"/"לא")
+    2. Reply-quoted "1"/"2" → match by WhatsApp message ID (unambiguous)
+    3. Bare "1"/"2" + exactly one pending → classic confirm/reject
+    4. Bare "1"/"2" + multiple pending → ask tech to quote the right message
+    5. Free text → NLP address match → ask for confirmation (NEVER auto-execute)
+    6. Unrecognised → route to chat agent
+
+    Rule: NLP can SUGGEST, never EXECUTE without explicit "כן" from the technician.
+    Rejections via NLP are intentionally disabled — unaccepted calls time out naturally.
     """
+    from datetime import timedelta
     from app.services import ai_assignment_agent
+    from app.services.whatsapp_service import _send_message
     from app.models.technician import Technician
+
     digits = "".join(c for c in phone if c.isdigit())
     if digits.startswith("972"):
         digits = "0" + digits[3:]
@@ -430,11 +444,32 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
                     Technician.whatsapp_number.contains(digits[-9:]))
             .first())
 
-    # Reply-linked 1/2: if the tech replied to a specific message, match via stanzaId
-    if text.strip() in ("1", "2") and quoted_msg_id:
+    clean = text.strip()
+
+    # ── 1. Pending NLP confirmation ───────────────────────────────────────────
+    pending_confirm = _PENDING_NLP_CONFIRMATION.get(phone)
+    if pending_confirm:
+        if datetime.utcnow() < pending_confirm["expires_at"]:
+            if clean in ("כן", "yes", "1", "אישור", "ok", "אוק", "סבבה", "אחלה", "בסדר"):
+                aid = pending_confirm.pop("assignment_id", None)
+                _PENDING_NLP_CONFIRMATION.pop(phone, None)
+                if aid:
+                    ai_assignment_agent.confirm_assignment_by_id(db, phone, aid)
+                    if tech:
+                        _send_route_throttled(db, tech)
+                return
+            elif clean in ("לא", "no", "2", "ביטול", "בטל", "נסה שוב"):
+                _PENDING_NLP_CONFIRMATION.pop(phone, None)
+                _send_message(phone, "👍 בוטל. שלח שוב אם תרצה.")
+                return
+        else:
+            _PENDING_NLP_CONFIRMATION.pop(phone, None)
+
+    # ── 2. Reply-quoted "1"/"2" ───────────────────────────────────────────────
+    if clean in ("1", "2") and quoted_msg_id:
         linked = next((p for p in pending if p.get("whatsapp_message_id") == quoted_msg_id), None)
         if linked:
-            if text.strip() == "1":
+            if clean == "1":
                 ai_assignment_agent.confirm_assignment_by_id(db, phone, linked["assignment_id"])
                 if tech:
                     from app.services.route_service import send_route_to_technician
@@ -443,47 +478,52 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
                 ai_assignment_agent.reject_assignment_by_id(db, phone, linked["assignment_id"])
             return
 
-    # Classic 1/2: only when exactly ONE pending assignment (unambiguous context)
-    if text.strip() in ("1", "2") and len(pending) == 1:
-        if text.strip() == "1":
+    # ── 3. Bare "1"/"2" — exactly one pending ────────────────────────────────
+    if clean in ("1", "2") and len(pending) == 1:
+        if clean == "1":
             ai_assignment_agent.confirm_assignment_by_id(db, phone, pending[0]["assignment_id"])
             if tech:
-                from app.services.route_service import send_route_to_technician
                 _send_route_throttled(db, tech)
         else:
             ai_assignment_agent.reject_assignment_by_id(db, phone, pending[0]["assignment_id"])
         return
 
-    # Multiple pending + bare "1"/"2" → ask tech to reply to the specific message
-    if text.strip() in ("1", "2") and len(pending) > 1:
-        from app.services.whatsapp_service import _send_message
+    # ── 4. Bare "1"/"2" — multiple pending → ask to quote ────────────────────
+    if clean in ("1", "2") and len(pending) > 1:
         lines = "\n".join(
-            f"• {p.get('address', 'כתובת לא ידועה')}"
+            f"• {p.get('address', 'כתובת לא ידועה')}, {p.get('city', '')}"
             for p in sorted(pending, key=lambda x: x["assigned_at"], reverse=True)[:8]
         )
         _send_message(phone,
             f"יש לך {len(pending)} קריאות ממתינות לאישור:\n{lines}\n\n"
-            f"↩️ *השב ישירות על ההודעה* שאת/ה רוצה לקבל/לדחות,\n"
-            f"או שלח: *לקחתי* + כתובת (לדוגמה: לקחתי רוזמרין 9)"
+            f"↩️ *השב ישירות על ההודעה* שאת/ה רוצה לקבל/לדחות."
         )
         return
 
-    # Gemini natural-language parsing
+    # ── 5. Free text → NLP address match → ASK FOR CONFIRMATION (never auto-execute) ──
     gemini_key = getattr(s, "gemini_api_key", "")
-    result = {"accept": [], "reject": []} if not gemini_key else _parse_reply_gemini(text, pending, gemini_key)
+    if gemini_key:
+        result = _parse_reply_gemini(clean, pending, gemini_key)
+        if result.get("accept"):
+            aid = result["accept"][0]  # take only the first match
+            matched = next((p for p in pending if p["assignment_id"] == aid), None)
+            if matched:
+                addr = f"{matched.get('address', '')}, {matched.get('city', '')}".strip(", ")
+                _PENDING_NLP_CONFIRMATION[phone] = {
+                    "assignment_id": aid,
+                    "address": addr,
+                    "expires_at": datetime.utcnow() + timedelta(minutes=10),
+                }
+                _send_message(phone,
+                    f"🤔 הבנתי שרצית לקבל את הקריאה ב-*{addr}*.\n"
+                    f"שלח *כן* לאישור, או *לא* לביטול."
+                )
+                return
+        # NLP found nothing → fall through to chat agent
+        # Note: we intentionally IGNORE result["reject"] — rejections require explicit "2"
 
-    if not result["accept"] and not result["reject"]:
-        # Could not parse → treat as free text
-        _handle_free_text(db, phone, text, s)
-        return
-
-    for aid in result["accept"]:
-        ai_assignment_agent.confirm_assignment_by_id(db, phone, aid)
-    for aid in result["reject"]:
-        ai_assignment_agent.reject_assignment_by_id(db, phone, aid)
-    
-    if tech and result["accept"]:
-        _send_route_throttled(db, tech)
+    # ── 6. Unrecognised → chat agent ─────────────────────────────────────────
+    _handle_free_text(db, phone, clean, s)
 
 
 def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
