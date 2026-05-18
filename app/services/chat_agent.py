@@ -35,11 +35,12 @@ _GEMINI_TOOLS = [{
     "function_declarations": [
         {
             "name": "search_elevators",
-            "description": "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי.",
+            "description": "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי. כשמחפשים לפי עיר — השתמש ב-limit=100 כדי לקבל רשימה מלאה. ברירת המחדל היא 20.",
             "parameters": {"type": "OBJECT", "properties": {
-                "query": {"type": "STRING", "description": "מחרוזת חיפוש"},
-                "limit": {"type": "INTEGER", "description": "מספר תוצאות מקסימלי"},
-            }, "required": ["query"]},
+                "query": {"type": "STRING", "description": "מחרוזת חיפוש — שם עיר, כתובת, בניין"},
+                "city": {"type": "STRING", "description": "סינון לפי עיר בלבד (מדויק יותר ממחרוזת חיפוש)"},
+                "limit": {"type": "INTEGER", "description": "מספר תוצאות מקסימלי — השתמש ב-100 לרשימה מלאה של עיר"},
+            }, "required": []},
         },
         {
             "name": "get_elevator_calls",
@@ -201,19 +202,22 @@ _GEMINI_URL = _GEMINI_PRIMARY
 
 # ── DB query functions (called when Claude invokes a tool) ────────────────────
 
-def _search_elevators(db: Session, query: str, limit: int = 5) -> list[dict]:
-    elevators = (
-        db.query(Elevator)
-        .filter(
+def _search_elevators(db: Session, query: str = "", city: str = "", limit: int = 20) -> list[dict]:
+    q = db.query(Elevator)
+    if city:
+        q = q.filter(Elevator.city.ilike(f"%{city}%"))
+    if query:
+        q = q.filter(
             Elevator.address.ilike(f"%{query}%")
             | Elevator.city.ilike(f"%{query}%")
             | Elevator.building_name.ilike(f"%{query}%")
             | Elevator.serial_number.ilike(f"%{query}%")
         )
-        .limit(limit)
-        .all()
-    )
-    return [
+    if not query and not city:
+        return [{"שגיאה": "יש לציין query או city לחיפוש"}]
+    total = q.count()
+    elevators = q.order_by(Elevator.address).limit(limit).all()
+    result = [
         {
             "id": str(e.id),
             "address": e.address,
@@ -227,6 +231,9 @@ def _search_elevators(db: Session, query: str, limit: int = 5) -> list[dict]:
         }
         for e in elevators
     ]
+    if total > limit:
+        result.append({"הערה": f"מוצגות {len(elevators)} מתוך {total} — הגדל את limit לקבלת כולן"})
+    return result
 
 
 def _get_elevator_calls(db: Session, elevator_id: str, limit: int = 10) -> list[dict]:
@@ -882,7 +889,12 @@ def _get_pending_unmatched_calls(db: Session, limit: int = 10) -> list:
 def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
     """Execute a tool call from Claude and return the result."""
     if tool_name == "search_elevators":
-        return _search_elevators(db, tool_input["query"], tool_input.get("limit", 5))
+        return _search_elevators(
+            db,
+            query=tool_input.get("query", ""),
+            city=tool_input.get("city", ""),
+            limit=tool_input.get("limit", 20),
+        )
     elif tool_name == "get_elevator_calls":
         return _get_elevator_calls(db, tool_input["elevator_id"], tool_input.get("limit", 10))
     elif tool_name == "get_recent_calls":
@@ -942,24 +954,24 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי של חברת אקורד מע
 השתמש בכלים כדי לשלוף מידע חי מהמסד. אל תמציא תשובות.
 ענה בעברית קצרה וישירה — ווצאפ, לא דוח. תאריכים בפורמט DD/MM/YYYY.
 
-══ כלל אינטנט — קרדינלי ══
-לא כל פניה היא בקשת ביצוע. נתח את כוונת המשתמש לפני כל פעולה:
+══ כלל ריצה מיידית — קרדינלי ══
+שאלות מידע: קרא כלי → ענה מיד. אל תשאל "האם לבצע חיפוש?" — פשוט תחפש.
+דוגמאות לריצה מיידית (ללא אישור):
+• "רשימת מעליות בעיר X" → search_elevators עם city=X ו-limit=100
+• "הקפץ לי קריאה 42" → get_call_by_number → הצג פרטים
+• "מה יש לי היום?" → get_my_calls → הצג רשימה
+• "מה קורה ב-רחוב X?" → search_elevators → get_elevator_calls
 
-בקשות מידע בלבד (השב עם נתונים — אל תבצע שום פעולה):
-• "הקפץ לי קריאה X" / "הראה לי" / "מה הפרטים" / "מה קורה ב" / "תן לי פרטים" / "איפה" / "מתי" / "כמה" / "מי" → השתמש בכלי קריאה בלבד והצג מידע.
+══ כלל תוצאות חלקיות ══
+אם חיפוש מחזיר הערת "מוצגות X מתוך Y" — הרץ שוב עם limit גדול יותר כדי לקבל את הכל.
+מעולם אל תגיד "הנה הרשימה" ואחרי כן תגלה שיש עוד תוצאות — תמיד שלוף את הכל תחילה.
 
-בקשות ביצוע (שינוי נתונים — מחייב אישור מפורש תחילה):
-• "סגור קריאה" / "העבר לטכנאי" / "שבץ אותי" / "אני לוקח את הקריאה" / "תקצה לי" → בקש אישור לפני ביצוע.
+══ כלל אישור — רק לפעולות שינוי ══
+בקש אישור מפורש לפני: סגירת קריאה / שיבוץ טכנאי / העברה להצעת מחיר.
+אישור תקף: כן / לא / 1 / 2 / אישור / ביטול. הודעה עמומה — המתן.
+"הקפץ לי" / "הראה לי" / "כמה" / "מתי" / "מי" = מידע בלבד, ללא אישור.
 
-דוגמאות:
-❌ "הקפץ לי את קריאה 42" — המשמעות: הצג לי את פרטי קריאה 42. אל תשבץ אותה.
-✓ "תשבץ אותי לקריאה 42" — המשמעות: בקש אישור, ואחר כך בצע שיבוץ.
-❌ "מה יש לי היום?" — הצג קריאות. אל תשנה כלום.
-✓ "סיימתי עם קריאה 42, פגם נפתר" — בקש אישור סגירה, ובצע.
-
-כלל אישור: לפני פעולה שמשנה נתונים (סגירה, שיבוץ, העברה להצעת מחיר) — שאל "האם לבצע?" והמתן לתשובה חד-משמעית: כן/לא/1/2/אישור/ביטול. הודעה עמומה אינה אישור.
-
-אם המשתמש מבקש משהו שאין לך כלי עבורו — ענה בעברית ציין מה חסר, למשל: "פעולה זו אינה זמינה כרגע במערכת (חסר: [תיאור הפונקציונליות החסרה])"."""
+אם המשתמש מבקש משהו שאין לך כלי עבורו — ציין מה חסר: "פעולה זו אינה זמינה כרגע (חסר: [תיאור])"."""
 
 
 def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
@@ -1125,11 +1137,12 @@ def _answer_gemini(db, s, contents: list, extra_system: str = "") -> str:
 _ANTHROPIC_TOOLS = [
     {
         "name": "search_elevators",
-        "description": "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי.",
+        "description": "חפש מעליות לפי כתובת, עיר, שם בניין או מספר סידורי. כשמחפשים לפי עיר — השתמש ב-limit=100.",
         "input_schema": {"type": "object", "properties": {
             "query": {"type": "string"},
+            "city": {"type": "string"},
             "limit": {"type": "integer"},
-        }, "required": ["query"]},
+        }, "required": []},
     },
     {
         "name": "get_elevator_calls",
