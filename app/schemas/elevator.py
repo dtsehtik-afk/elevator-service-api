@@ -21,7 +21,7 @@ class ElevatorBase(BaseModel):
 
 
 class ElevatorCreate(ElevatorBase):
-    pass
+    customer_id: Optional[uuid.UUID] = None
 
 
 class ElevatorUpdate(BaseModel):
@@ -76,11 +76,14 @@ class ElevatorUpdate(BaseModel):
     # Status
     status: Optional[str] = Field(None, pattern="^(ACTIVE|INACTIVE|UNDER_REPAIR)$")
     # Grouping
+    customer_id: Optional[uuid.UUID] = None
+    secondary_customer_id: Optional[uuid.UUID] = None
     management_company_id: Optional[uuid.UUID] = None
     responsible_technician_id: Optional[uuid.UUID] = None
     maintenance_technician_id: Optional[uuid.UUID] = None
     consultant_id: Optional[uuid.UUID] = None
     lead_source: Optional[str] = None
+    notification_prefs: Optional[Any] = None
     # Extended technical specs (already in model, missing from schema)
     motor_type: Optional[str] = None
     controller_model: Optional[str] = None
@@ -204,6 +207,14 @@ class ElevatorResponse(BaseModel):
     handover_date: Optional[date] = None
     dismantle_date: Optional[date] = None
     # Grouping
+    customer_id: Optional[uuid.UUID] = None
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_payment_terms_type: Optional[str] = None
+    secondary_customer_id: Optional[uuid.UUID] = None
+    secondary_customer_name: Optional[str] = None
+    notification_prefs: Optional[Any] = None
     management_company_id: Optional[uuid.UUID] = None
     management_company_name: Optional[str] = None
     responsible_technician_id: Optional[uuid.UUID] = None
@@ -213,7 +224,6 @@ class ElevatorResponse(BaseModel):
     consultant_id: Optional[uuid.UUID] = None
     consultant_name: Optional[str] = None
     lead_source: Optional[str] = None
-    customer_id: Optional[uuid.UUID] = None
     vaad_phone: Optional[str] = None
     created_at: datetime
     updated_at: datetime

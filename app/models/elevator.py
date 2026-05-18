@@ -174,8 +174,15 @@ class Elevator(Base):
     consultant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("consultants.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # לקוח אב נוסף — secondary customer entity linked to this elevator
+    secondary_customer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # נכנסה מ — lead source / how the elevator was acquired
     lead_source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # notification_prefs — who receives which automated notifications
+    # e.g. {"customer": ["maintenance","inspection","invoice"], "secondary": ["inspection"]}
+    notification_prefs: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -205,6 +212,26 @@ class Elevator(Base):
                 return c.phone
         return self.contact_phone  # fallback to legacy field
 
+    @property
+    def customer_name(self) -> Optional[str]:
+        return self.customer.name if self.customer else None
+
+    @property
+    def customer_phone(self) -> Optional[str]:
+        return self.customer.phone if self.customer else None
+
+    @property
+    def customer_email(self) -> Optional[str]:
+        return self.customer.email if self.customer else None
+
+    @property
+    def customer_payment_terms_type(self) -> Optional[str]:
+        return self.customer.payment_terms_type if self.customer else None
+
+    @property
+    def secondary_customer_name(self) -> Optional[str]:
+        return self.secondary_customer.name if self.secondary_customer else None
+
     # ── Relationships ─────────────────────────────────────────────────────────
     building: Mapped[Optional["Building"]] = relationship(  # noqa: F821
         "Building", back_populates="elevators", foreign_keys=[building_id]
@@ -220,6 +247,9 @@ class Elevator(Base):
     )
     customer: Mapped[Optional["Customer"]] = relationship(  # noqa: F821
         "Customer", back_populates="elevators", foreign_keys="Elevator.customer_id"
+    )
+    secondary_customer: Mapped[Optional["Customer"]] = relationship(  # noqa: F821
+        "Customer", foreign_keys="Elevator.secondary_customer_id"
     )
     contacts: Mapped[list["Contact"]] = relationship(  # noqa: F821
         "Contact", back_populates="elevator", foreign_keys="Contact.elevator_id"

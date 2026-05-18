@@ -71,6 +71,8 @@ export default function ElevatorsPage() {
     address: '', city: '', building_name: '', floor_count: 1,
     internal_number: '', labor_file_number: '', serial_number: '',
     status: 'ACTIVE',
+    // Customer
+    customer_id: null,
     // Contact
     contact_phone: '', intercom_phone: '', entry_code: '',
     // Specs
@@ -89,6 +91,15 @@ export default function ElevatorsPage() {
   const { data: elevators = [], isLoading } = useQuery({
     queryKey: ['elevators', sortBy, sortDir],
     queryFn: () => listElevators({ sort_by: sortBy, sort_dir: sortDir }),
+  })
+
+  const { data: customersList = [] } = useQuery<any[]>({
+    queryKey: ['customers-list'],
+    queryFn: async () => {
+      const { default: client } = await import('../api/client')
+      return (await client.get('/customers?limit=500')).data
+    },
+    staleTime: 5 * 60 * 1000,
   })
 
   const filtered = useMemo(() => {
@@ -436,6 +447,40 @@ export default function ElevatorsPage() {
               </Grid.Col>
               <Grid.Col span={3}>
                 <NumberInput label="קומות" required min={1} max={200} value={newElev.floor_count} onChange={v => setNewElev((s: any) => ({ ...s, floor_count: Number(v) }))} />
+              </Grid.Col>
+            </Grid>
+
+            <Divider label="לקוח" labelPosition="right" mt="xs" />
+            <Grid>
+              <Grid.Col span={8}>
+                <Select
+                  label="לקוח"
+                  placeholder="בחר לקוח (אופציונלי)..."
+                  data={(customersList as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+                  value={newElev.customer_id}
+                  onChange={v => setNewElev((s: any) => ({ ...s, customer_id: v }))}
+                  searchable
+                  clearable
+                />
+              </Grid.Col>
+              <Grid.Col span={4}>
+                <Select
+                  label="תנאי תשלום"
+                  data={[
+                    { value: 'CASH', label: 'מזומן' },
+                    { value: 'NET_5', label: 'שוטף +5' },
+                    { value: 'NET_10', label: 'שוטף +10' },
+                    { value: 'NET_15', label: 'שוטף +15' },
+                    { value: 'NET_30', label: 'שוטף +30' },
+                    { value: 'NET_45', label: 'שוטף +45' },
+                    { value: 'NET_60', label: 'שוטף +60' },
+                    { value: 'OTHER', label: 'אחר' },
+                  ]}
+                  value={newElev.payment_terms_type ?? null}
+                  onChange={v => setNewElev((s: any) => ({ ...s, payment_terms_type: v }))}
+                  clearable
+                  disabled={!newElev.customer_id}
+                />
               </Grid.Col>
             </Grid>
 

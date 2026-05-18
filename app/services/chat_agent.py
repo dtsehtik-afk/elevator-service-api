@@ -948,30 +948,34 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
 
 # ── Main chat function ────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """אתה עוזר דיגיטלי של חברת אקורד מעליות, זמין לטכנאים ומנהלים דרך ווצאפ.
-יש לך גישה מלאה למערכת דרך כלים — מעליות, קריאות שירות, טכנאים, לקוחות, חברות ניהול, בדיקות, תחזוקה וקריאות ממתינות.
+_SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ווצאפ.
+יש לך גישה למערכת דרך כלים — מעליות, קריאות שירות, טכנאים, לקוחות, חברות ניהול, בדיקות, תחזוקה וקריאות ממתינות.
 
-השתמש בכלים כדי לשלוף מידע חי מהמסד. אל תמציא תשובות.
-ענה בעברית קצרה וישירה — ווצאפ, לא דוח. תאריכים בפורמט DD/MM/YYYY.
+השתמש בכלים לשליפת מידע חי. אל תמציא תשובות.
+ענה בעברית קצרה וישירה. תאריכים בפורמט DD/MM/YYYY.
 
-══ כלל ריצה מיידית — קרדינלי ══
-שאלות מידע: קרא כלי → ענה מיד. אל תשאל "האם לבצע חיפוש?" — פשוט תחפש.
-דוגמאות לריצה מיידית (ללא אישור):
-• "רשימת מעליות בעיר X" → search_elevators עם city=X ו-limit=100
+══ כלל ריצה מיידית ══
+שאלות מידע: קרא כלי → ענה מיד. אל תשאל "האם לבצע?" — פשוט תחפש.
+• "רשימת מעליות בעיר X" → search_elevators(city=X, limit=100)
 • "הקפץ לי קריאה 42" → get_call_by_number → הצג פרטים
 • "מה יש לי היום?" → get_my_calls → הצג רשימה
-• "מה קורה ב-רחוב X?" → search_elevators → get_elevator_calls
 
 ══ כלל תוצאות חלקיות ══
-אם חיפוש מחזיר הערת "מוצגות X מתוך Y" — הרץ שוב עם limit גדול יותר כדי לקבל את הכל.
-מעולם אל תגיד "הנה הרשימה" ואחרי כן תגלה שיש עוד תוצאות — תמיד שלוף את הכל תחילה.
+אם חיפוש מחזיר "מוצגות X מתוך Y" — הרץ שוב עם limit גדול יותר.
+אל תאמר "הנה הרשימה" לפני שמשכת את הכל.
 
-══ כלל אישור — רק לפעולות שינוי ══
-בקש אישור מפורש לפני: סגירת קריאה / שיבוץ טכנאי / העברה להצעת מחיר.
+══ כלל אישור — לכל פעולה שמשנה נתונים ══
+כל פעולה שמשנה, יוצרת או מוחקת נתונים חייבת אישור מפורש לפני הביצוע.
+כולל: סגירת קריאה, שיבוץ טכנאי, העברה להצעת מחיר, ועוד.
 אישור תקף: כן / לא / 1 / 2 / אישור / ביטול. הודעה עמומה — המתן.
 "הקפץ לי" / "הראה לי" / "כמה" / "מתי" / "מי" = מידע בלבד, ללא אישור.
 
-אם המשתמש מבקש משהו שאין לך כלי עבורו — ציין מה חסר: "פעולה זו אינה זמינה כרגע (חסר: [תיאור])"."""
+══ כלל הרשאות ══
+פרטי ההרשאות של המשתמש יסופקו בהקשר. הצג רק מידע שהתפקיד שלו מורשה לראות.
+אם אין לו הרשאה למידע מבוקש — השב: "אין לך הרשאה לצפות במידע זה (תפקידך: [תפקיד])".
+אם המשתמש לא זוהה במערכת — התייחס כטכנאי (הרשאות מוגבלות לקריאות שירות בלבד).
+
+אם המשתמש מבקש משהו שאין לך כלי עבורו — ציין: "פעולה זו אינה זמינה כרגע (חסר: [תיאור])"."""
 
 
 def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
@@ -1040,6 +1044,57 @@ def _load_qa_context(db: Session, question: str, limit: int = 5) -> str:
         return ""
 
 
+def _get_caller_role(db: Session, phone: str) -> tuple:
+    """Return (role, permissions_dict) for a caller identified by WhatsApp phone."""
+    from app.models.technician import Technician
+    from app.routers.settings import _DEFAULT_ROLE_PERMISSIONS
+
+    normalized = phone.strip().lstrip("+")
+    tech = None
+    for candidate in [phone, normalized, f"+{normalized}"]:
+        tech = db.query(Technician).filter(
+            (Technician.phone == candidate) | (Technician.whatsapp_number == candidate)
+        ).first()
+        if tech:
+            break
+
+    role = tech.role if tech else "TECHNICIAN"
+    perms = _DEFAULT_ROLE_PERMISSIONS.get(role, _DEFAULT_ROLE_PERMISSIONS.get("TECHNICIAN", {}))
+    return role, perms, tech.name if tech else None
+
+
+def _build_role_context(role: str, perms: dict, name: str | None) -> str:
+    """Format role and permissions as system prompt context."""
+    perm_lines = []
+    label_map = {
+        "service_calls": "קריאות שירות",
+        "invoices": "חשבוניות",
+        "inventory": "מלאי",
+        "crm": "CRM / לקוחות",
+        "hr": "משאבי אנוש",
+        "reports": "דוחות",
+        "settings": "הגדרות",
+        "users": "ניהול משתמשים",
+    }
+    action_map = {
+        "view": "צפייה", "create": "יצירה", "assign": "שיבוץ",
+        "close": "סגירה", "delete": "מחיקה", "send": "שליחה",
+        "mark_paid": "סימון שולם", "manage": "ניהול",
+        "purchase_orders": "הזמנות רכש", "export": "ייצוא",
+        "edit": "עריכה", "assign_roles": "שינוי תפקידים",
+    }
+    for module, actions in perms.items():
+        hebrew_actions = [action_map.get(a, a) for a in actions]
+        perm_lines.append(f"  • {label_map.get(module, module)}: {', '.join(hebrew_actions)}")
+
+    lines = [f"══ פרטי המשתמש ══", f"תפקיד: {role}"]
+    if name:
+        lines.insert(1, f"שם: {name}")
+    lines.append("הרשאות:")
+    lines.extend(perm_lines)
+    return "\n".join(lines)
+
+
 def answer_question(db: Session, question: str, asker_name: str = "טכנאי", phone: str = "", with_history: bool = False) -> str:
     """
     Answer a free-text Hebrew question about the system using Gemini + tool use.
@@ -1071,16 +1126,27 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     # Inject relevant Q&A pairs into system prompt
     qa_ctx = _load_qa_context(db, question)
 
+    # Build role-based permission context
+    role_ctx = ""
+    if phone:
+        try:
+            role, perms, tech_name = _get_caller_role(db, phone)
+            role_ctx = _build_role_context(role, perms, tech_name)
+        except Exception:
+            pass
+
+    extra = "\n\n".join(filter(None, [role_ctx, qa_ctx]))
+
     # Try Gemini first (with tool use), fall back to Anthropic if unavailable
     if s.gemini_api_key:
         try:
-            return _answer_gemini(db, s, contents, extra_system=qa_ctx)
+            return _answer_gemini(db, s, contents, extra_system=extra)
         except Exception as exc:
             logger.warning("Gemini unavailable (%s) — trying Anthropic fallback", exc)
 
     if s.anthropic_api_key:
         try:
-            return _answer_anthropic(s, question, asker_name, db=db)
+            return _answer_anthropic(s, question, asker_name, db=db, extra_system=extra)
         except Exception as exc:
             logger.warning("Anthropic fallback also failed: %s", exc)
 
@@ -1282,7 +1348,7 @@ _ANTHROPIC_TOOLS = [
 ]
 
 
-def _answer_anthropic(s, question: str, asker_name: str, db=None) -> str:
+def _answer_anthropic(s, question: str, asker_name: str, db=None, extra_system: str = "") -> str:
     """Fallback: answer via Anthropic Claude with full tool-use DB access."""
     headers = {
         "x-api-key": s.anthropic_api_key,
@@ -1296,7 +1362,7 @@ def _answer_anthropic(s, question: str, asker_name: str, db=None) -> str:
             payload = {
                 "model": "claude-haiku-4-5-20251001",
                 "max_tokens": 600,
-                "system": _SYSTEM_PROMPT,
+                "system": _SYSTEM_PROMPT + ("\n\n" + extra_system if extra_system else ""),
                 "tools": _ANTHROPIC_TOOLS if db else [],
                 "messages": messages,
             }

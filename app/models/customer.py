@@ -35,6 +35,9 @@ class Customer(Base):
     # Financial
     vat_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     payment_terms: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    # CASH | NET_5 | NET_10 | NET_15 | NET_30 | NET_45 | NET_60 | OTHER
+    payment_terms_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    payment_terms_notes: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     credit_limit: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

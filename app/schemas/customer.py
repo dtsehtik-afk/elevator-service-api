@@ -18,6 +18,8 @@ class CustomerBase(BaseModel):
     contact_person: Optional[str] = None
     vat_number: Optional[str] = None
     payment_terms: int = 30
+    payment_terms_type: Optional[str] = None
+    payment_terms_notes: Optional[str] = None
     credit_limit: Optional[float] = None
     notes: Optional[str] = None
     is_active: bool = True
@@ -48,6 +50,8 @@ class CustomerUpdate(BaseModel):
     contact_person: Optional[str] = None
     vat_number: Optional[str] = None
     payment_terms: Optional[int] = None
+    payment_terms_type: Optional[str] = None
+    payment_terms_notes: Optional[str] = None
     credit_limit: Optional[float] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None

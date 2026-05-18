@@ -376,6 +376,13 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMPTZ DEFAULT NOW(),
                     created_by VARCHAR(100)
                 )""",
+                # customers — payment terms type + notes
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS payment_terms_type VARCHAR(20)",
+                "ALTER TABLE customers ADD COLUMN IF NOT EXISTS payment_terms_notes VARCHAR(200)",
+                # elevators — secondary customer + notification prefs
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS secondary_customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
+                "CREATE INDEX IF NOT EXISTS ix_elevators_secondary_customer_id ON elevators (secondary_customer_id)",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS notification_prefs JSONB",
                 # customers
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS creation_date DATE",
                 "ALTER TABLE customers ADD COLUMN IF NOT EXISTS fax VARCHAR(30)",
