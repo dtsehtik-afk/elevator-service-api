@@ -43,6 +43,10 @@ interface PendingCall {
   lat: number | null
   lng: number | null
   manufacturer?: string | null
+  call_number?: string | null
+  created_at?: string | null
+  reported_by?: string | null
+  inspection_note?: string | null
 }
 
 interface TechInfo {
@@ -62,6 +66,9 @@ interface OpenCall {
   lat: number | null
   lng: number | null
   manufacturer?: string | null
+  call_number?: string | null
+  created_at?: string | null
+  reported_by?: string | null
 }
 
 interface MaintenanceItem {
@@ -91,6 +98,7 @@ interface InspReport {
   deficiencies: ReportDeficiency[] | null
   report_status: 'OPEN' | 'PARTIAL' | 'CLOSED' | 'NA'
   assigned_technician_name: string | null
+  deadline_days: number | null
 }
 
 interface MapPin {
@@ -205,7 +213,12 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     if (!email || !password) return
     setLoading(true)
     try {
-      const token = await apiLogin(email, password)
+      const result = await apiLogin(email, password)
+      if (result.mfa_required) {
+        notifications.show({ message: 'אימות דו-שלבי נדרש — היכנס דרך הדפדפן', color: 'orange' })
+        return
+      }
+      const token = result.access_token
       const { data: me } = await client.get('/auth/me', {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -403,8 +416,18 @@ function ReportsTab() {
               <Text fw={700} size="sm">📍 {r.elevator_address}</Text>
               <Badge color="red" size="sm">{r.deficiency_count} ליקויים</Badge>
             </Group>
-            {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
-            <Button size="xs" variant="subtle" mt={6}
+            <Group gap="xs" mb={2}>
+              {r.inspection_date && (
+                <Text size="xs" c="dimmed">📅 {new Date(r.inspection_date).toLocaleDateString('he-IL')}</Text>
+              )}
+              {r.inspector_name && <Text size="xs" c="dimmed">👤 {r.inspector_name}</Text>}
+            </Group>
+            {r.deadline_days != null && (
+              <Badge color={r.deadline_days <= 14 ? 'red' : 'orange'} size="xs" mb={4}>
+                ⏰ דד-ליין: תוך {r.deadline_days} יום
+              </Badge>
+            )}
+            <Button size="xs" variant="subtle" mt={4}
               onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
               {expanded === r.id ? 'הסתר ▲' : `הצג ליקויים ▼`}
             </Button>
@@ -647,6 +670,7 @@ function TechMain() {
   const [reassignCallId, setReassignCallId] = useState<string | null>(null)
   const [elevSearch, setElevSearch] = useState('')
   const [elevResults, setElevResults] = useState<{ id: string; address: string; city: string; building_name: string }[]>([])
+  const [detailCall, setDetailCall] = useState<PendingCall | OpenCall | null>(null)
 
   const resolveMutation = useMutation({
     mutationFn: ({ callId, notes, quoteNeeded }: { callId: string; notes: string; quoteNeeded: boolean }) =>
@@ -780,9 +804,13 @@ function TechMain() {
             {/* ── Active / confirmed calls — always at top ── */}
             {pending.filter(c => c.assignment_status !== 'PENDING_CONFIRMATION').map((call) => (
               <Card key={call.assignment_id} withBorder radius="md" p="lg" shadow="md"
-                style={{ borderRight: '5px solid #40c057', background: '#f8fff9' }}>
+                style={{ borderRight: '5px solid #40c057', background: '#f8fff9', cursor: 'pointer' }}
+                onClick={() => setDetailCall(call)}>
                 <Group justify="space-between" mb="sm">
-                  <Badge color="green" size="md" variant="filled">✅ קריאה פעילה</Badge>
+                  <Group gap="xs">
+                    <Badge color="green" size="md" variant="filled">✅ קריאה פעילה</Badge>
+                    {call.call_number && <Badge color="gray" size="sm" variant="outline">{call.call_number}</Badge>}
+                  </Group>
                   <Badge color={PRIORITY_COLOR[call.priority]} size="md">{PRIORITY_LABEL[call.priority]}</Badge>
                 </Group>
 
@@ -792,6 +820,11 @@ function TechMain() {
                 <Stack gap={4} mb="sm">
                   <Text size="sm">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
                   {call.description && <Text size="sm" c="dimmed">📝 {call.description}</Text>}
+                  {call.created_at && <Text size="xs" c="dimmed">🕐 נפתחה: {call.created_at}</Text>}
+                  {call.reported_by && <Text size="xs" c="dimmed">👤 פותח: {call.reported_by}</Text>}
+                  {(call as PendingCall).inspection_note && (
+                    <Badge color="orange" size="xs" variant="light">⚠️ {(call as PendingCall).inspection_note}</Badge>
+                  )}
                   {call.travel_minutes && call.travel_minutes !== '?' &&
                     <Text size="sm" c="dimmed">🚗 ~{call.travel_minutes} דקות נסיעה</Text>}
                 </Stack>
@@ -799,10 +832,12 @@ function TechMain() {
                 {call.lat && call.lng ? (
                   <Stack gap="xs" mt="sm">
                     <Button size="md" color="blue" fullWidth component="a"
-                      href={`https://www.google.com/maps/dir/?api=1&destination=${call.lat},${call.lng}`} target="_blank">
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${call.lat},${call.lng}`} target="_blank"
+                      onClick={(e) => e.stopPropagation()}>
                       🗺 נווט — גוגל מפות</Button>
                     <Button size="md" color="teal" fullWidth variant="light" component="a"
-                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}&navigate=yes`} target="_blank">
+                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}&navigate=yes`} target="_blank"
+                      onClick={(e) => e.stopPropagation()}>
                       🚘 נווט — Waze</Button>
                   </Stack>
                 ) : (
@@ -811,22 +846,22 @@ function TechMain() {
                 <Divider my="sm" />
                 <Group gap="xs">
                   <Button flex={1} size="sm" color="orange" variant="light"
-                    onClick={() => { setReassignCallId(call.call_id); setReassignOpen(true) }}>
+                    onClick={(e) => { e.stopPropagation(); setReassignCallId(call.call_id); setReassignOpen(true) }}>
                     🏢 שנה כתובת</Button>
                   <Button flex={1} size="sm" color="red" variant="light"
-                    onClick={() => { setResolveCallId(call.call_id); setResolveNotes(''); setResolveQuoteNeeded(false); setResolveOpen(true) }}>
+                    onClick={(e) => { e.stopPropagation(); setResolveCallId(call.call_id); setResolveNotes(''); setResolveQuoteNeeded(false); setResolveOpen(true) }}>
                     ✅ סגור קריאה</Button>
                 </Group>
                 <Group gap="xs" mt="xs">
                   <Button flex={1} size="sm" color="blue" variant="light"
-                    onClick={() => { setMonitorCallId(call.call_id); setMonitorNotes(''); setMonitorOpen(true) }}>
+                    onClick={(e) => { e.stopPropagation(); setMonitorCallId(call.call_id); setMonitorNotes(''); setMonitorOpen(true) }}>
                     👁 העבר למעקב</Button>
                   <Button flex={1} size="sm" color="grape" variant="light"
-                    onClick={() => { setTransferCallId(call.call_id); setTransferNotes(''); setTransferOpen(true) }}>
+                    onClick={(e) => { e.stopPropagation(); setTransferCallId(call.call_id); setTransferNotes(''); setTransferOpen(true) }}>
                     🔧 העבר לצוות טכני</Button>
                 </Group>
                 <Button fullWidth size="sm" color="yellow" variant="light" mt="xs"
-                  onClick={() => { setPartReqCallId(call.call_id); setPartReqManufacturer(call.manufacturer ?? null); setPartReqOpen(true) }}>
+                  onClick={(e) => { e.stopPropagation(); setPartReqCallId(call.call_id); setPartReqManufacturer(call.manufacturer ?? null); setPartReqOpen(true) }}>
                   🔩 החלפת חלק
                 </Button>
               </Card>
@@ -958,21 +993,33 @@ function TechMain() {
               <Text fw={700} size="lg">📋 ממתינות לאישורך</Text>
             )}
             {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION').map((call) => (
-              <Card key={call.assignment_id} withBorder radius="md" p="md" shadow="sm">
+              <Card key={call.assignment_id} withBorder radius="md" p="md" shadow="sm"
+                style={{ cursor: 'pointer' }}
+                onClick={() => setDetailCall(call)}>
                 <Group justify="space-between" mb="xs">
-                  <Text fw={700} size="md">📍 {call.address}, {call.city}</Text>
+                  <Group gap="xs">
+                    <Text fw={700} size="md">📍 {call.address}, {call.city}</Text>
+                    {call.call_number && <Badge color="gray" size="xs" variant="outline">{call.call_number}</Badge>}
+                  </Group>
                   <Badge color={PRIORITY_COLOR[call.priority]}>{PRIORITY_LABEL[call.priority]}</Badge>
                 </Group>
                 <Text size="sm" c="dimmed">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
                 {call.description && <Text size="sm" c="dimmed">📝 {call.description}</Text>}
+                {call.created_at && <Text size="xs" c="dimmed">🕐 נפתחה: {call.created_at}</Text>}
+                {call.reported_by && <Text size="xs" c="dimmed">👤 פותח: {call.reported_by}</Text>}
+                {call.inspection_note && (
+                  <Badge color="orange" size="xs" variant="light" mt={4}>⚠️ {call.inspection_note}</Badge>
+                )}
                 <Text size="sm" c="dimmed">🚗 ~{call.travel_minutes} דקות נסיעה</Text>
                 {call.lat && call.lng && (
                   <Group mt="xs" gap="xs">
                     <Button size="xs" variant="light" color="blue" component="a"
-                      href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank">
+                      href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank"
+                      onClick={(e) => e.stopPropagation()}>
                       🗺 גוגל מפות</Button>
                     <Button size="xs" variant="light" color="teal" component="a"
-                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank">
+                      href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank"
+                      onClick={(e) => e.stopPropagation()}>
                       🚘 Waze</Button>
                   </Group>
                 )}
@@ -980,11 +1027,11 @@ function TechMain() {
                 <Group gap="sm">
                   <Button flex={1} color="green" size="md"
                     loading={acceptMutation.isPending && acceptMutation.variables?.aid === call.assignment_id}
-                    onClick={() => acceptMutation.mutate({ aid: call.assignment_id })}>
+                    onClick={(e) => { e.stopPropagation(); acceptMutation.mutate({ aid: call.assignment_id }) }}>
                     ✅ קבל</Button>
                   <Button flex={1} color="red" variant="light" size="md"
                     loading={rejectMutation.isPending && rejectMutation.variables?.aid === call.assignment_id}
-                    onClick={() => rejectMutation.mutate({ aid: call.assignment_id })}>
+                    onClick={(e) => { e.stopPropagation(); rejectMutation.mutate({ aid: call.assignment_id }) }}>
                     ❌ דחה</Button>
                 </Group>
               </Card>
@@ -1014,13 +1061,19 @@ function TechMain() {
                 <Text size="sm" c="dimmed">כל הקריאות הפתוחות שלא שויכו סופית — לחץ "משוך" כדי לקחת</Text>
             {openBoard.map((call) => (
               <Card key={call.call_id} withBorder radius="md" p="md" shadow="xs"
-                style={{ borderRight: `4px solid ${PRIORITY_COLOR[call.priority] === 'red' ? '#fa5252' : PRIORITY_COLOR[call.priority] === 'orange' ? '#fd7e14' : '#228be6'}` }}>
+                style={{ borderRight: `4px solid ${PRIORITY_COLOR[call.priority] === 'red' ? '#fa5252' : PRIORITY_COLOR[call.priority] === 'orange' ? '#fd7e14' : '#228be6'}`, cursor: 'pointer' }}
+                onClick={() => setDetailCall(call)}>
                 <Group justify="space-between" mb={4}>
-                  <Text fw={700} size="sm">📍 {call.address}, {call.city}</Text>
+                  <Group gap="xs">
+                    <Text fw={700} size="sm">📍 {call.address}, {call.city}</Text>
+                    {call.call_number && <Badge color="gray" size="xs" variant="outline">{call.call_number}</Badge>}
+                  </Group>
                   <Badge color={PRIORITY_COLOR[call.priority]} size="sm">{PRIORITY_LABEL[call.priority]}</Badge>
                 </Group>
                 <Text size="xs" c="dimmed">🔧 {FAULT_LABEL[call.fault_type] ?? call.fault_type}</Text>
                 {call.description && <Text size="xs" c="dimmed">📝 {call.description}</Text>}
+                {call.created_at && <Text size="xs" c="dimmed">🕐 נפתחה: {call.created_at}</Text>}
+                {call.reported_by && <Text size="xs" c="dimmed">👤 פותח: {call.reported_by}</Text>}
                 {call.primary_tech ? (
                   <Text size="xs" c="blue" mt={4}>🔵 {call.primary_tech} ממתין לאישור</Text>
                 ) : (
@@ -1029,17 +1082,19 @@ function TechMain() {
                 {call.lat && call.lng && (
                   <Group mt="xs" gap="xs">
                     <Button size="xs" variant="subtle" color="blue"
-                      component="a" href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank">
+                      component="a" href={`https://maps.google.com/?q=${call.lat},${call.lng}`} target="_blank"
+                      onClick={(e) => e.stopPropagation()}>
                       🗺 מפות</Button>
                     <Button size="xs" variant="subtle" color="teal"
-                      component="a" href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank">
+                      component="a" href={`https://waze.com/ul?ll=${call.lat},${call.lng}`} target="_blank"
+                      onClick={(e) => e.stopPropagation()}>
                       🚘 Waze</Button>
                   </Group>
                 )}
                 <Button
                   fullWidth mt="sm" size="sm" color="grape" variant="light"
                   loading={claimMutation.isPending && claimMutation.variables?.callId === call.call_id}
-                  onClick={() => claimMutation.mutate({ callId: call.call_id })}
+                  onClick={(e) => { e.stopPropagation(); claimMutation.mutate({ callId: call.call_id }) }}
                 >
                   🙋 משוך קריאה אלי
                 </Button>
@@ -1050,6 +1105,64 @@ function TechMain() {
           </>
         )}
       </Stack>
+
+      {/* ── Call Detail Modal ── */}
+      <Modal opened={!!detailCall} onClose={() => setDetailCall(null)} title="📋 פרטי הקריאה" dir="rtl" size="md">
+        {detailCall && (
+          <Stack gap="md">
+            <Group justify="space-between">
+              {detailCall.call_number
+                ? <Badge color="blue" size="lg" variant="filled">{detailCall.call_number}</Badge>
+                : <span />}
+              <Badge color={PRIORITY_COLOR[detailCall.priority]} size="lg">{PRIORITY_LABEL[detailCall.priority]}</Badge>
+            </Group>
+            <Paper withBorder p="sm" radius="sm">
+              <Text fw={700} size="lg">📍 {detailCall.address}</Text>
+              <Text c="dimmed">{detailCall.city}</Text>
+            </Paper>
+            <Stack gap={8}>
+              <Group gap="xs">
+                <Text size="sm" fw={600}>סוג תקלה:</Text>
+                <Text size="sm">{FAULT_LABEL[detailCall.fault_type] ?? detailCall.fault_type}</Text>
+              </Group>
+              {detailCall.description && (
+                <Group gap="xs" align="flex-start">
+                  <Text size="sm" fw={600}>תיאור:</Text>
+                  <Text size="sm" style={{ flex: 1 }}>{detailCall.description}</Text>
+                </Group>
+              )}
+              {detailCall.created_at && (
+                <Group gap="xs">
+                  <Text size="sm" fw={600}>נפתחה:</Text>
+                  <Text size="sm">{detailCall.created_at}</Text>
+                </Group>
+              )}
+              {detailCall.reported_by && (
+                <Group gap="xs">
+                  <Text size="sm" fw={600}>פותח הקריאה:</Text>
+                  <Text size="sm">{detailCall.reported_by}</Text>
+                </Group>
+              )}
+              {(detailCall as PendingCall).inspection_note && (
+                <Badge color="orange" variant="light" mt={4}>
+                  ⚠️ {(detailCall as PendingCall).inspection_note}
+                </Badge>
+              )}
+            </Stack>
+            {detailCall.lat && detailCall.lng && (
+              <Group gap="sm">
+                <Button flex={1} color="blue" component="a"
+                  href={`https://www.google.com/maps/dir/?api=1&destination=${detailCall.lat},${detailCall.lng}`} target="_blank">
+                  🗺 גוגל מפות</Button>
+                <Button flex={1} color="teal" variant="light" component="a"
+                  href={`https://waze.com/ul?ll=${detailCall.lat},${detailCall.lng}&navigate=yes`} target="_blank">
+                  🚘 Waze</Button>
+              </Group>
+            )}
+            <Button variant="subtle" onClick={() => setDetailCall(null)}>סגור</Button>
+          </Stack>
+        )}
+      </Modal>
     </div>
   )
 }

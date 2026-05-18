@@ -956,7 +956,30 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
         call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
         if not call or call.status not in ("OPEN", "ASSIGNED", "IN_PROGRESS"):
             continue
+        # Maintenance calls belong in the maintenance tab, not calls tab
+        if call.fault_type == "MAINTENANCE":
+            continue
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+
+        # Check for open inspection deficiencies on this elevator
+        inspection_note = None
+        if elev:
+            from app.models.inspection_report import InspectionReport
+            open_report = (
+                db.query(InspectionReport)
+                .filter(
+                    InspectionReport.elevator_id == elev.id,
+                    InspectionReport.report_status.in_(["OPEN", "PARTIAL"]),
+                )
+                .order_by(InspectionReport.created_at.desc())
+                .first()
+            )
+            if open_report:
+                inspection_note = f"קיים דוח בודק עם {open_report.deficiency_count} ליקויים פתוחים"
+
+        call_number_str = f"S{call.call_number:05d}" if call.call_number else None
+        created_at_str = call.created_at.strftime('%d/%m/%Y %H:%M') if getattr(call, 'created_at', None) else None
+
         result.append({
             "assignment_id": str(a.id),
             "call_id": str(call.id),
@@ -970,6 +993,10 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
             "lat": elev.latitude if elev else None,
             "lng": elev.longitude if elev else None,
             "manufacturer": elev.manufacturer if elev else None,
+            "call_number": call_number_str,
+            "created_at": created_at_str,
+            "reported_by": call.reported_by or None,
+            "inspection_note": inspection_note,
         })
     return result
 
@@ -1449,6 +1476,10 @@ def open_calls_board(db: Session = Depends(get_db)):
     PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     result = []
     for call in calls:
+        # Maintenance calls belong in the maintenance tab
+        if call.fault_type == "MAINTENANCE":
+            continue
+
         # Skip calls that already have a confirmed assignment
         confirmed = db.query(Assignment).filter(
             Assignment.service_call_id == call.id,
@@ -1469,6 +1500,9 @@ def open_calls_board(db: Session = Depends(get_db)):
 
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
 
+        call_number_str = f"S{call.call_number:05d}" if call.call_number else None
+        created_at_str = call.created_at.strftime('%d/%m/%Y %H:%M') if getattr(call, 'created_at', None) else None
+
         result.append({
             "call_id": str(call.id),
             "address": elev.address if elev else "כתובת לא ידועה",
@@ -1480,6 +1514,9 @@ def open_calls_board(db: Session = Depends(get_db)):
             "lat": elev.latitude if elev else None,
             "lng": elev.longitude if elev else None,
             "manufacturer": elev.manufacturer if elev else None,
+            "call_number": call_number_str,
+            "created_at": created_at_str,
+            "reported_by": call.reported_by or None,
         })
 
     result.sort(key=lambda x: PRIORITY_ORDER.get(x["priority"], 99))

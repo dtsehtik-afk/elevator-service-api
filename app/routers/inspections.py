@@ -9,8 +9,24 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import require_dispatcher_or_admin, get_current_user
 from app.database import get_db
 
+import re as _re
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/inspections", tags=["Inspections"])
+
+_DEADLINE_RE = _re.compile(r'(?:לטפל|לתקן|לתקון|יש\s+לטפל)?\s*תוך\s+(\d+)\s+יום', _re.IGNORECASE)
+
+
+def _max_deadline_days(deficiencies: list | None) -> int | None:
+    """Return the smallest (most urgent) deadline_days found in deficiency descriptions, or None."""
+    if not deficiencies:
+        return None
+    days = []
+    for d in deficiencies:
+        m = _DEADLINE_RE.search(d.get("description", "") or "")
+        if m:
+            days.append(int(m.group(1)))
+    return min(days) if days else None
 
 ALLOWED_MIME = {
     "application/pdf",
@@ -101,6 +117,7 @@ def list_inspections(
             "assigned_technician_name": tech.name if tech else None,
             "raw_city": r.raw_city,
             "notes": r.notes,
+            "deadline_days": _max_deadline_days(r.deficiencies),
         })
     return result
 

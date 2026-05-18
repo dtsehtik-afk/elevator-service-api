@@ -403,11 +403,13 @@ def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
         db.commit()
         db.refresh(report)
         date_str = inspection_date.strftime('%d/%m/%Y') if inspection_date else "—"
+        report_link = f"{settings.app_base_url}/#/inspections" if getattr(settings, 'app_base_url', None) else ""
         msg = (
             f"📋 *תסקיר בודק נקלט*\n"
             f"📍 {elevator.address}, {elevator.city}\n"
             f"📅 {date_str}  |  👤 {inspector_name or 'לא ידוע'}\n"
             f"✅ תקין — אין ליקויים"
+            + (f"\n🔗 {report_link}" if report_link else "")
         )
         for num in (settings.dispatcher_whatsapp or "").split(","):
             n = num.strip()
@@ -430,12 +432,14 @@ def _apply_inspection_to_elevator(db: Session, report, elevator) -> dict:
         f"• {d.get('description', '')} [{d.get('severity', 'MEDIUM')}]"
         for d in deficiencies
     )
+    report_link = f"{settings.app_base_url}/#/inspections" if getattr(settings, 'app_base_url', None) else ""
     msg = (
         f"📋 *תסקיר בודק נקלט — נדרש טיפול*\n"
         f"📍 {elevator.address}, {elevator.city}\n"
         f"📅 {date_str}  |  👤 {inspector_name or 'לא ידוע'}\n"
         f"⚠️ {len(deficiencies)} ליקויים:\n{deficiency_lines}\n\n"
         f"הדוח ממתין לשיוך טכנאי בדשבורד › דוחות בודק"
+        + (f"\n🔗 {report_link}" if report_link else "")
     )
     for num in (settings.dispatcher_whatsapp or "").split(","):
         n = num.strip()

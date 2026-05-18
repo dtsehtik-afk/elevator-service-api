@@ -32,13 +32,7 @@ def is_working_hours(now: datetime | None = None) -> bool:
 
 def get_working_hours_str() -> str:
     """Return a formatted Hebrew string of the working schedule."""
-    lines = []
-    for day_num in [6, 0, 1, 2, 3, 4]:
-        if day_num not in _SCHEDULE:
-            continue
-        sh, sm, eh, em = _SCHEDULE[day_num]
-        lines.append(f"יום {_DAY_NAMES[day_num]}: {sh:02d}:{sm:02d}–{eh:02d}:{em:02d}")
-    return "\n".join(lines)
+    return "יום ראשון-חמישי: 07:30–16:30\nיום שישי: 07:30–13:00"
 
 
 def get_time_greeting() -> str:
