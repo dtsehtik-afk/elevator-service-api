@@ -31,6 +31,7 @@ from app.models.whatsapp_message import WhatsAppMessage
 from app.models.consultant import Consultant
 from app.models.part_request import PartRequest
 from app.models.bot_qa import BotQA
+from app.models.document_analysis import DocumentAnalysis
 
 __all__ = [
     "Building",
@@ -70,4 +71,5 @@ __all__ = [
     "Consultant",
     "PartRequest",
     "BotQA",
+    "DocumentAnalysis",
 ]

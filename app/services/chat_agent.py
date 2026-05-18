@@ -183,6 +183,14 @@ _GEMINI_TOOLS = [{
                 "limit": {"type": "INTEGER", "description": "מספר תוצאות מקסימלי (ברירת מחדל: 10)"},
             }, "required": []},
         },
+        {
+            "name": "get_document_analysis",
+            "description": "מחזיר ניתוח AI של חוזים/הסכמי שירות/תסקירים שהועלו למערכת עבור מעלית, פרויקט, חוזה, ליד או לקוח. מכיל סיכום, שדות שחולצו ושדות שעודכנו אוטומטית.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "entity_type": {"type": "STRING", "description": "ELEVATOR|PROJECT|CONTRACT|LEAD|CUSTOMER"},
+                "entity_id": {"type": "STRING", "description": "UUID של הישות"},
+            }, "required": ["entity_type", "entity_id"]},
+        },
     ]
 }]
 
@@ -811,6 +819,40 @@ def _get_upcoming_maintenance(db: Session, days_ahead: int = 14, overdue_only: b
     return result
 
 
+def _get_document_analysis(db: Session, entity_type: str, entity_id: str) -> list:
+    """Return AI document analyses for a given entity."""
+    try:
+        from app.models.document_analysis import DocumentAnalysis
+        import uuid as _uuid
+        eid = _uuid.UUID(entity_id)
+        records = (
+            db.query(DocumentAnalysis)
+            .filter(
+                DocumentAnalysis.entity_type == entity_type.upper(),
+                DocumentAnalysis.entity_id == eid,
+                DocumentAnalysis.status == "PROCESSED",
+            )
+            .order_by(DocumentAnalysis.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        if not records:
+            return [{"תוצאה": "אין מסמכים מנותחים עבור ישות זו"}]
+        return [
+            {
+                "קובץ": r.filename,
+                "סוג_מסמך": r.document_type or "לא ידוע",
+                "סיכום": r.summary_text or "",
+                "שדות_שמולאו_אוטו": list((r.auto_filled or {}).keys()),
+                "תאריך_העלאה": r.created_at.strftime("%d/%m/%Y") if r.created_at else None,
+                "נתונים_מחולצים": r.extracted_data or {},
+            }
+            for r in records
+        ]
+    except Exception as exc:
+        return [{"שגיאה": str(exc)}]
+
+
 def _get_pending_unmatched_calls(db: Session, limit: int = 10) -> list:
     """Return unmatched incoming calls awaiting manual elevator assignment."""
     logs = (
@@ -886,6 +928,8 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
         return _get_upcoming_maintenance(db, tool_input.get("days_ahead", 14), tool_input.get("overdue_only", False))
     elif tool_name == "get_pending_unmatched_calls":
         return _get_pending_unmatched_calls(db, tool_input.get("limit", 10))
+    elif tool_name == "get_document_analysis":
+        return _get_document_analysis(db, tool_input["entity_type"], tool_input["entity_id"])
     else:
         return {"error": f"כלי לא מוכר: {tool_name}"}
 

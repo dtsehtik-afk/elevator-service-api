@@ -8,6 +8,7 @@ import { notifications } from '@mantine/notifications'
 import { leadsApi } from '../api/leads'
 import type { Lead } from '../types'
 import { EditViewDrawer } from '../components/EditViewDrawer'
+import { DocumentUploadPanel } from '../components/DocumentUploadPanel'
 
 const STATUS_COLORS: Record<string, string> = {
   NEW: 'blue', CONTACTED: 'cyan', QUALIFIED: 'violet', PROPOSAL: 'orange', WON: 'green', LOST: 'gray',
@@ -203,6 +204,8 @@ export default function LeadsPage() {
             {selectedLead.customer_id && (
               <Text size="sm" c="green">✓ הומר ללקוח</Text>
             )}
+
+            <DocumentUploadPanel entityType="LEAD" entityId={selectedLead.id} />
           </Stack>
         </Modal>
       )}

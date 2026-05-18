@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import {
   Title, Table, Badge, Button, Group, Select, Modal, Stack, Text,
   Paper, TextInput, NumberInput, Textarea, Alert, Tooltip, Tabs,
-  ActionIcon, Menu, Divider,
+  ActionIcon, Menu, Divider, Image,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { inventoryApi, type Warehouse, type StockItem } from '../api/inventory'
 import type { Part } from '../types'
+import client from '../api/client'
+import { useAuthStore } from '../stores/authStore'
 
 const WH_TYPE_LABEL: Record<string, string> = {
   MAIN: '🏭 מחסן ראשי',
@@ -23,6 +25,30 @@ const WH_TYPE_COLOR: Record<string, string> = {
 }
 
 export default function InventoryPage() {
+  const userRole = useAuthStore(s => s.userRole)
+  const canUploadImage = userRole === 'ADMIN' || userRole === 'DISPATCHER'
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const [imageUploadPartId, setImageUploadPartId] = useState<string | null>(null)
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !imageUploadPartId) return
+    const form = new FormData()
+    form.append('file', file)
+    try {
+      await client.post(`/inventory/${imageUploadPartId}/upload-image`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      notifications.show({ message: 'תמונה הועלתה בהצלחה', color: 'green' })
+      loadParts()
+    } catch {
+      notifications.show({ message: 'שגיאה בהעלאת תמונה', color: 'red' })
+    } finally {
+      e.target.value = ''
+      setImageUploadPartId(null)
+    }
+  }
+
   const [parts, setParts] = useState<Part[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -214,6 +240,7 @@ export default function InventoryPage() {
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th>תמונה</Table.Th>
                   <Table.Th>מקט</Table.Th><Table.Th>שם</Table.Th><Table.Th>קטגוריה</Table.Th>
                   <Table.Th>כמות</Table.Th><Table.Th>מינימום</Table.Th><Table.Th>מחיר קנייה</Table.Th>
                   <Table.Th>מחיר מכירה</Table.Th><Table.Th>ספק</Table.Th><Table.Th></Table.Th>
@@ -221,11 +248,31 @@ export default function InventoryPage() {
               </Table.Thead>
               <Table.Tbody>
                 {loading ? (
-                  <Table.Tr><Table.Td colSpan={9}><Text ta="center" py="xl" c="dimmed">טוען...</Text></Table.Td></Table.Tr>
+                  <Table.Tr><Table.Td colSpan={10}><Text ta="center" py="xl" c="dimmed">טוען...</Text></Table.Td></Table.Tr>
                 ) : parts.length === 0 ? (
-                  <Table.Tr><Table.Td colSpan={9}><Text ta="center" py="xl" c="dimmed">אין חלקים במלאי</Text></Table.Td></Table.Tr>
+                  <Table.Tr><Table.Td colSpan={10}><Text ta="center" py="xl" c="dimmed">אין חלקים במלאי</Text></Table.Td></Table.Tr>
                 ) : parts.map(p => (
                   <Table.Tr key={p.id}>
+                    <Table.Td style={{ width: 56 }}>
+                      {p.image_url ? (
+                        <Tooltip label={p.name} position="right">
+                          <Image
+                            src={p.image_url}
+                            w={44} h={44}
+                            radius="sm"
+                            fit="cover"
+                            style={{ cursor: canUploadImage ? 'pointer' : 'default' }}
+                            onClick={canUploadImage ? () => { setImageUploadPartId(p.id); imageInputRef.current?.click() } : undefined}
+                          />
+                        </Tooltip>
+                      ) : canUploadImage ? (
+                        <ActionIcon
+                          variant="light" size="lg"
+                          title="העלה תמונה"
+                          onClick={() => { setImageUploadPartId(p.id); imageInputRef.current?.click() }}
+                        >📷</ActionIcon>
+                      ) : <Text size="xs" c="dimmed">—</Text>}
+                    </Table.Td>
                     <Table.Td>{p.sku || '—'}</Table.Td>
                     <Table.Td fw={500}>{p.name}</Table.Td>
                     <Table.Td>{p.category || '—'}</Table.Td>
@@ -500,6 +547,15 @@ export default function InventoryPage() {
           </Group>
         </Stack>
       </Modal>
+
+      {/* Hidden image file input — triggered by image upload buttons */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        style={{ display: 'none' }}
+        onChange={handleImageUpload}
+      />
     </>
   )
 }

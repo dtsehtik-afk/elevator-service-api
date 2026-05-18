@@ -23,6 +23,7 @@ from app.routers import consultants as consultants_router
 from app.routers import activity_log as activity_log_router
 from app.routers import ai as ai_router
 from app.routers import bot_qa as bot_qa_router
+from app.routers import documents as documents_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
 from app.routers import search as search_router
@@ -45,6 +46,8 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)  # creates any missing tables
     Path("uploads/elevators").mkdir(parents=True, exist_ok=True)
     Path("uploads/inspections").mkdir(parents=True, exist_ok=True)
+    Path("uploads/parts").mkdir(parents=True, exist_ok=True)
+    Path("uploads/documents").mkdir(parents=True, exist_ok=True)
     # Incremental migrations — PostgreSQL only (skipped for SQLite in tests)
     from sqlalchemy import text as _text
     with engine.connect() as _conn:
@@ -344,6 +347,23 @@ async def lifespan(app: FastAPI):
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_activity_log_created_at ON activity_log (created_at DESC)",
                 "CREATE INDEX IF NOT EXISTS ix_activity_log_category ON activity_log (category)",
+                # document_analyses
+                """CREATE TABLE IF NOT EXISTS document_analyses (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    entity_type VARCHAR(50) NOT NULL,
+                    entity_id UUID,
+                    filename VARCHAR(255) NOT NULL,
+                    file_path VARCHAR(500),
+                    document_type VARCHAR(50),
+                    extracted_data JSONB,
+                    summary_text TEXT,
+                    auto_filled JSONB,
+                    status VARCHAR(20) DEFAULT 'PROCESSED',
+                    error_message TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    created_by VARCHAR(100)
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_doc_analyses_entity ON document_analyses (entity_type, entity_id)",
                 # bot_qa
                 """CREATE TABLE IF NOT EXISTS bot_qa (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -572,6 +592,7 @@ app.include_router(consultants_router.router)
 app.include_router(part_requests_router.router, prefix="/part-requests", tags=["Part Requests"])
 app.include_router(activity_log_router.router)
 app.include_router(bot_qa_router.router)
+app.include_router(documents_router.router)
 
 
 @app.get("/health", tags=["Health"])

@@ -16,6 +16,7 @@ import client from '../api/client'
 import { Elevator } from '../types'
 import LocationPickerModal from '../components/LocationPickerModal'
 import RelatedPanel from '../components/RelatedPanel'
+import { DocumentUploadPanel } from '../components/DocumentUploadPanel'
 import {
   ELEVATOR_STATUS_LABELS, ELEVATOR_STATUS_COLORS,
   PRIORITY_LABELS, PRIORITY_COLORS, CALL_STATUS_LABELS, CALL_STATUS_COLORS, FAULT_TYPE_LABELS,
@@ -978,6 +979,7 @@ export default function ElevatorDetailPage() {
           <Tabs.Tab value="inspection">דוחות בודק</Tabs.Tab>
           <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>
           <Tabs.Tab value="log">📋 יומן מעלית</Tabs.Tab>
+          <Tabs.Tab value="documents">📎 מסמכים</Tabs.Tab>
           {elevator.building_id && (
             <Tabs.Tab value="group">קבוצה {siblings.length > 0 && `(${siblings.length + 1})`}</Tabs.Tab>
           )}
@@ -1806,6 +1808,11 @@ export default function ElevatorDetailPage() {
             inspections={inspectionLogs}
             elevatorId={id!}
           />
+        </Tabs.Panel>
+
+        {/* ── DOCUMENTS ── */}
+        <Tabs.Panel value="documents" pt="md">
+          <DocumentUploadPanel entityType="ELEVATOR" entityId={id!} />
         </Tabs.Panel>
 
         {/* ── GROUP ── */}

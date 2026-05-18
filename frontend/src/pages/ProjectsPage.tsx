@@ -8,6 +8,7 @@ import { DateInput } from '@mantine/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { projectsApi, Project, ProjectTask, ProjectDetail } from '../api/projects'
+import { DocumentUploadPanel } from '../components/DocumentUploadPanel'
 
 const STATUS_COLORS: Record<string, string> = {
   PLANNING: 'gray', ACTIVE: 'blue', ON_HOLD: 'orange', COMPLETED: 'green', CANCELLED: 'red',
@@ -241,6 +242,7 @@ function ProjectPanel({ projectId, onClose }: { projectId: string; onClose: () =
         <Tabs.List>
           <Tabs.Tab value="gantt">גאנט</Tabs.Tab>
           <Tabs.Tab value="tasks">משימות ({project.tasks.length})</Tabs.Tab>
+          <Tabs.Tab value="documents">📎 מסמכים</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="gantt" pt="md">
@@ -292,6 +294,10 @@ function ProjectPanel({ projectId, onClose }: { projectId: string; onClose: () =
               )}
             </Table.Tbody>
           </Table>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="documents" pt="md">
+          <DocumentUploadPanel entityType="PROJECT" entityId={projectId} />
         </Tabs.Panel>
       </Tabs>
 

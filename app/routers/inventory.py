@@ -1,9 +1,10 @@
 """Inventory router — ניהול מלאי חלקי חילוף + מחסנות."""
 
+import os
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,9 @@ from app.database import get_db
 from app.models.part import Part, PartUsage
 from app.models.technician import Technician
 from app.schemas.part import PartCreate, PartResponse, PartUpdate, PartUsageCreate, PartUsageResponse
+
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_PARTS_UPLOAD_DIR = "uploads/parts"
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
@@ -54,6 +58,7 @@ class StockItem(BaseModel):
     min_quantity: int
     is_low_stock: bool
     unit: str
+    image_url: Optional[str] = None
 
 
 class TransferRequest(BaseModel):
@@ -190,6 +195,62 @@ def update_part(
     db.commit()
     db.refresh(p)
     return _enrich_part(p)
+
+
+@router.post("/{part_id}/upload-image", response_model=PartResponse)
+def upload_part_image(
+    part_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    """Upload or replace the image for a part. Admin/Dispatcher/Warehouse-Manager only."""
+    if current_user.role not in ("ADMIN", "DISPATCHER", "WAREHOUSE_MANAGER"):
+        raise HTTPException(status_code=403, detail="רק מנהל מערכת או מנהל מחסן יכול להעלות תמונות")
+
+    p = db.query(Part).filter(Part.id == part_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Part not found")
+
+    content_type = file.content_type or ""
+    if content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="קובץ חייב להיות תמונה (JPEG/PNG/WEBP/GIF)")
+
+    ext = content_type.split("/")[-1].replace("jpeg", "jpg")
+    os.makedirs(_PARTS_UPLOAD_DIR, exist_ok=True)
+    filename = f"{part_id}.{ext}"
+    filepath = os.path.join(_PARTS_UPLOAD_DIR, filename)
+
+    data = file.file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="תמונה גדולה מדי — מקסימום 5MB")
+
+    with open(filepath, "wb") as f:
+        f.write(data)
+
+    p.image_url = f"/uploads/parts/{filename}"
+    db.commit()
+    db.refresh(p)
+    return _enrich_part(p)
+
+
+@router.delete("/{part_id}/image", status_code=204)
+def delete_part_image(
+    part_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: Technician = Depends(get_current_user),
+):
+    if current_user.role not in ("ADMIN", "DISPATCHER", "WAREHOUSE_MANAGER"):
+        raise HTTPException(status_code=403, detail="אין הרשאה")
+    p = db.query(Part).filter(Part.id == part_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Part not found")
+    if p.image_url:
+        local = p.image_url.lstrip("/")
+        if os.path.exists(local):
+            os.remove(local)
+    p.image_url = None
+    db.commit()
 
 
 @router.patch("/{part_id}/adjust-stock")
@@ -413,6 +474,7 @@ def get_warehouse_stock(
             min_quantity=part.min_quantity,
             is_low_stock=stock.quantity < part.min_quantity,
             unit=part.unit,
+            image_url=part.image_url,
         )
         for stock, part in rows
     ]

@@ -9,6 +9,7 @@ import { notifications } from '@mantine/notifications'
 import { contractsApi } from '../api/contracts'
 import { customersApi } from '../api/customers'
 import type { Contract, Customer } from '../types'
+import { DocumentUploadPanel } from '../components/DocumentUploadPanel'
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING: 'gray', ACTIVE: 'green', EXPIRED: 'orange', CANCELLED: 'red',
@@ -28,6 +29,7 @@ export default function ContractsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [erpOpen, setErpOpen] = useState(false)
+  const [docContract, setDocContract] = useState<Contract | null>(null)
   const [form, setForm] = useState({
     customer_id: '', contract_type: 'SERVICE', status: 'PENDING',
     start_date: '', end_date: '', monthly_price: 0, total_value: 0,
@@ -75,6 +77,9 @@ export default function ContractsPage() {
       <Table.Td>{c.end_date || '—'}</Table.Td>
       <Table.Td>{c.monthly_price ? `₪${Number(c.monthly_price).toLocaleString()}` : '—'}</Table.Td>
       <Table.Td><Badge size="xs" color="blue">{c.elevator_count}</Badge></Table.Td>
+      <Table.Td onClick={e => { e.stopPropagation(); setDocContract(c) }}>
+        <Button size="xs" variant="subtle">📎</Button>
+      </Table.Td>
     </Table.Tr>
   ))
 
@@ -101,7 +106,7 @@ export default function ContractsPage() {
             <Table.Tr>
               <Table.Th>מספר</Table.Th><Table.Th>לקוח</Table.Th><Table.Th>סוג</Table.Th>
               <Table.Th>סטטוס</Table.Th><Table.Th>התחלה</Table.Th><Table.Th>סיום</Table.Th>
-              <Table.Th>מחיר חודשי</Table.Th><Table.Th>מעליות</Table.Th>
+              <Table.Th>מחיר חודשי</Table.Th><Table.Th>מעליות</Table.Th><Table.Th></Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -177,6 +182,19 @@ export default function ContractsPage() {
           <Button onClick={handleCreate} disabled={!form.customer_id}>צור חוזה</Button>
         </Stack>
       </Modal>
+
+      {/* Document upload modal */}
+      {docContract && (
+        <Modal
+          opened={!!docContract}
+          onClose={() => setDocContract(null)}
+          title={`📎 מסמכים — חוזה ${docContract.number}`}
+          dir="rtl"
+          size="lg"
+        >
+          <DocumentUploadPanel entityType="CONTRACT" entityId={docContract.id} />
+        </Modal>
+      )}
     </>
   )
 }

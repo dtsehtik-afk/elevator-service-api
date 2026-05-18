@@ -470,7 +470,7 @@ function ReportsTab() {
 
 // ── Inventory Tab ─────────────────────────────────────────────────────────
 function TechInventoryTab({ techId }: { techId: string }) {
-  const [stock, setStock] = useState<{ part_id: string; part_name: string; part_sku?: string; quantity: number; min_quantity: number; is_low_stock: boolean; unit: string }[]>([])
+  const [stock, setStock] = useState<{ part_id: string; part_name: string; part_sku?: string; quantity: number; min_quantity: number; is_low_stock: boolean; unit: string; image_url?: string | null }[]>([])
   const [loading, setLoading] = useState(true)
   const [warehouseId, setWarehouseId] = useState<string | null>(null)
   const [usageOpen, setUsageOpen] = useState(false)
@@ -531,11 +531,20 @@ function TechInventoryTab({ techId }: { techId: string }) {
           <Card key={s.part_id} withBorder radius="md" p="sm"
             style={{ cursor: 'pointer', borderRight: s.is_low_stock ? '4px solid #fa5252' : '4px solid #40c057' }}
             onClick={() => { setUsagePart({ id: s.part_id, name: s.part_name }); setUsageQty(1); setUsageOpen(true) }}>
-            <Group justify="space-between">
-              <div>
-                <Text fw={600} size="sm">{s.part_name}</Text>
-                {s.part_sku && <Text size="xs" c="dimmed">{s.part_sku}</Text>}
-              </div>
+            <Group justify="space-between" wrap="nowrap">
+              <Group gap="sm" wrap="nowrap">
+                {s.image_url && (
+                  <img
+                    src={s.image_url}
+                    alt={s.part_name}
+                    style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
+                  />
+                )}
+                <div>
+                  <Text fw={600} size="sm">{s.part_name}</Text>
+                  {s.part_sku && <Text size="xs" c="dimmed">{s.part_sku}</Text>}
+                </div>
+              </Group>
               <Badge color={s.is_low_stock ? 'red' : 'green'} size="md">
                 {s.quantity} {s.unit}
               </Badge>
