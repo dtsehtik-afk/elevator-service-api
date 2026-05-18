@@ -62,20 +62,20 @@ function SlaBadge({ deadline, status, resolvedAt, createdAt }: {
     if (!resolvedAt || !createdAt) return null
     const mins = Math.round((new Date(resolvedAt).getTime() - new Date(createdAt).getTime()) / 60000)
     if (mins < 0) return null
-    const label = mins < 60 ? `${mins} דק'` : `${(mins / 60).toFixed(1)} ש'`
-    return <Badge color="gray" size="xs" variant="light" title="משך טיפול">⏱ {label}</Badge>
+    const label = mins < 60 ? `${mins} דקות` : `${(mins / 60).toFixed(1)} שעות`
+    return <Badge color="gray" size="sm" variant="light" title="משך טיפול" style={{ textTransform: 'none' }}>⏱ {label}</Badge>
   }
   if (!deadline) return null
   const msLeft = new Date(deadline).getTime() - Date.now()
   const hLeft = msLeft / 3600000
   if (msLeft < 0) {
     const hOver = Math.abs(hLeft)
-    const label = hOver < 1 ? `חריגה ${Math.round(hOver * 60)}ד` : `חריגה ${hOver.toFixed(0)}ש`
-    return <Badge color="red" size="xs" variant="filled">{label}</Badge>
+    const label = hOver < 1 ? `${Math.round(hOver * 60)} דקות` : `${hOver.toFixed(1)} שעות`
+    return <Badge color="red" size="sm" variant="filled" style={{ textTransform: 'none' }}>חריגה: {label}</Badge>
   }
   const color = hLeft <= 2 ? 'orange' : 'green'
-  const label = hLeft < 1 ? `${Math.round(hLeft * 60)}ד` : hLeft < 24 ? `${hLeft.toFixed(0)}ש` : `${(hLeft / 24).toFixed(0)}י`
-  return <Badge color={color} size="xs" variant="light">SLA {label}</Badge>
+  const label = hLeft < 1 ? `${Math.round(hLeft * 60)} דקות` : hLeft < 24 ? `${hLeft.toFixed(1)} שעות` : `${(hLeft / 24).toFixed(1)} ימים`
+  return <Badge color={color} size="sm" variant="light" style={{ textTransform: 'none' }}>SLA נותר: {label}</Badge>
 }
 
 export default function CallsPage() {
@@ -537,6 +537,7 @@ export default function CallsPage() {
             <Group>
               <Badge color={PRIORITY_COLORS[detail.priority]}>{PRIORITY_LABELS[detail.priority]}</Badge>
               <StatusBadge status={detail.status} />
+              <SlaBadge deadline={detail.sla_deadline} status={detail.status} resolvedAt={detail.resolved_at} createdAt={detail.created_at} />
               {detail.is_recurring && <Badge color="orange" variant="light">🔁 תקלה חוזרת</Badge>}
               {detail.quote_needed && <Badge color="yellow" variant="filled">💰 נדרשת הצעת מחיר</Badge>}
             </Group>
