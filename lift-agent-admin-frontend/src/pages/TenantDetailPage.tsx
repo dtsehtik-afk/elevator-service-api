@@ -9,6 +9,16 @@ import { getTenant, updateTenant, setModules, getTenantStats, pingTenant, type M
 
 const ALL_MODULES = ['WHATSAPP', 'AI_ASSIGN', 'INSPECTIONS', 'MAINTENANCE', 'MAP', 'IMPORT']
 
+const INDUSTRY_OPTIONS = [
+  { value: 'ELEVATORS', label: 'מעליות' },
+  { value: 'CRANES', label: 'עגורנים' },
+  { value: 'ESCALATORS', label: 'מדרגות נעות' },
+  { value: 'HVAC', label: 'מיזוג אוויר' },
+  { value: 'PLUMBING', label: 'אינסטלציה' },
+  { value: 'ELECTRICAL', label: 'חשמל' },
+  { value: 'GENERAL', label: 'כללי' },
+]
+
 function ModulesTab({ tenantId, modules }: { tenantId: string; modules: Module[] }) {
   const qc = useQueryClient()
   const [local, setLocal] = useState<Module[]>(() => {
@@ -110,6 +120,7 @@ export default function TenantDetailPage() {
               <Stack>
                 <TextInput label="שם חברה" value={val('name')} onChange={(e) => f('name')(e.target.value)} />
                 <Select label="תוכנית" data={['BASIC', 'PRO', 'ENTERPRISE']} value={val('plan')} onChange={(v) => f('plan')(v)} />
+                <Select label="ענף" data={INDUSTRY_OPTIONS} value={val('industry') ?? null} onChange={(v) => f('industry')(v)} clearable />
                 <TextInput label="דומיין" value={val('domain') ?? ''} onChange={(e) => f('domain')(e.target.value)} />
                 <TextInput label="API URL" value={val('api_url') ?? ''} onChange={(e) => f('api_url')(e.target.value)} />
                 <TextInput label="API Key" value={val('api_key') ?? ''} onChange={(e) => f('api_key')(e.target.value)} />

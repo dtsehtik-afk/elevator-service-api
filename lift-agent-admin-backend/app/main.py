@@ -11,6 +11,14 @@ from app.routers.stats import router as stats_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    # Incremental migrations for existing SQLite/PostgreSQL databases
+    from sqlalchemy import text as _text
+    with engine.connect() as conn:
+        try:
+            conn.execute(_text("ALTER TABLE tenants ADD COLUMN industry VARCHAR(50)"))
+            conn.commit()
+        except Exception:
+            pass  # column already exists
     yield
 
 

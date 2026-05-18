@@ -1,3 +1,5 @@
+import json
+import logging
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +8,8 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.models.tenant import Tenant, TenantModule
 from app.auth.dependencies import get_current_admin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
@@ -25,6 +29,7 @@ class TenantCreate(BaseModel):
     api_key: Optional[str] = None
     plan: str = "BASIC"
     is_demo: bool = False
+    industry: Optional[str] = None
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
@@ -41,6 +46,7 @@ class TenantUpdate(BaseModel):
     plan: Optional[str] = None
     is_active: Optional[bool] = None
     is_demo: Optional[bool] = None
+    industry: Optional[str] = None
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
@@ -59,6 +65,7 @@ def _tenant_dict(t: Tenant) -> dict:
         "plan": t.plan,
         "is_active": t.is_active,
         "is_demo": t.is_demo,
+        "industry": t.industry,
         "contact_name": t.contact_name,
         "contact_email": t.contact_email,
         "contact_phone": t.contact_phone,
@@ -70,6 +77,25 @@ def _tenant_dict(t: Tenant) -> dict:
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "modules": [{"module": m.module, "enabled": m.enabled} for m in t.modules],
     }
+
+
+def _push_company_info(t: Tenant) -> None:
+    """Fire-and-forget: push company name + industry to the tenant app."""
+    if not t.api_url or not t.api_key:
+        return
+    import httpx
+    try:
+        payload = {"company_name": t.name}
+        if t.industry:
+            payload["industry"] = t.industry
+        httpx.post(
+            f"{t.api_url.rstrip('/')}/settings/company-info/admin-sync",
+            content=json.dumps(payload),
+            headers={"X-Api-Key": t.api_key, "Content-Type": "application/json"},
+            timeout=5,
+        )
+    except Exception as exc:
+        logger.warning("Could not push company info to tenant %s: %s", t.slug, exc)
 
 
 @router.get("")
@@ -94,6 +120,7 @@ def create_tenant(body: TenantCreate, db: Session = Depends(get_db), _=Depends(g
         db.add(TenantModule(tenant_id=tenant.id, module=m.module, enabled=m.enabled))
     db.commit()
     db.refresh(tenant)
+    _push_company_info(tenant)
     return _tenant_dict(tenant)
 
 
@@ -114,6 +141,7 @@ def update_tenant(tenant_id: str, body: TenantUpdate, db: Session = Depends(get_
         setattr(t, field, val)
     db.commit()
     db.refresh(t)
+    _push_company_info(t)
     return _tenant_dict(t)
 
 

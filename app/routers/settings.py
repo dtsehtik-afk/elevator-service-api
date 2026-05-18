@@ -1,6 +1,7 @@
 """System settings router — working hours and other configurable parameters."""
 import json
-from fastapi import APIRouter, Depends
+import os
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
@@ -248,6 +249,20 @@ def save_company_info(
     db: Session = Depends(get_db),
     _: Technician = Depends(require_admin),
 ):
+    _set_setting(db, "company_info", json.dumps(payload))
+    return {"ok": True}
+
+
+@router.post("/company-info/admin-sync", summary="Sync company info pushed from admin console (api-key auth)")
+def admin_sync_company_info(
+    payload: Dict[str, str],
+    x_api_key: str = Header(None, alias="X-Api-Key"),
+    db: Session = Depends(get_db),
+):
+    secret = os.getenv("WEBHOOK_SECRET", "")
+    if not secret or x_api_key != secret:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Invalid API key")
     _set_setting(db, "company_info", json.dumps(payload))
     return {"ok": True}
 

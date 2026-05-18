@@ -25,6 +25,9 @@ class Tenant(Base):
     contact_email: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     contact_phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
 
+    # Industry / branding
+    industry: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)   # ELEVATORS|CRANES|etc.
+
     # Billing
     monthly_price: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)   # ILS
     billing_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

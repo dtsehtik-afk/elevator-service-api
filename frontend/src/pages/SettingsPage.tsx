@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import {
   Stack, Title, Paper, Table, Switch, TextInput, Button, Group, Text, Tabs,
-  SegmentedControl, SimpleGrid, Card, useMantineColorScheme, Badge,
+  SegmentedControl, SimpleGrid, Card, useMantineColorScheme,
 } from '@mantine/core'
-import { INDUSTRY_OPTIONS, industryIcon } from '../utils/industry'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
@@ -16,7 +15,6 @@ const FONTS = [
   { value: 'Rubik',     label: 'Rubik — מודרני ונקי' },
 ]
 
-type CompanyInfo = { company_name: string; company_icon?: string; industry?: string }
 
 const DAYS = [
   { key: 'sun', label: 'ראשון' },
@@ -98,25 +96,6 @@ export default function SettingsPage() {
     onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
   })
 
-  // ── Company info ───────────────────────────────────────────────────────────
-  const { data: savedCompany } = useQuery<CompanyInfo>({
-    queryKey: ['company-info'],
-    queryFn: () => client.get('/settings/company-info').then(r => r.data),
-  })
-  const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null)
-  const currentIndustry = selectedIndustry ?? savedCompany?.industry ?? null
-
-  const saveCompany = useMutation({
-    mutationFn: (industry: string) =>
-      client.put('/settings/company-info', { ...savedCompany, industry }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['company-info'] })
-      setSelectedIndustry(null)
-      notifications.show({ message: '✅ ענף עודכן', color: 'green' })
-    },
-    onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
-  })
-
   // ── Nav config ─────────────────────────────────────────────────────────────
   const { data: savedNav } = useQuery<NavConfig>({
     queryKey: ['nav-config'],
@@ -150,7 +129,6 @@ export default function SettingsPage() {
         <Tabs.List mb="md">
           <Tabs.Tab value="hours">🕐 שעות עבודה</Tabs.Tab>
           <Tabs.Tab value="nav">🗂️ עריכת תפריט</Tabs.Tab>
-          <Tabs.Tab value="company">🏢 פרטי החברה</Tabs.Tab>
           <Tabs.Tab value="display">🎨 תצוגה</Tabs.Tab>
         </Tabs.List>
 
@@ -266,46 +244,6 @@ export default function SettingsPage() {
                 onClick={() => saveNav.mutate(effectiveNav)}
               >
                 שמור תפריט
-              </Button>
-            </Group>
-          </Paper>
-        </Tabs.Panel>
-        {/* Company info */}
-        <Tabs.Panel value="company">
-          <Paper withBorder radius="md" p="lg" maw={560}>
-            <Group mb="md" gap="xs">
-              <Text size="2rem">{industryIcon(currentIndustry, '🔧')}</Text>
-              <Text fw={600} size="lg">{savedCompany?.company_name ?? 'שם החברה'}</Text>
-              <Badge color="gray" variant="light" size="sm">קורא בלבד — מנוהל ע"י האדמין</Badge>
-            </Group>
-            <Text size="sm" c="dimmed" mb="md">בחר את ענף הפעילות — האייקון בראש הדף ובדף ההתחברות יתעדכן בהתאם.</Text>
-            <SimpleGrid cols={3} spacing="sm" mb="md">
-              {INDUSTRY_OPTIONS.map(opt => (
-                <Card
-                  key={opt.value}
-                  withBorder
-                  radius="md"
-                  p="sm"
-                  style={{
-                    cursor: 'pointer',
-                    borderColor: currentIndustry === opt.value ? 'var(--mantine-color-blue-5)' : undefined,
-                    borderWidth: currentIndustry === opt.value ? 2 : 1,
-                    textAlign: 'center',
-                  }}
-                  onClick={() => setSelectedIndustry(opt.value)}
-                >
-                  <Text size="xl">{opt.icon}</Text>
-                  <Text size="sm" fw={currentIndustry === opt.value ? 600 : 400}>{opt.label}</Text>
-                </Card>
-              ))}
-            </SimpleGrid>
-            <Group justify="flex-end">
-              <Button
-                loading={saveCompany.isPending}
-                disabled={!selectedIndustry || selectedIndustry === savedCompany?.industry}
-                onClick={() => selectedIndustry && saveCompany.mutate(selectedIndustry)}
-              >
-                שמור ענף
               </Button>
             </Group>
           </Paper>
