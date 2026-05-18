@@ -1500,6 +1500,7 @@ def _check_pending_assignment_timeouts():
         )
 
         _reminder_calls: list = []  # collected this run — sent as one batch after loop
+        _reminded_call_ids: set = set()  # deduplicate calls with multiple pending assignments
 
         for assignment in pending:
             assigned_at = assignment.assigned_at
@@ -1560,8 +1561,9 @@ def _check_pending_assignment_timeouts():
             elif age_minutes >= _REMINDER_AFTER_MINUTES and not assignment.reminder_sent_at:
                 assignment.reminder_sent_at = now
                 db.commit()
-                if call and elevator:
+                if call and elevator and call.id not in _reminded_call_ids:
                     _reminder_calls.append((call, elevator, addr))
+                    _reminded_call_ids.add(call.id)
 
         # ── Send consolidated reminder to all available technicians ──────────
         if _reminder_calls:
