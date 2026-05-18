@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { industryIcon } from '../../utils/industry'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   AppShell, Burger, Group, NavLink, Text, Avatar, Menu,
@@ -219,13 +220,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     staleTime: 5 * 60 * 1000,
   })
 
-  const { data: companyInfo } = useQuery<{ company_name: string; company_icon: string }>({
+  const { data: companyInfo } = useQuery<{ company_name: string; company_icon?: string; industry?: string }>({
     queryKey: ['company-info'],
     queryFn: () => client.get('/settings/company-info').then(r => r.data),
     staleTime: 10 * 60 * 1000,
   })
   const companyName = companyInfo?.company_name ?? 'אקורד מעליות'
-  const companyIcon = companyInfo?.company_icon ?? '⚡'
+  const companyIcon = industryIcon(companyInfo?.industry, companyInfo?.company_icon ?? '⚡')
 
   const activeSection = getActiveSection(pathname)
   const hasPanel = (activeSection?.children.length ?? 0) > 0

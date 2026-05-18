@@ -7,6 +7,7 @@ import {
 import { useAuthStore } from '../stores/authStore'
 import { login, forgotPassword, resetPassword } from '../api/auth'
 import client from '../api/client'
+import { industryIcon } from '../utils/industry'
 
 type Screen = 'login' | 'forgot' | 'reset'
 
@@ -21,7 +22,7 @@ export default function LoginPage() {
   useEffect(() => {
     client.get('/settings/company-info').then(r => {
       setCompanyName(r.data.company_name ?? 'אקורד מעליות')
-      setCompanyIcon(r.data.company_icon ?? '⚙️')
+      setCompanyIcon(industryIcon(r.data.industry, r.data.company_icon ?? '⚙️'))
     }).catch(() => {})
   }, [])
 

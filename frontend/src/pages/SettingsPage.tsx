@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import {
   Stack, Title, Paper, Table, Switch, TextInput, Button, Group, Text, Tabs,
-  SegmentedControl, SimpleGrid, Card, useMantineColorScheme,
+  SegmentedControl, SimpleGrid, Card, useMantineColorScheme, Badge,
 } from '@mantine/core'
+import { INDUSTRY_OPTIONS, industryIcon } from '../utils/industry'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
@@ -15,7 +16,7 @@ const FONTS = [
   { value: 'Rubik',     label: 'Rubik — מודרני ונקי' },
 ]
 
-type CompanyInfo = { company_name: string; company_icon: string }
+type CompanyInfo = { company_name: string; company_icon?: string; industry?: string }
 
 const DAYS = [
   { key: 'sun', label: 'ראשון' },
@@ -102,15 +103,16 @@ export default function SettingsPage() {
     queryKey: ['company-info'],
     queryFn: () => client.get('/settings/company-info').then(r => r.data),
   })
-  const [companyForm, setCompanyForm] = useState<CompanyInfo | null>(null)
-  const effectiveCompany: CompanyInfo = companyForm ?? savedCompany ?? { company_name: 'אקורד מעליות', company_icon: '⚡' }
+  const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null)
+  const currentIndustry = selectedIndustry ?? savedCompany?.industry ?? null
 
   const saveCompany = useMutation({
-    mutationFn: (info: CompanyInfo) => client.put('/settings/company-info', info),
+    mutationFn: (industry: string) =>
+      client.put('/settings/company-info', { ...savedCompany, industry }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['company-info'] })
-      setCompanyForm(null)
-      notifications.show({ message: '✅ פרטי החברה עודכנו', color: 'green' })
+      setSelectedIndustry(null)
+      notifications.show({ message: '✅ ענף עודכן', color: 'green' })
     },
     onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
   })
@@ -270,33 +272,42 @@ export default function SettingsPage() {
         </Tabs.Panel>
         {/* Company info */}
         <Tabs.Panel value="company">
-          <Paper withBorder radius="md" p="lg" maw={480}>
-            <Text size="sm" c="dimmed" mb="md">
-              שם החברה יוצג בראש הדף ובדף ההתחברות. האייקון הוא תו/אמוג׳י בודד.
-            </Text>
-            <Stack gap="sm">
-              <TextInput
-                label="שם החברה"
-                value={effectiveCompany.company_name}
-                onChange={e => setCompanyForm(prev => ({ ...(prev ?? effectiveCompany), company_name: e.target.value }))}
-              />
-              <TextInput
-                label="אייקון"
-                placeholder="⚡"
-                value={effectiveCompany.company_icon}
-                w={120}
-                onChange={e => setCompanyForm(prev => ({ ...(prev ?? effectiveCompany), company_icon: e.target.value }))}
-              />
-              <Group justify="flex-end" mt="xs">
-                <Button
-                  loading={saveCompany.isPending}
-                  disabled={!companyForm}
-                  onClick={() => saveCompany.mutate(effectiveCompany)}
+          <Paper withBorder radius="md" p="lg" maw={560}>
+            <Group mb="md" gap="xs">
+              <Text size="2rem">{industryIcon(currentIndustry, '🔧')}</Text>
+              <Text fw={600} size="lg">{savedCompany?.company_name ?? 'שם החברה'}</Text>
+              <Badge color="gray" variant="light" size="sm">קורא בלבד — מנוהל ע"י האדמין</Badge>
+            </Group>
+            <Text size="sm" c="dimmed" mb="md">בחר את ענף הפעילות — האייקון בראש הדף ובדף ההתחברות יתעדכן בהתאם.</Text>
+            <SimpleGrid cols={3} spacing="sm" mb="md">
+              {INDUSTRY_OPTIONS.map(opt => (
+                <Card
+                  key={opt.value}
+                  withBorder
+                  radius="md"
+                  p="sm"
+                  style={{
+                    cursor: 'pointer',
+                    borderColor: currentIndustry === opt.value ? 'var(--mantine-color-blue-5)' : undefined,
+                    borderWidth: currentIndustry === opt.value ? 2 : 1,
+                    textAlign: 'center',
+                  }}
+                  onClick={() => setSelectedIndustry(opt.value)}
                 >
-                  שמור
-                </Button>
-              </Group>
-            </Stack>
+                  <Text size="xl">{opt.icon}</Text>
+                  <Text size="sm" fw={currentIndustry === opt.value ? 600 : 400}>{opt.label}</Text>
+                </Card>
+              ))}
+            </SimpleGrid>
+            <Group justify="flex-end">
+              <Button
+                loading={saveCompany.isPending}
+                disabled={!selectedIndustry || selectedIndustry === savedCompany?.industry}
+                onClick={() => selectedIndustry && saveCompany.mutate(selectedIndustry)}
+              >
+                שמור ענף
+              </Button>
+            </Group>
           </Paper>
         </Tabs.Panel>
         {/* Display settings */}
