@@ -163,11 +163,20 @@ _GEMINI_TOOLS = [{
         },
         {
             "name": "get_elevator_inspections",
-            "description": "מחזיר דוחות בדיקה תקופתית עבור מעלית — תאריך, תוצאה (עבר/נכשל), ליקויים.",
+            "description": "מחזיר דוחות בדיקה תקופתית עבור מעלית ספציפית — תאריך, תוצאה (עבר/נכשל), ליקויים.",
             "parameters": {"type": "OBJECT", "properties": {
                 "elevator_id": {"type": "STRING", "description": "UUID של המעלית"},
                 "limit": {"type": "INTEGER", "description": "מספר דוחות אחרונים (ברירת מחדל: 5)"},
             }, "required": ["elevator_id"]},
+        },
+        {
+            "name": "search_inspection_reports",
+            "description": "חיפוש דוחות בודק לפי עיר ו/או סטטוס ליקויים. השתמש בכלי זה כאשר שואלים על דוחות בודק בעיר מסוימת, דוחות עם ליקויים פתוחים, או דוחות שדורשים טיפול. לעולם אל תשתמש ב-get_recent_calls לשאלות על דוחות בודק.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "city": {"type": "STRING", "description": "סינון לפי עיר (חיפוש חלקי)"},
+                "has_open_deficiencies": {"type": "BOOLEAN", "description": "אם True — רק דוחות עם ליקויים שטרם טופלו"},
+                "limit": {"type": "INTEGER", "description": "מספר תוצאות (ברירת מחדל: 10)"},
+            }, "required": []},
         },
         {
             "name": "get_upcoming_maintenance",
@@ -786,6 +795,33 @@ def _get_management_company_info(db: Session, name: str) -> list:
     return result or [{"תוצאה": "לא נמצאה חברת ניהול תואמת"}]
 
 
+def _search_inspection_reports(db: Session, city: str = "", has_open_deficiencies: bool = False, limit: int = 10) -> list:
+    """Search inspection reports across elevators, optionally filtered by city and open deficiencies."""
+    q = db.query(InspectionReport)
+    if city:
+        q = q.join(Elevator, InspectionReport.elevator_id == Elevator.id).filter(Elevator.city.ilike(f"%{city}%"))
+    if has_open_deficiencies:
+        q = q.filter(InspectionReport.report_status.in_(["OPEN", "PARTIAL"]))
+    reports = q.order_by(InspectionReport.inspection_date.desc()).limit(limit).all()
+    if not reports:
+        return [{"תוצאה": "לא נמצאו דוחות בודק התואמים לחיפוש"}]
+    result = []
+    for r in reports:
+        elev = db.query(Elevator).filter(Elevator.id == r.elevator_id).first()
+        open_defs = [d for d in (r.deficiencies or []) if not d.get("done")]
+        result.append({
+            "id": str(r.id),
+            "כתובת": f"{elev.address}, {elev.city}" if elev else "לא ידוע",
+            "תאריך_בדיקה": r.inspection_date.strftime("%d/%m/%Y") if r.inspection_date else None,
+            "בודק": r.inspector_name,
+            "ליקויים_פתוחים": len(open_defs),
+            "ליקויים_סה_כ": r.deficiency_count,
+            "סטטוס_דוח": r.report_status,
+            "ליקויים": [{"תיאור": d.get("description", ""), "חומרה": d.get("severity", "")} for d in open_defs[:5]],
+        })
+    return result
+
+
 def _get_elevator_inspections(db: Session, elevator_id: str, limit: int = 5) -> list:
     """Return recent inspection reports for an elevator."""
     import uuid as _uuid
@@ -958,6 +994,8 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
         return _get_management_company_info(db, tool_input.get("name", ""))
     elif tool_name == "get_elevator_inspections":
         return _get_elevator_inspections(db, tool_input["elevator_id"], tool_input.get("limit", 5))
+    elif tool_name == "search_inspection_reports":
+        return _search_inspection_reports(db, tool_input.get("city", ""), tool_input.get("has_open_deficiencies", False), tool_input.get("limit", 10))
     elif tool_name == "get_upcoming_maintenance":
         return _get_upcoming_maintenance(db, tool_input.get("days_ahead", 14), tool_input.get("overdue_only", False), tool_input.get("city"))
     elif tool_name == "get_pending_unmatched_calls":
