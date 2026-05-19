@@ -202,6 +202,39 @@ _GEMINI_TOOLS = [{
                 "entity_id": {"type": "STRING", "description": "UUID של הישות"},
             }, "required": ["entity_type", "entity_id"]},
         },
+        {
+            "name": "take_service_call",
+            "description": "טכנאי לוקח על עצמו קריאת שירות פתוחה ומשבץ את עצמו אליה. השתמש כאשר הטכנאי אומר 'לקחתי', 'אני על זה', 'הולך לשם', 'אני מגיע', 'אני לוקח', 'יש לי'. בצע מיד ללא בקשת אישור נוסף.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "address_hint": {"type": "STRING", "description": "כתובת/עיר/שם בניין של הקריאה מהטקסט"},
+                "call_id": {"type": "STRING", "description": "UUID של קריאה ספציפית אם ידוע"},
+            }, "required": []},
+        },
+        {
+            "name": "close_my_active_call",
+            "description": "סוגר את הקריאה הפעילה של הטכנאי הנוכחי. השתמש כאשר הטכנאי אומר 'סיימתי', 'בוצע', 'טיפלתי', 'סגרתי', 'גמרתי'. חלץ הערות פתרון מהטקסט אם יש. בצע מיד.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "resolution_notes": {"type": "STRING", "description": "תיאור מה בוצע / הערות סגירה מהטקסט"},
+                "quote_needed": {"type": "BOOLEAN", "description": "True אם הטכנאי ציין שנדרשת הצעת מחיר"},
+            }, "required": []},
+        },
+        {
+            "name": "get_my_route",
+            "description": "מחזיר את רשימת הקריאות הפתוחות המשובצות לטכנאי הנוכחי כמסלול עבודה. השתמש כאשר הטכנאי שואל 'מה יש לי', 'שלח מסלול', 'הקריאות שלי', 'סדר יום'.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+        },
+        {
+            "name": "request_call_from_dispatcher",
+            "description": "טכנאי מבקש לטפל בקריאה — שולח בקשה לאישור מוקד. השתמש כאשר הטכנאי אומר 'מבקש', 'אשמח לטפל', 'רוצה לטפל'. שונה מ-take_service_call שמשבץ מיד.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "address_hint": {"type": "STRING", "description": "כתובת/עיר של הקריאה המבוקשת"},
+            }, "required": []},
+        },
+        {
+            "name": "mark_call_in_progress",
+            "description": "מסמן את הקריאה הפעילה כ'בטיפול'. השתמש כאשר הטכנאי אומר 'התחלתי', 'אני שם', 'מתחיל לטפל'.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+        },
     ]
 }]
 
@@ -942,9 +975,242 @@ def _get_pending_unmatched_calls(db: Session, limit: int = 10) -> list:
     return result
 
 
+def _find_tech_by_phone(db: Session, phone: str):
+    """Find a technician by any phone format."""
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    last9 = digits[-9:] if len(digits) >= 9 else digits
+    if not last9:
+        return None
+    return db.query(Technician).filter(
+        (Technician.phone.contains(last9)) | (Technician.whatsapp_number.contains(last9))
+    ).first()
+
+
+def _take_service_call(db: Session, phone: str, address_hint: str = "", call_id: str = "") -> dict:
+    """Self-assign an open service call to the technician identified by phone."""
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return {"error": "הטכנאי לא זוהה במערכת — פנה למוקד"}
+
+    from app.models.assignment import Assignment
+    import uuid as _uuid
+    from sqlalchemy import or_
+
+    call = None
+    if call_id:
+        try:
+            call = db.query(ServiceCall).filter(ServiceCall.id == _uuid.UUID(call_id)).first()
+        except Exception:
+            pass
+
+    if not call:
+        q = (db.query(ServiceCall)
+             .join(Elevator, ServiceCall.elevator_id == Elevator.id)
+             .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED"]))
+             .order_by(ServiceCall.created_at.desc()))
+        if address_hint:
+            for term in [t for t in address_hint.split() if len(t) > 1]:
+                q = q.filter(or_(
+                    Elevator.address.ilike(f"%{term}%"),
+                    Elevator.city.ilike(f"%{term}%"),
+                    Elevator.building_name.ilike(f"%{term}%"),
+                ))
+        call = q.first()
+
+    if not call:
+        return {"error": "לא נמצאה קריאה פתוחה מתאימה לכתובת שצוינה"}
+
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"
+
+    for existing in db.query(Assignment).filter(
+        Assignment.service_call_id == call.id,
+        Assignment.status == "PENDING_CONFIRMATION"
+    ).all():
+        existing.status = "REJECTED"
+
+    new_assign = Assignment(
+        service_call_id=call.id,
+        technician_id=tech.id,
+        assignment_type="MANUAL",
+        status="CONFIRMED",
+    )
+    db.add(new_assign)
+    call.status = "ASSIGNED"
+    db.commit()
+
+    try:
+        from app.services.route_service import send_route_to_technician
+        send_route_to_technician(db, tech)
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "מספר_קריאה": f"S{call.call_number:05d}" if call.call_number else None,
+        "כתובת": addr,
+        "הודעה": f"✅ שויכת לקריאה ב-{addr}",
+    }
+
+
+def _close_my_active_call(db: Session, phone: str, resolution_notes: str = "", quote_needed: bool = False) -> dict:
+    """Close the active call for the technician identified by phone."""
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return {"error": "הטכנאי לא זוהה במערכת"}
+
+    from app.models.assignment import Assignment
+
+    assignment = (
+        db.query(Assignment)
+        .filter(
+            Assignment.technician_id == tech.id,
+            Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]),
+        )
+        .order_by(Assignment.assigned_at.desc())
+        .first()
+    )
+    if not assignment:
+        return {"error": "לא נמצאה קריאה פעילה לסגירה — אולי כבר נסגרה?"}
+
+    call = db.query(ServiceCall).filter(
+        ServiceCall.id == assignment.service_call_id,
+        ServiceCall.status.notin_(["CLOSED", "RESOLVED"]),
+    ).first()
+    if not call:
+        return {"error": "הקריאה לא נמצאה או שכבר סגורה"}
+
+    call.status = "CLOSED"
+    if resolution_notes:
+        call.resolution_notes = resolution_notes
+    call.resolved_at = datetime.now(timezone.utc)
+    call.resolved_by = tech.name
+    if quote_needed:
+        call.quote_needed = True
+    assignment.status = "COMPLETED"
+    db.commit()
+
+    try:
+        from app.services.service_call_service import _advance_next_service_date
+        _advance_next_service_date(db, call)
+    except Exception:
+        pass
+
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"
+
+    return {
+        "success": True,
+        "מספר_קריאה": f"S{call.call_number:05d}" if call.call_number else None,
+        "כתובת": addr,
+        "הצעת_מחיר": quote_needed,
+        "הודעה": "✅ הקריאה נסגרה בהצלחה",
+    }
+
+
+def _get_my_route_by_phone(db: Session, phone: str) -> dict:
+    """Return the current route for the technician identified by phone."""
+    return _get_my_calls(db, phone)
+
+
+def _request_call_from_dispatcher(db: Session, phone: str, address_hint: str = "") -> dict:
+    """Create a REQUEST-type assignment pending dispatcher approval."""
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return {"error": "הטכנאי לא זוהה במערכת"}
+
+    from app.models.assignment import Assignment
+    from sqlalchemy import or_
+
+    q = (db.query(ServiceCall)
+         .join(Elevator, ServiceCall.elevator_id == Elevator.id)
+         .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED"]))
+         .order_by(ServiceCall.created_at.desc()))
+    if address_hint:
+        for term in [t for t in address_hint.split() if len(t) > 1]:
+            q = q.filter(or_(
+                Elevator.address.ilike(f"%{term}%"),
+                Elevator.city.ilike(f"%{term}%"),
+            ))
+    call = q.first()
+    if not call:
+        return {"error": "לא נמצאה קריאה פתוחה מתאימה"}
+
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"
+
+    existing = db.query(Assignment).filter(
+        Assignment.service_call_id == call.id,
+        Assignment.technician_id == tech.id,
+        Assignment.assignment_type == "REQUEST",
+        Assignment.status == "PENDING_CONFIRMATION",
+    ).first()
+    if existing:
+        return {"error": f"כבר שלחת בקשה לקריאה ב-{addr} — ממתין לאישור מוקד"}
+
+    db.add(Assignment(
+        service_call_id=call.id,
+        technician_id=tech.id,
+        assignment_type="REQUEST",
+        status="PENDING_CONFIRMATION",
+        notes=f"{tech.name} ביקש לטפל דרך הסוכן",
+    ))
+    db.commit()
+
+    try:
+        from app.services.whatsapp_service import notify_dispatcher
+        notify_dispatcher(
+            f"🙋 *{tech.name} מבקש לטפל בקריאה*\n"
+            f"📍 {addr}\n⚡ {call.fault_type} | {call.priority}"
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "כתובת": addr,
+        "הודעה": f"✅ בקשתך לטפל בקריאה ב-{addr} נשלחה למוקד — תקבל עדכון לאחר אישור",
+    }
+
+
+def _mark_call_in_progress(db: Session, phone: str) -> dict:
+    """Mark the technician's active call as IN_PROGRESS."""
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return {"error": "הטכנאי לא זוהה"}
+
+    from app.models.assignment import Assignment
+
+    assignment = (
+        db.query(Assignment)
+        .filter(Assignment.technician_id == tech.id, Assignment.status == "CONFIRMED")
+        .order_by(Assignment.assigned_at.desc())
+        .first()
+    )
+    if not assignment:
+        return {"error": "אין קריאה פעילה לסימון"}
+
+    call = db.query(ServiceCall).filter(ServiceCall.id == assignment.service_call_id).first()
+    if not call:
+        return {"error": "הקריאה לא נמצאה"}
+
+    call.status = "IN_PROGRESS"
+    db.commit()
+    elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+    addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"
+
+    return {
+        "success": True,
+        "כתובת": addr,
+        "הודעה": f"✅ הקריאה ב-{addr} סומנה כבטיפול",
+    }
+
+
 # ── Tool dispatcher ───────────────────────────────────────────────────────────
 
-def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
+def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") -> Any:
     """Execute a tool call from Claude and return the result."""
     if tool_name == "search_elevators":
         return _search_elevators(
@@ -1002,6 +1268,16 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict) -> Any:
         return _get_pending_unmatched_calls(db, tool_input.get("limit", 10))
     elif tool_name == "get_document_analysis":
         return _get_document_analysis(db, tool_input["entity_type"], tool_input["entity_id"])
+    elif tool_name == "take_service_call":
+        return _take_service_call(db, phone, tool_input.get("address_hint", ""), tool_input.get("call_id", ""))
+    elif tool_name == "close_my_active_call":
+        return _close_my_active_call(db, phone, tool_input.get("resolution_notes", ""), tool_input.get("quote_needed", False))
+    elif tool_name == "get_my_route":
+        return _get_my_route_by_phone(db, phone)
+    elif tool_name == "request_call_from_dispatcher":
+        return _request_call_from_dispatcher(db, phone, tool_input.get("address_hint", ""))
+    elif tool_name == "mark_call_in_progress":
+        return _mark_call_in_progress(db, phone)
     else:
         return {"error": f"כלי לא מוכר: {tool_name}"}
 
@@ -1051,10 +1327,22 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 אם אין לו הרשאה למידע מבוקש — השב: "אין לך הרשאה לצפות במידע זה (תפקידך: [תפקיד])".
 אם המשתמש לא זוהה במערכת — התייחס כטכנאי (הרשאות מוגבלות לקריאות שירות בלבד).
 
-אם המשתמש מבקש משהו שאין לך כלי עבורו — ציין: "פעולה זו אינה זמינה כרגע (חסר: [תיאור])"."""
+אם המשתמש מבקש משהו שאין לך כלי עבורו — ציין: "פעולה זו אינה זמינה כרגע (חסר: [תיאור])".
+
+══ כלי פעולות לטכנאים ══
+כלים אלה מזהים את הטכנאי אוטומטית לפי מספר הטלפון — אין צורך לבקש פרטים נוספים.
+
+• "לקחתי / הולך / אני על זה / אני מגיע" + כתובת → take_service_call(address_hint=...)  [בצע מיד]
+• "סיימתי / בוצע / טיפלתי / גמרתי" + הערות → close_my_active_call(resolution_notes=..., quote_needed=...)  [בצע מיד]
+• "מה יש לי / שלח מסלול / הקריאות שלי / סדר יום" → get_my_route()
+• "מבקש לטפל / אשמח לטפל / רוצה לטפל" → request_call_from_dispatcher(address_hint=...)
+• "התחלתי / אני שם / מתחיל לטפל" → mark_call_in_progress()
+
+כלל ברזל: close_my_active_call ו-take_service_call — בצע מיד כשהכוונה ברורה. אל תבקש אישור חוזר.
+כלל ברזל: close_service_call (הכלי הישן לסגירה לפי call_id) — דורש אישור מפורש לפני ביצוע."""
 
 
-def _load_conversation_history(db: Session, phone: str, limit: int = 10) -> list:
+def _load_conversation_history(db: Session, phone: str, limit: int = 20) -> list:
     """
     Load the last N WhatsApp messages for a phone number and format them
     as Gemini conversation turns (user/model roles).
@@ -1216,7 +1504,7 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     # Try Gemini first (with tool use), fall back to Anthropic if unavailable
     if s.gemini_api_key:
         try:
-            return _answer_gemini(db, s, contents, extra_system=extra)
+            return _answer_gemini(db, s, contents, extra_system=extra, phone=phone)
         except Exception as exc:
             logger.warning("Gemini unavailable (%s) — trying Anthropic fallback", exc)
 
@@ -1229,7 +1517,7 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     return "השירות אינו זמין כרגע — נסה שוב בעוד מספר דקות."
 
 
-def _answer_gemini(db, s, contents: list, extra_system: str = "") -> str:
+def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "") -> str:
     """Run the Gemini tool-use loop and return Hebrew answer."""
     from sqlalchemy import text
     import json
@@ -1279,7 +1567,7 @@ def _answer_gemini(db, s, contents: list, extra_system: str = "") -> str:
                 name = fn_call["name"]
                 args = fn_call.get("args", {})
                 logger.warning("🔧 Gemini tool: %s(%s)", name, args)
-                result = _run_tool(db, name, args)
+                result = _run_tool(db, name, args, phone=phone)
                 fn_responses.append({
                     "functionResponse": {
                         "name": name,

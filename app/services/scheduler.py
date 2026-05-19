@@ -1166,48 +1166,14 @@ def _quick_detect_intent(text: str, settings) -> str:
     return "OTHER"
 
 
-def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = False) -> None:
+def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = False) -> None:  # noqa: ARG001
     """
-    Route ANY free-text message from a technician through Gemini for intent detection.
-    Always sends a reply — never silently ignores a message.
-      - REPORT   → close active call with notes
-      - TAKE     → self-assign an open call
-      - QUESTION → answer via chat agent
-      - IGNORE   → echo the message back and ask for clarification
-
-    Args:
-        is_reply: True when the message is a quoted/reply message — passes with_history to chat agent.
+    Route free-text messages to the right handler.
+    With Gemini configured: everything goes through the chat agent (questions AND actions).
+    Without Gemini: keyword-based fallback.
     """
-    import urllib.request
     from app.models.technician import Technician
     from app.services.whatsapp_service import _send_message
-
-    def _fallback_reply():
-        """Reply when we genuinely can't understand the message."""
-        _send_message(phone,
-            f"❓ לא הבנתי את הבקשה.\n"
-            f"האם התכוונת: *\"{text}\"*?\n\n"
-            f"ניתן לשלוח:\n"
-            f"• *דוח* + תיאור — לסגירת קריאה\n"
-            f"• *לקחתי* + כתובת — לרישום עצמי\n"
-            f"• שאלה חופשית — ואני אנסה לענות 🤖"
-        )
-
-    if not settings.gemini_api_key:
-        # Fallback to keyword routing if Gemini not configured
-        if any(w in text for w in ["דוח", "סיום", "סיימתי", "טיפלתי", "סגור"]):
-            _handle_technician_report(db, phone, text)
-        elif any(w in text for w in ["מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום"]):
-            _handle_send_route(db, phone)
-        elif any(w in text for w in ["לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך"]):
-            _handle_self_assign(db, phone, text)
-        elif any(w in text for w in ["דחה למחר", "אטפל מחר", "מחר", "לדחות"]):
-            _handle_technician_defer(db, phone, text)
-        elif any(w in text for w in ["מבקש", "אשמח לטפל", "רוצה לטפל", "אני מבקש"]):
-            _handle_technician_request(db, phone, text)
-        else:
-            _handle_chat_question_simple(db, phone, text, settings)
-        return
 
     digits = "".join(c for c in phone if c.isdigit())
     if digits.startswith("972"):
@@ -1228,87 +1194,30 @@ def _handle_free_text(db, phone: str, text: str, settings, is_reply: bool = Fals
         logger.warning("📵 Message from unregistered number %s — ignored", phone)
         return
 
-    # Manager = dispatcher + technician capabilities.
-    # Tech-style intents (REPORT/TAKE/DEFER/REQUEST) handled as technician first;
-    # everything else routed to dispatcher handler (with confirmation for destructive actions).
-    if is_manager and not tech:
-        # Pure dispatcher (no tech record) — always dispatcher handler
-        from app.services.dispatcher_commands import handle_dispatcher_command
-        handle_dispatcher_command(db, phone, text, settings)
-        return
-
-    if is_manager and tech:
-        # Manager who is also a technician — detect tech intents first
-        _tech_intents = {"REPORT", "TAKE", "DEFER", "REQUEST", "ROUTE"}
-        quick_intent = _quick_detect_intent(text, settings)
-        if quick_intent in _tech_intents:
-            pass  # fall through to technician flow below
-        else:
-            # Questions and general queries → go directly to chat_agent for smart answers
-            _handle_chat_question(db, phone, text, settings, with_history=is_reply)
-            return
-
+    # Pure dispatcher (no tech record) → dispatcher command handler
     if is_dispatcher and not tech:
-        # Fallback: dispatcher without tech record
         from app.services.dispatcher_commands import handle_dispatcher_command
         handle_dispatcher_command(db, phone, text, settings)
         return
 
-    # Keyword-based intent detection — no Gemini API call needed for common intents
-    intent = _quick_detect_intent(text, settings)
-    extract = text
+    # No Gemini configured → keyword-based fallback
+    if not settings.gemini_api_key:
+        if any(w in text for w in ["דוח", "סיום", "סיימתי", "טיפלתי", "סגור"]):
+            _handle_technician_report(db, phone, text)
+        elif any(w in text for w in ["מסלול", "שלח מסלול", "קריאות שלי", "מה יש לי היום"]):
+            _handle_send_route(db, phone)
+        elif any(w in text for w in ["לקחתי", "קיבלתי", "אני לוקח", "הולך", "אני על זה"]):
+            _handle_self_assign(db, phone, text)
+        elif any(w in text for w in ["דחה למחר", "אטפל מחר", "לדחות"]):
+            _handle_technician_defer(db, phone, text)
+        elif any(w in text for w in ["מבקש", "אשמח לטפל", "רוצה לטפל"]):
+            _handle_technician_request(db, phone, text)
+        else:
+            _handle_chat_question_simple(db, phone, text, settings)
+        return
 
-    # For ambiguous cases (OTHER), try Gemini only if quota available
-    if intent == "OTHER" and getattr(settings, "gemini_api_key", ""):
-        try:
-            import json, urllib.request, urllib.error
-            _prompt = (
-                "אתה מנתח כוונות של הודעות ווצאפ מטכנאים. "
-                "החזר JSON בלבד עם שדה 'intent' אחד מתוך: "
-                "REPORT/TAKE/DEFER/REQUEST/ROUTE/QUESTION/IGNORE "
-                "ושדה 'extract' עם הטקסט הרלוונטי.\n"
-                "IGNORE רק לברכות קצרות ('אוקיי','תודה','👍'). "
-                "כל שאלה/בקשה מהותית = QUESTION.\n"
-                f"הודעה: {text}"
-            )
-            _payload = json.dumps({
-                "contents": [{"parts": [{"text": _prompt}]}],
-                "generationConfig": {"maxOutputTokens": 80},
-            }).encode()
-            _req = urllib.request.Request(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.gemini_api_key}",
-                data=_payload, headers={"Content-Type": "application/json"}, method="POST",
-            )
-            with urllib.request.urlopen(_req, timeout=8) as _r:
-                _data = json.loads(_r.read())
-            raw = _data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
-            parsed = json.loads(raw)
-            intent  = parsed.get("intent", "QUESTION")
-            extract = parsed.get("extract", text)
-        except Exception as exc:
-            logger.warning("Gemini intent detection failed (%s) — treating as QUESTION", exc)
-            intent = "QUESTION"
-
-    logger.info("🧠 Intent '%s' for: %s", intent, text[:60])
-
-    if intent == "REPORT":
-        _handle_technician_report(db, phone, extract or text)
-    elif intent == "TAKE":
-        _handle_self_assign(db, phone, extract or text)
-    elif intent == "DEFER":
-        _handle_technician_defer(db, phone, extract or text)
-    elif intent == "REQUEST":
-        _handle_technician_request(db, phone, extract or text)
-    elif intent == "ROUTE":
-        _handle_send_route(db, phone)
-    elif intent == "QUESTION":
-        _handle_chat_question(db, phone, text, settings, with_history=is_reply)
-    elif intent == "IGNORE":
-        _send_message(phone, "👍")
-    else:
-        _handle_chat_question(db, phone, text, settings, with_history=is_reply)
+    # Gemini configured → chat agent handles everything (questions + actions)
+    _handle_chat_question(db, phone, text, settings, with_history=True)
 
 
 def _handle_chat_question_simple(db, phone: str, question: str, settings) -> None:
