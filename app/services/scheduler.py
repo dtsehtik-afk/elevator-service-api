@@ -412,58 +412,66 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
 
     Priority order:
     1. Confirm/cancel a pending NLP-inferred action (requires explicit "כן"/"לא")
-    2. Reply-quoted "1"/"2" → match by WhatsApp message ID (unambiguous)
-    3. Bare "1"/"2" + exactly one pending → classic confirm/reject
-    4. Bare "1"/"2" + multiple pending → ask tech to quote the right message
-    5. Free text → NLP address match → ask for confirmation (NEVER auto-execute)
+    2. Reply-quoted "1"/"2"/"כן"/"לא" → match by WhatsApp message ID (unambiguous)
+    3. Bare confirm/reject + exactly one pending
+    4. Bare confirm/reject + multiple pending → ask tech to quote
+    5. Free text → NLP address match → ask for confirmation
     6. Unrecognised → route to chat agent
-
-    Rule: NLP can SUGGEST, never EXECUTE without explicit "כן" from the technician.
-    Rejections via NLP are intentionally disabled — unaccepted calls time out naturally.
     """
     from datetime import timedelta
     from app.services import ai_assignment_agent
     from app.services.whatsapp_service import _send_message
 
-    clean = text.strip()
+    clean = text.strip().lower()
+    
+    # Common confirm/reject words
+    is_confirm = clean in ("1", "כן", "yes", "ok", "אוקי", "אוקיי", "סבבה", "אחלה", "בסדר", "y")
+    is_reject = clean in ("2", "לא", "no", "ביטול", "בטל", "n")
 
     # ── 1. Pending NLP confirmation ───────────────────────────────────────────
     pending_confirm = _PENDING_NLP_CONFIRMATION.get(phone)
     if pending_confirm:
         if datetime.utcnow() < pending_confirm["expires_at"]:
-            if clean in ("כן", "yes", "1", "אישור", "ok", "אוק", "סבבה", "אחלה", "בסדר"):
+            if is_confirm:
                 aid = pending_confirm.pop("assignment_id", None)
                 _PENDING_NLP_CONFIRMATION.pop(phone, None)
                 if aid:
                     ai_assignment_agent.confirm_assignment_by_id(db, phone, aid)
                 return
-            elif clean in ("לא", "no", "2", "ביטול", "בטל", "נסה שוב"):
+            elif is_reject:
                 _PENDING_NLP_CONFIRMATION.pop(phone, None)
                 _send_message(phone, "👍 בוטל. שלח שוב אם תרצה.")
                 return
         else:
             _PENDING_NLP_CONFIRMATION.pop(phone, None)
 
-    # ── 2. Reply-quoted "1"/"2" ───────────────────────────────────────────────
-    if clean in ("1", "2") and quoted_msg_id:
+    # ── 2. Reply-quoted message ───────────────────────────────────────────────
+    if quoted_msg_id:
         linked = next((p for p in pending if p.get("whatsapp_message_id") == quoted_msg_id), None)
         if linked:
-            if clean == "1":
+            if is_confirm:
                 ai_assignment_agent.confirm_assignment_by_id(db, phone, linked["assignment_id"])
-            else:
+            elif is_reject:
                 ai_assignment_agent.reject_assignment_by_id(db, phone, linked["assignment_id"])
+            else:
+                _send_message(phone, "אנא השב 'כן' (או 1) לאישור, או 'לא' (או 2) לדחייה.")
+            return
+        else:
+            # They replied to some OTHER message (like the chat bot!).
+            # Pass directly to chat agent.
+            _handle_free_text(db, phone, text, s, is_reply=True)
             return
 
-    # ── 3. Bare "1"/"2" — exactly one pending ────────────────────────────────
-    if clean in ("1", "2") and len(pending) == 1:
-        if clean == "1":
+    # ── 3. Bare confirm/reject — exactly one pending ────────────────────────
+    if len(pending) == 1 and (is_confirm or is_reject):
+        if is_confirm:
             ai_assignment_agent.confirm_assignment_by_id(db, phone, pending[0]["assignment_id"])
         else:
             ai_assignment_agent.reject_assignment_by_id(db, phone, pending[0]["assignment_id"])
         return
 
-    # ── 4. Bare "1"/"2" — multiple pending → ask to quote ────────────────────
-    if clean in ("1", "2") and len(pending) > 1:
+    # ── 4. Bare confirm/reject — multiple pending → ask to quote ────────────
+    if len(pending) > 1 and (is_confirm or is_reject):
         lines = "\n".join(
             f"• {p.get('address', 'כתובת לא ידועה')}, {p.get('city', '')}"
             for p in sorted(pending, key=lambda x: x["assigned_at"], reverse=True)[:8]
@@ -474,30 +482,30 @@ def _handle_tech_reply(db, phone: str, text: str, pending: list, s, quoted_msg_i
         )
         return
 
-    # ── 5. Free text → NLP address match → ASK FOR CONFIRMATION (never auto-execute) ──
-    gemini_key = getattr(s, "gemini_api_key", "")
-    if gemini_key:
-        result = _parse_reply_gemini(clean, pending, gemini_key)
-        if result.get("accept"):
-            aid = result["accept"][0]  # take only the first match
-            matched = next((p for p in pending if p["assignment_id"] == aid), None)
-            if matched:
-                addr = f"{matched.get('address', '')}, {matched.get('city', '')}".strip(", ")
-                _PENDING_NLP_CONFIRMATION[phone] = {
-                    "assignment_id": aid,
-                    "address": addr,
-                    "expires_at": datetime.utcnow() + timedelta(minutes=10),
-                }
-                _send_message(phone,
-                    f"🤔 הבנתי שרצית לקבל את הקריאה ב-*{addr}*.\n"
-                    f"שלח *כן* לאישור, או *לא* לביטול."
-                )
-                return
-        # NLP found nothing → fall through to chat agent
-        # Note: we intentionally IGNORE result["reject"] — rejections require explicit "2"
+    # ── 5. Free text → NLP address match ────────────────────────────────────
+    # Avoid asking Gemini to parse obvious conversational short words as addresses.
+    if len(clean) > 3 and not (is_confirm or is_reject) and clean not in ("תודה", "היי", "שלום"):
+        gemini_key = getattr(s, "gemini_api_key", "")
+        if gemini_key:
+            result = _parse_reply_gemini(clean, pending, gemini_key)
+            if result.get("accept"):
+                aid = result["accept"][0]  # take only the first match
+                matched = next((p for p in pending if p["assignment_id"] == aid), None)
+                if matched:
+                    addr = f"{matched.get('address', '')}, {matched.get('city', '')}".strip(", ")
+                    _PENDING_NLP_CONFIRMATION[phone] = {
+                        "assignment_id": aid,
+                        "address": addr,
+                        "expires_at": datetime.utcnow() + timedelta(minutes=10),
+                    }
+                    _send_message(phone,
+                        f"🤔 הבנתי שרצית לקבל את הקריאה ב-*{addr}*.\n"
+                        f"שלח *כן* לאישור, או *לא* לביטול."
+                    )
+                    return
 
     # ── 6. Unrecognised → chat agent ─────────────────────────────────────────
-    _handle_free_text(db, phone, clean, s)
+    _handle_free_text(db, phone, text, s, is_reply=bool(quoted_msg_id))
 
 
 def _parse_reply_gemini(text: str, pending: list, api_key: str) -> dict:
@@ -1403,6 +1411,39 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
         from app.services.chat_agent import answer_question
         answer = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
         _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
+
+        # Save bot response to conversation history so it appears in the UI
+        # and so the bot can see its own previous replies in future turns
+        try:
+            from app.models.whatsapp_message import WhatsAppMessage
+            db.add(WhatsAppMessage(phone=phone, direction="out", msg_type="text", text=answer))
+            db.commit()
+        except Exception as save_exc:
+            logger.warning("Could not save bot reply to history: %s", save_exc)
+
+        # Auto-build QA knowledge base from successful conversations
+        # Skip write-action questions (close/assign/transfer) — those are too specific
+        _write_keywords = ["סגור", "שבץ", "העבר", "הצעת מחיר", "לבטל", "בטל"]
+        if len(answer) > 60 and not any(w in question for w in _write_keywords):
+            try:
+                from app.models.bot_qa import BotQA
+                existing = db.query(BotQA).filter(BotQA.question == question).first()
+                if not existing:
+                    db.add(BotQA(
+                        question=question,
+                        answer=answer,
+                        active=True,
+                        use_count=0,
+                        created_by="auto",
+                    ))
+                    db.commit()
+                else:
+                    existing.answer = answer
+                    existing.updated_at = __import__('datetime').datetime.utcnow()
+                    db.commit()
+            except Exception as qa_exc:
+                logger.warning("Could not auto-save QA pair: %s", qa_exc)
+
     except Exception as exc:
         logger.error("Chat agent error: %s", exc)
         _handle_chat_question_simple(db, phone, question, settings)
