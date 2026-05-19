@@ -1128,15 +1128,27 @@ def _handle_send_route(db, phone: str) -> None:
 def _quick_detect_intent(text: str, settings) -> str:
     """Keyword-based intent detection — no API call. Returns intent or OTHER for ambiguous cases."""
     t = text.strip().lower()
+
+    # Question signals — always win; must be checked FIRST before any action keyword
+    # A message ending with "?" or starting with a question word is always a QUESTION
+    question_starters = (
+        "יש משהו", "יכול ל", "יכולה ל", "האם יש", "האם", "כמה יש",
+        "יש לך", "יש פה", "מה יש", "מה קרה", "מה המצב", "מה הסטטוס",
+        "תוכל", "תוכלי", "אפשר לשלוח", "אפשר לקבל",
+    )
+    if t.endswith("?") or any(t.startswith(qs) for qs in question_starters):
+        return "QUESTION"
+
     report_kw  = ("דוח", "סיום", "סיימתי", "טיפלתי", "סגור", "סגירה", 'דו"ח', "טיפלנו", "בוצע")
-    take_kw    = ("לקחתי", "קיבלתי", "אני לוקח", "אטפל", "הולך", "אני על זה", "אני מגיע")
+    # "אטפל" requires a preceding space or start-of-string to avoid matching "שאטפל"/"שאני אטפל" inside questions
+    take_kw    = ("לקחתי", "קיבלתי", "אני לוקח", "אני אטפל", " אטפל ", "הולך", "אני על זה", "אני מגיע")
     defer_kw   = ("דחה למחר", "אטפל מחר", "לדחות", "מחר בבוקר")
     request_kw = ("מבקש", "מבקשת", "אשמח לטפל", "רוצה לטפל")
     route_kw   = ("מסלול", "שלח מסלול", "מפה", "קריאות שלי", "מה יש לי היום", "מה יש לי",
                    "את המסלול", "הקריאות שלי", "סדר יום")
     ignore_kw  = ("תודה", "אוקיי", "אוק", "סבבה", "בסדר", "👍", "🙏", "✅", "ממש תודה")
     question_kw = ("אפשר", "מה ה", "כמה", "מתי", "היסטוריה", "פרטים", "מי ה", "איפה",
-                   "קריאות פתוחות", "סטטוס", "רשימה", "כתובת", "פירוט", "מה קרה", "מה המצב")
+                   "קריאות פתוחות", "סטטוס", "רשימה", "כתובת", "פירוט", "מה המצב")
     if any(k in t for k in report_kw):
         return "REPORT"
     if any(k in t for k in route_kw):
