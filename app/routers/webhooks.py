@@ -355,6 +355,19 @@ async def receive_call(
 
 # ── WhatsApp reply from technician (Green API webhook) ────────────────────────
 
+def _log_message(db, phone: str, direction: str, msg_type: str, text: str | None, transcription: str | None = None):
+    try:
+        from app.models.whatsapp_message import WhatsAppMessage
+        # Only log messages from known technicians — skip unknown numbers
+        if not _find_tech_by_phone_local(db, phone):
+            return
+        entry = WhatsAppMessage(phone=phone, direction=direction, msg_type=msg_type, text=text, transcription=transcription)
+        db.add(entry)
+        db.commit()
+    except Exception as exc:
+        logger.error("Failed to log WhatsApp message: %s", exc)
+
+
 @router.post(
     "/whatsapp",
     status_code=status.HTTP_200_OK,
@@ -381,15 +394,26 @@ def receive_whatsapp(
 
     # For outgoing messages: only process self-messages (Denis texting himself).
     # When chatId == sender it's a self-message (saved messages / own chat).
-    # When chatId != sender it's a system echo sent TO a technician — ignore.
+    # When chatId != sender it's a system echo sent TO a technician.
     if webhook_type == "outgoingMessageReceived":
         chat_id = sender_data.get("chatId", "")
         sender  = sender_data.get("sender", "")
-        if chat_id != sender:
-            logger.warning("🔕 Outgoing echo to %s — ignored", chat_id)
-            return {"status": "ignored_outgoing_echo"}
-        # Self-message: Denis writing to himself → use his own number
         phone = chat_id.replace("@c.us", "").replace("@s.whatsapp.net", "")
+
+        # Log outgoing system messages sent to technicians
+        msg_id = msg_data.get("idMessage", "")
+        if msg_id and not _is_duplicate_message(msg_id):
+            text = ""
+            if msg_type == "textMessage":
+                text = msg_data.get("textMessageData", {}).get("textMessage", "")
+            elif msg_type == "extendedTextMessage":
+                text = msg_data.get("extendedTextMessageData", {}).get("text", "")
+            if text:
+                _log_message(db, phone, "out", msg_type, text)
+
+        if chat_id != sender:
+            logger.warning("🔕 Outgoing echo to %s — logged and ignored for processing", chat_id)
+            return {"status": "ignored_outgoing_echo"}
     else:
         phone = sender_data.get("sender", "").replace("@c.us", "").replace("@s.whatsapp.net", "")
 
@@ -417,8 +441,10 @@ def receive_whatsapp(
         if lat is not None and lng is not None:
             tech = _find_tech_by_phone_local(db, phone)
             if tech:
+                from datetime import datetime, timezone as _tz
                 tech.current_latitude  = float(lat)
                 tech.current_longitude = float(lng)
+                tech.last_location_at  = datetime.now(_tz.utc)
                 db.commit()
                 logger.warning("📍 Location saved for %s: %.4f, %.4f", tech.name, float(lat), float(lng))
                 from app.services.whatsapp_service import _send_message
@@ -672,20 +698,6 @@ def _transcribe_audio_gemini(msg_data: dict) -> str:
 
     return ""
 
-
-def _log_message(db, phone: str, direction: str, msg_type: str, text: str | None, transcription: str | None = None):
-    try:
-        from app.models.whatsapp_message import WhatsAppMessage
-        # Only log messages from known technicians — skip unknown numbers
-        if not _find_tech_by_phone_local(db, phone):
-            return
-        entry = WhatsAppMessage(phone=phone, direction=direction, msg_type=msg_type, text=text, transcription=transcription)
-        db.add(entry)
-        db.commit()
-    except Exception as exc:
-        logger.error("Failed to log WhatsApp message: %s", exc)
-
-
 def _save_caller_phone(elevator, phone: str, db) -> None:
     """Add caller phone to elevator.caller_phones if not already present."""
     try:
@@ -793,8 +805,10 @@ def location_tracking_page(tech_id: str):
 <script>
 const TECH_ID = "{tech_id}";
 const BASE_URL = "{base_url}";
-const INTERVAL_MS = 5 * 60 * 1000;
-let timer = null;
+const FALLBACK_MS = 60 * 1000;  // fallback poll every 60s if watch stalls
+let lastSentAt = 0;
+let watchId = null;
+let fallbackTimer = null;
 
 function setStatus(type, msg, sub) {{
   document.getElementById('dot').className = 'dot ' + type;
@@ -814,6 +828,10 @@ function hideRetry() {{
 }}
 
 function sendLocation(lat, lng) {{
+  const now = Date.now();
+  // Throttle: don't send more than once every 30 seconds
+  if (now - lastSentAt < 30000) return;
+  lastSentAt = now;
   fetch(BASE_URL + '/webhooks/location/' + TECH_ID, {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
@@ -821,7 +839,7 @@ function sendLocation(lat, lng) {{
   }}).then(r => {{
     if (r.ok) {{
       const t = new Date().toLocaleTimeString('he-IL', {{hour:'2-digit', minute:'2-digit'}});
-      setStatus('green', '✅ מיקום פעיל', 'מתעדכן כל 5 דקות');
+      setStatus('green', '✅ מיקום פעיל', 'מתעדכן בזמן אמת');
       document.getElementById('time').textContent = 'עדכון אחרון: ' + t;
       hideRetry();
     }} else {{
@@ -830,48 +848,61 @@ function sendLocation(lat, lng) {{
   }}).catch(() => setStatus('red', '⚠️ אין חיבור לשרת', 'בדוק חיבור לאינטרנט'));
 }}
 
+function onError(e) {{
+  if (e.code === 1) {{
+    const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent);
+    const isInsecure = location.protocol !== 'https:';
+    if (isInsecure && isChrome) {{
+      setStatus('red', '🔒 נדרש HTTPS', '');
+      showRetry(`<b>Chrome חוסם מיקום על HTTP.</b><br>פתרונות:<br>
+        1️⃣ פתח בדפדפן <b>Firefox</b> במקום Chrome<br>
+        2️⃣ או בשורת הכתובת הקלד:<br><code>chrome://flags</code><br>
+        חפש: <i>Insecure origins treated as secure</i><br>
+        הוסף: <code>http://{settings.app_base_url.replace("http://","")}</code>`);
+    }} else {{
+      setStatus('red', '❌ גישה למיקום נדחתה', '');
+      showRetry(`כדי לאפשר מיקום:<br>
+        1️⃣ לחץ על סמל המנעול/מידע בשורת הכתובת<br>
+        2️⃣ בחר <b>הרשאות אתר</b><br>
+        3️⃣ הגדר <b>מיקום → אפשר</b><br>
+        4️⃣ לחץ <b>נסה שוב</b>`);
+    }}
+  }} else if (e.code === 2) {{
+    setStatus('red', '📡 GPS לא זמין', 'ודא שה-GPS מופעל בהגדרות הטלפון');
+    showRetry('');
+  }} else {{
+    setStatus('red', '⏱ timeout', 'המיקום לוקח זמן רב — נסה שוב');
+    showRetry('');
+  }}
+}}
+
 function grab() {{
   setStatus('yellow', 'מאתר מיקום…', '');
   hideRetry();
-  navigator.geolocation.getCurrentPosition(
+  if (watchId !== null) {{ navigator.geolocation.clearWatch(watchId); watchId = null; }}
+  if (fallbackTimer) {{ clearInterval(fallbackTimer); fallbackTimer = null; }}
+
+  // Primary: watchPosition — fires on every significant movement
+  watchId = navigator.geolocation.watchPosition(
     p => sendLocation(p.coords.latitude, p.coords.longitude),
-    e => {{
-      if (e.code === 1) {{
-        // PERMISSION_DENIED
-        const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent);
-        const isInsecure = location.protocol !== 'https:';
-        if (isInsecure && isChrome) {{
-          setStatus('red', '🔒 נדרש HTTPS', '');
-          showRetry(`<b>Chrome חוסם מיקום על HTTP.</b><br>פתרונות:<br>
-            1️⃣ פתח בדפדפן <b>Firefox</b> במקום Chrome<br>
-            2️⃣ או בשורת הכתובת הקלד:<br><code>chrome://flags</code><br>
-            חפש: <i>Insecure origins treated as secure</i><br>
-            הוסף: <code>http://{settings.app_base_url.replace("http://","")}</code>`);
-        }} else {{
-          setStatus('red', '❌ גישה למיקום נדחתה', '');
-          showRetry(`כדי לאפשר מיקום:<br>
-            1️⃣ לחץ על סמל המנעול/מידע בשורת הכתובת<br>
-            2️⃣ בחר <b>הרשאות אתר</b><br>
-            3️⃣ הגדר <b>מיקום → אפשר</b><br>
-            4️⃣ לחץ <b>נסה שוב</b>`);
-        }}
-      }} else if (e.code === 2) {{
-        setStatus('red', '📡 GPS לא זמין', 'ודא שה-GPS מופעל בהגדרות הטלפון');
-        showRetry('');
-      }} else {{
-        setStatus('red', '⏱ timeout', 'המיקום לוקח זמן רב — נסה שוב');
-        showRetry('');
-      }}
-    }},
-    {{enableHighAccuracy: true, timeout: 15000}}
+    onError,
+    {{enableHighAccuracy: true, timeout: 20000, maximumAge: 10000}}
   );
+
+  // Fallback poll: if device doesn't move (watchPosition may not fire), force send every 60s
+  fallbackTimer = setInterval(() => {{
+    navigator.geolocation.getCurrentPosition(
+      p => sendLocation(p.coords.latitude, p.coords.longitude),
+      () => {{}},
+      {{enableHighAccuracy: true, timeout: 10000, maximumAge: 30000}}
+    );
+  }}, FALLBACK_MS);
 }}
 
 if (!navigator.geolocation) {{
   setStatus('red', '❌ GPS לא נתמך', 'נסה לפתוח בדפדפן Chrome או Firefox');
 }} else {{
   grab();
-  timer = setInterval(grab, INTERVAL_MS);
 }}
 
 if ('wakeLock' in navigator) {{
@@ -956,9 +987,7 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
         call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
         if not call or call.status not in ("OPEN", "ASSIGNED", "IN_PROGRESS"):
             continue
-        # Maintenance calls belong in the maintenance tab, not calls tab
-        if call.fault_type == "MAINTENANCE":
-            continue
+        # Maintenance calls will be sent too, but frontend will filter them into the Maintenance tab
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
 
         # Check for open inspection deficiencies on this elevator

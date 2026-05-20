@@ -137,7 +137,7 @@ _DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, List[str]]] = {
         "reports":        ["view"],
     },
     "TECHNICIAN": {
-        "service_calls": ["view"],
+        "service_calls": ["view", "create", "assign", "close"],
     },
     "ACCOUNTANT": {
         "invoices": ["view", "create", "send", "mark_paid"],

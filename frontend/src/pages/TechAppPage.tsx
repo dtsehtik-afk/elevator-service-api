@@ -265,8 +265,11 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 // ── GPS Hook ───────────────────────────────────────────────────────────────
 function useGPS(techId: string | null) {
   const [status, setStatus] = useState<'idle' | 'active' | 'error'>('idle')
+  const [lastSentAt, setLastSentAt] = useState<Date | null>(null)
   const watchIdRef = useRef<string | null>(null)
   const cancelledRef = useRef(false)
+  const lastSentMsRef = useRef(0)
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stop = () => {
     cancelledRef.current = true
@@ -274,7 +277,17 @@ function useGPS(techId: string | null) {
       Geolocation.clearWatch({ id: watchIdRef.current }).catch(() => {})
       watchIdRef.current = null
     }
+    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null }
     setStatus('idle')
+  }
+
+  const doSend = (tid: string, lat: number, lng: number) => {
+    const now = Date.now()
+    if (now - lastSentMsRef.current < 30000) return  // throttle: max once per 30s
+    lastSentMsRef.current = now
+    sendLocation(tid, lat, lng)
+      .then(() => { setLastSentAt(new Date()); setStatus('active') })
+      .catch(() => {})
   }
 
   useEffect(() => {
@@ -283,7 +296,6 @@ function useGPS(techId: string | null) {
 
     ;(async () => {
       try {
-        // On native Android/iOS — request runtime permission explicitly
         if (Capacitor.isNativePlatform()) {
           const perm = await Geolocation.requestPermissions()
           if (cancelledRef.current) return
@@ -294,11 +306,11 @@ function useGPS(techId: string | null) {
         }
 
         const id = await Geolocation.watchPosition(
-          { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 },
+          // maximumAge: 0 — never return a cached GPS position
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
           (pos, err) => {
             if (err || !pos) { setStatus('error'); return }
-            sendLocation(techId, pos.coords.latitude, pos.coords.longitude).catch(() => {})
-            setStatus('active')
+            doSend(techId, pos.coords.latitude, pos.coords.longitude)
           }
         )
 
@@ -307,6 +319,16 @@ function useGPS(techId: string | null) {
           return
         }
         watchIdRef.current = id
+
+        // Heartbeat: even if device doesn't move (watchPosition may not fire),
+        // force a fresh location every 60s
+        heartbeatRef.current = setInterval(() => {
+          if (cancelledRef.current) return
+          Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 0, timeout: 15000 })
+            .then(pos => doSend(techId, pos.coords.latitude, pos.coords.longitude))
+            .catch(() => {})
+        }, 60000)
+
       } catch {
         if (!cancelledRef.current) setStatus('error')
       }
@@ -315,19 +337,35 @@ function useGPS(techId: string | null) {
     return () => stop()
   }, [techId])
 
-  return { status }
+  return { status, lastSentAt }
 }
+
 
 // ── Maintenance Tab ───────────────────────────────────────────────────────
 const STATUS_COLOR: Record<string, string> = { SCHEDULED: 'blue', COMPLETED: 'green', OVERDUE: 'red', CANCELLED: 'gray' }
 const STATUS_LABEL: Record<string, string> = { SCHEDULED: '📅 מתוכנן', COMPLETED: '✅ הושלם', OVERDUE: '⚠️ באיחור', CANCELLED: 'בוטל' }
 
-function MaintenanceTab({ techId }: { techId: string }) {
+function MaintenanceTab({ techId, pendingCalls }: { techId: string; pendingCalls: PendingCall[] }) {
   const { data: items = [], isLoading } = useQuery({ queryKey: ['maint-tech', techId], queryFn: () => fetchMaintenance(techId) })
   if (isLoading) return <Center h={200}><Loader /></Center>
-  if (!items.length) return <Card withBorder p="xl" ta="center"><Text c="dimmed">אין תחזוקה מתוכננת ב-30 הימים הקרובים</Text></Card>
+  
+  const maintCalls = pendingCalls.filter(c => c.fault_type === 'MAINTENANCE')
+  
+  if (!items.length && !maintCalls.length) return <Card withBorder p="xl" ta="center"><Text c="dimmed">אין תחזוקה מתוכננת ב-30 הימים הקרובים</Text></Card>
+  
   return (
     <Stack gap="sm">
+      {maintCalls.map(c => (
+        <Card key={c.assignment_id} withBorder radius="md" p="md" style={{ borderRight: '4px solid #1a73e8', background: '#f8f9fa' }}>
+          <Group justify="space-between" mb={4}>
+            <Badge color="blue">קריאת תחזוקה (פעילה)</Badge>
+            {c.created_at && <Text size="xs" c="dimmed">{c.created_at}</Text>}
+          </Group>
+          <Text fw={700}>📍 {c.address}, {c.city}</Text>
+          {c.description && <Text size="sm" c="dimmed" mt={4}>📝 {c.description}</Text>}
+        </Card>
+      ))}
+      
       {items.map(m => (
         <Card key={m.id} withBorder radius="md" p="md">
           <Group justify="space-between" mb={4}>
@@ -626,7 +664,7 @@ function TechMain() {
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const techId = me?.id ?? null
 
-  const { status: gpsStatus } = useGPS(techId)
+  const { status: gpsStatus, lastSentAt } = useGPS(techId)
 
   const { data: pending = [], isLoading } = useQuery({
     queryKey: ['pending', techId],
@@ -760,7 +798,12 @@ function TechMain() {
     onError: () => notifications.show({ message: 'שגיאה בדחיית הקריאה', color: 'red' }),
   })
 
-  const gpsLabel = gpsStatus === 'active' ? '🟢 GPS פעיל' : gpsStatus === 'error' ? '🔴 GPS שגיאה' : '⚪ GPS לא פעיל'
+  const gpsTimeStr = lastSentAt
+    ? lastSentAt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null
+  const gpsLabel = gpsStatus === 'active'
+    ? `🟢 GPS פעיל${gpsTimeStr ? ` — שודר ${gpsTimeStr}` : ''}`
+    : gpsStatus === 'error' ? '🔴 GPS שגיאה' : '⚪ GPS לא פעיל'
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f2f5', direction: 'rtl' }}>
@@ -794,7 +837,7 @@ function TechMain() {
       </div>
 
       <Stack gap="md" p="md">
-        {activeTab === 'maint' && techId && <MaintenanceTab techId={techId} />}
+        {activeTab === 'maint' && techId && <MaintenanceTab techId={techId} pendingCalls={pending} />}
         {activeTab === 'reports' && <ReportsTab />}
         {activeTab === 'map' && techId && <MapTab techId={techId} />}
         {activeTab === 'inventory' && techId && <TechInventoryTab techId={techId} />}
@@ -802,7 +845,7 @@ function TechMain() {
         {activeTab === 'calls' && (isLoading ? <Center h={200}><Loader /></Center> : (
           <>
             {/* ── Active / confirmed calls — always at top ── */}
-            {pending.filter(c => c.assignment_status !== 'PENDING_CONFIRMATION').map((call) => (
+            {pending.filter(c => c.assignment_status !== 'PENDING_CONFIRMATION' && c.fault_type !== 'MAINTENANCE').map((call) => (
               <Card key={call.assignment_id} withBorder radius="md" p="lg" shadow="md"
                 style={{ borderRight: '5px solid #40c057', background: '#f8fff9', cursor: 'pointer' }}
                 onClick={() => setDetailCall(call)}>
@@ -989,10 +1032,10 @@ function TechMain() {
             </Modal>
 
             {/* ── Pending confirmation calls ── */}
-            {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION').length > 0 && (
+            {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION' && c.fault_type !== 'MAINTENANCE').length > 0 && (
               <Text fw={700} size="lg">📋 ממתינות לאישורך</Text>
             )}
-            {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION').map((call) => (
+            {pending.filter(c => c.assignment_status === 'PENDING_CONFIRMATION' && c.fault_type !== 'MAINTENANCE').map((call) => (
               <Card key={call.assignment_id} withBorder radius="md" p="md" shadow="sm"
                 style={{ cursor: 'pointer' }}
                 onClick={() => setDetailCall(call)}>
@@ -1037,7 +1080,7 @@ function TechMain() {
               </Card>
             ))}
 
-            {pending.length === 0 && (
+            {pending.filter(c => c.fault_type !== 'MAINTENANCE').length === 0 && (
               <Card withBorder radius="md" p="xl" ta="center">
                 <Text size="xl">✅</Text>
                 <Text fw={600} mt="sm">אין קריאות פעילות</Text>

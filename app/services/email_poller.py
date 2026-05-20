@@ -673,7 +673,7 @@ def poll_emails(db) -> int:
             try:
                 # Re-select folder in case last iteration was a different one
                 mail.select(f'"{folder}"', readonly=False)
-                _, data = mail.fetch(mid, "(RFC822)")
+                _, data = mail.fetch(mid, "(BODY.PEEK[])")
                 raw = data[0][1]
                 msg = email.message_from_bytes(raw)
 
@@ -709,7 +709,6 @@ def poll_emails(db) -> int:
                 if any(p in body for p in _SKIP_PATTERNS):
                     logger.info("📧 Skipping closure/summary email (not a new call)")
                     _record_as_scanned(db, message_id)
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 import time as _time
@@ -718,12 +717,10 @@ def poll_emails(db) -> int:
 
                 if fields is None:
                     logger.warning("Email parsing returned no data — skipping (see above for reason)")
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 if not fields.get("city") and not fields.get("address"):
                     logger.warning("Could not extract address — body preview: %s", body[:600])
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 # Lead detection — must happen FIRST, before elevator lookup or pending queue
@@ -754,7 +751,6 @@ def poll_emails(db) -> int:
                         )
                     except Exception as exc:
                         logger.error("Failed to create lead from email: %s", exc)
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 # Elevator lookup — after lead detection
@@ -786,7 +782,6 @@ def poll_emails(db) -> int:
                     except Exception as exc:
                         logger.error("Failed to save pending unmatched call log: %s", exc)
                     _record_as_scanned(db, message_id)
-                    mail.store(mid, "+FLAGS", "\\Seen")
                     continue
 
                 # Enrich the matched elevator with any new data from this email
@@ -911,12 +906,8 @@ def poll_emails(db) -> int:
                     logger.warning("📧 OVERQUOTA on email %s — stopping this poll cycle to avoid rate limiting", mid)
                     break
 
-            finally:
-                # Mark as read regardless of success/failure to avoid re-processing
-                try:
-                    mail.store(mid, "+FLAGS", "\\Seen")
-                except Exception:
-                    pass
+                # We no longer mark as read to preserve user's inbox state
+                pass
 
         mail.close()
         mail.logout()

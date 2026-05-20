@@ -2080,15 +2080,15 @@ def start_scheduler():
     _scheduler.add_job(_run_auto_invoicing,               "cron", hour=6,  minute=0)
     _scheduler.add_job(_run_nightly_maintenance,         "cron", hour=0,  minute=5,  day_of_week="sun,mon,tue,wed,thu,fri")
     _scheduler.add_job(_send_morning_maintenance_alerts, "cron", hour=7,  minute=35, day_of_week="sun,mon,tue,wed,thu,fri")
-    # Morning location requests disabled — technicians use the app now
-    # _scheduler.add_job(_send_morning_location_requests,   "cron",     hour=7,  minute=45)
+    # Morning location requests disabled — technicians use the dedicated mobile app
+    # _scheduler.add_job(_send_morning_location_requests, "cron", hour=7, minute=15, day_of_week="sun,mon,tue,wed,thu,fri")
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
     _scheduler.add_job(_check_pending_assignment_timeouts,   "interval", seconds=60)
     _scheduler.add_job(_poll_inspection_emails,              "interval", hours=1)
     _scheduler.add_job(_scan_drive_inspections,              "interval", minutes=15)
-    # _scheduler.add_job(_check_location_reminders,            "interval", minutes=5)  # disabled
+    _scheduler.add_job(_check_location_reminders,            "interval", minutes=10)
     _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
     _scheduler.add_job(_check_inspection_deficiency_escalation, "interval", hours=6)
     # Geocode elevators missing coordinates: once 90s after startup + nightly at 02:00

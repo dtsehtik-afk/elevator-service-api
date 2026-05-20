@@ -308,14 +308,14 @@ def notify_rescue_emergency(
 
 
 def _get_admin_phones_from_db() -> list[str]:
-    """Get WhatsApp/phone numbers of all active ADMIN technicians from DB."""
+    """Get WhatsApp/phone numbers of all active ADMIN/DISPATCHER technicians from DB."""
     try:
         from app.database import SessionLocal
         from app.models.technician import Technician
         db = SessionLocal()
         try:
             admins = db.query(Technician).filter(
-                Technician.role == "ADMIN",
+                Technician.role.in_(["ADMIN", "DISPATCHER", "SERVICE_MANAGER"]),
                 Technician.is_active == True,  # noqa: E712
             ).all()
             return [a.whatsapp_number or a.phone for a in admins if (a.whatsapp_number or a.phone)]

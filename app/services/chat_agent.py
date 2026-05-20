@@ -235,6 +235,34 @@ _GEMINI_TOOLS = [{
             "description": "מסמן את הקריאה הפעילה כ'בטיפול'. השתמש כאשר הטכנאי אומר 'התחלתי', 'אני שם', 'מתחיל לטפל'.",
             "parameters": {"type": "OBJECT", "properties": {}, "required": []},
         },
+        {
+            "name": "create_service_call",
+            "description": "פותח קריאת שירות חדשה עבור מעלית מזהה. השתמש רק לאחר קבלת אישור מפורש מהמשתמש לפתוח את הקריאה לכתובת הרלוונטית.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "elevator_id": {"type": "STRING", "description": "UUID של המעלית"},
+                "reported_by": {"type": "STRING", "description": "שם/טלפון של המדווח (אם ידוע)"},
+                "description": {"type": "STRING", "description": "תיאור התקלה"},
+                "priority": {"type": "STRING", "description": "עדיפות: LOW/MEDIUM/HIGH/CRITICAL"},
+                "fault_type": {"type": "STRING", "description": "סוג: STUCK/DOOR/ELECTRICAL/MECHANICAL/SOFTWARE/OTHER"},
+            }, "required": ["elevator_id", "description"]},
+        },
+        {
+            "name": "match_unmatched_call_to_elevator",
+            "description": "משייך קריאה ממתינה שלא זוהתה למעלית ספציפית ומייצר ממנה קריאת שירות. השתמש רק לאחר אישור מהמשתמש.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "incoming_call_id": {"type": "STRING", "description": "מזהה ה-UUID של הקריאה הממתינה מהמוקד"},
+                "elevator_id": {"type": "STRING", "description": "UUID של המעלית אליה רוצים לשייך את הקריאה"},
+            }, "required": ["incoming_call_id", "elevator_id"]},
+        },
+        {
+            "name": "save_to_qa",
+            "description": "שמור שאלה ותשובה חדשה למאגר הידע (QA) של הבוט. השתמש בזה כאשר ענית על שאלה חדשה שהתשובה עליה חשובה, או כאשר למדת מידע חדש מהמשתמש שכדאי לזכור לעתיד.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "question": {"type": "STRING", "description": "השאלה או נושא המידע"},
+                "answer": {"type": "STRING", "description": "התשובה המלאה או המידע לשמירה"},
+                "tags": {"type": "STRING", "description": "מילות מפתח מופרדות בפסיקים"},
+            }, "required": ["question", "answer"]},
+        },
     ]
 }]
 
@@ -800,17 +828,24 @@ def _list_technicians(db: Session, available_only: bool = False) -> list:
 
 def _search_customers(db: Session, query: str) -> list:
     """Search customers by name, phone, city or contact person."""
-    q = f"%{query}%"
-    customers = (
-        db.query(Customer)
-        .filter(
-            Customer.is_active == True,  # noqa
-            (Customer.name.ilike(q)) | (Customer.phone.ilike(q)) |
-            (Customer.city.ilike(q)) | (Customer.contact_person.ilike(q)),
+    from sqlalchemy import or_
+    terms = [t for t in query.split() if len(t) > 1]
+    if not terms:
+        terms = [query]
+    
+    q_filter = db.query(Customer).filter(Customer.is_active == True)  # noqa
+    for term in terms:
+        t = f"%{term}%"
+        q_filter = q_filter.filter(
+            or_(
+                Customer.name.ilike(t),
+                Customer.phone.ilike(t),
+                Customer.city.ilike(t),
+                Customer.contact_person.ilike(t),
+            )
         )
-        .limit(8)
-        .all()
-    )
+        
+    customers = q_filter.limit(8).all()
     result = []
     for c in customers:
         elev_count = db.query(Elevator).filter(Elevator.customer_id == c.id).count()
@@ -1297,6 +1332,97 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
         return _request_call_from_dispatcher(db, phone, tool_input.get("address_hint", ""))
     elif tool_name == "mark_call_in_progress":
         return _mark_call_in_progress(db, phone)
+    elif tool_name == "create_service_call":
+        from app.services.service_call_service import create_service_call
+        from app.schemas.service_call import ServiceCallCreate
+        import uuid as _uuid
+        try:
+            eid = _uuid.UUID(tool_input["elevator_id"])
+        except ValueError:
+            return {"error": "מזהה מעלית לא תקין"}
+        data = ServiceCallCreate(
+            elevator_id=eid,
+            reported_by=tool_input.get("reported_by") or "סוכן AI",
+            description=tool_input["description"],
+            priority=tool_input.get("priority", "MEDIUM"),
+            fault_type=tool_input.get("fault_type", "OTHER"),
+        )
+        try:
+            call = create_service_call(db, data, current_user_email=f"ai_agent_{phone}")
+            
+            try:
+                from app.services.whatsapp_service import notify_dispatcher
+                from app.models.elevator import Elevator
+                elev = db.query(Elevator).filter(Elevator.id == eid).first()
+                addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"
+                notify_dispatcher(f"🤖 *קריאה חדשה נפתחה ע\"י סוכן AI*\n📍 {addr}\n⚡ {data.fault_type}\n📝 {data.description}")
+            except Exception:
+                pass
+                
+            return {
+                "success": True,
+                "מספר_קריאה": f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8],
+                "הודעה": "הקריאה נפתחה בהצלחה"
+            }
+        except Exception as exc:
+            return {"error": f"שגיאה בפתיחת קריאה: {str(exc)}"}
+    elif tool_name == "match_unmatched_call_to_elevator":
+        from app.services.service_call_service import create_service_call
+        from app.schemas.service_call import ServiceCallCreate
+        import uuid as _uuid
+        try:
+            iid = _uuid.UUID(tool_input["incoming_call_id"])
+            eid = _uuid.UUID(tool_input["elevator_id"])
+        except ValueError:
+            return {"error": "מזהה לא תקין"}
+        log = db.query(IncomingCallLog).filter(IncomingCallLog.id == iid).first()
+        if not log:
+            return {"error": "הקריאה הממתינה לא נמצאה"}
+        data = ServiceCallCreate(
+            elevator_id=eid,
+            reported_by=log.caller_name or log.caller_phone or "מוקד",
+            description=f"שויך ידנית ע\"י סוכן AI. \n{log.extracted_description or ''}",
+            priority=log.priority or "MEDIUM",
+            fault_type=log.fault_type or "OTHER",
+        )
+        try:
+            call = create_service_call(db, data, current_user_email=f"ai_agent_{phone}")
+            log.match_status = "MATCHED"
+            log.elevator_id = eid
+            log.service_call_id = call.id
+            db.commit()
+            
+            try:
+                from app.services.whatsapp_service import notify_dispatcher
+                from app.models.elevator import Elevator
+                elev = db.query(Elevator).filter(Elevator.id == eid).first()
+                addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"
+                notify_dispatcher(f"🤖 *קריאה ממתינה שויכה ונפתחה ע\"י AI*\n📍 {addr}\n⚡ {data.fault_type}\n📝 {data.description}")
+            except Exception:
+                pass
+                
+            return {
+                "success": True,
+                "מספר_קריאה": f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8],
+                "הודעה": "הקריאה שויכה ונפתחה בהצלחה"
+            }
+        except Exception as exc:
+            return {"error": f"שגיאה בשיוך הקריאה: {str(exc)}"}
+    elif tool_name == "save_to_qa":
+        from app.models.bot_qa import BotQA
+        try:
+            entry = BotQA(
+                question=tool_input["question"],
+                answer=tool_input["answer"],
+                tags=tool_input.get("tags", ""),
+                created_by=f"ai_agent_{phone}"
+            )
+            db.add(qa)
+            db.commit()
+            return {"success": True, "message": "המידע נשמר בהצלחה למאגר הידע של הבוט"}
+        except Exception as exc:
+            db.rollback()
+            return {"error": f"שגיאה בשמירת QA: {str(exc)}"}
     else:
         return {"error": f"כלי לא מוכר: {tool_name}"}
 
