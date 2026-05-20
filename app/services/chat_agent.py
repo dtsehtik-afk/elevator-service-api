@@ -490,28 +490,47 @@ def _get_elevator_maintenance(db: Session, elevator_id: str) -> list[dict]:
 def _get_technician_location(db: Session, technician_name: str | None = None, near_address: str | None = None) -> dict:
     techs = db.query(Technician).filter(Technician.is_active == True).all()  # noqa: E712
     results = []
+    now = datetime.now(timezone.utc)
     for t in techs:
         if technician_name and technician_name.lower() not in t.name.lower():
             continue
-        # Prefer live location, fall back to base location
-        lat = t.current_latitude or t.base_latitude
-        lng = t.current_longitude or t.base_longitude
-        is_live = bool(t.current_latitude and t.current_longitude)
-        if lat and lng:
-            results.append({
-                "שם": t.name,
-                "קו_רוחב": lat,
-                "קו_אורך": lng,
-                "סוג_מיקום": "חי" if is_live else "מיקום_בסיס",
-                "קישור_מפה": f"https://maps.google.com/?q={lat},{lng}",
-                "זמין": t.is_available,
-            })
+
+        # A location is "live" only if last_location_at is within the last 60 minutes
+        has_coords = bool(t.current_latitude and t.current_longitude)
+        if has_coords and t.last_location_at:
+            loc_age = now - t.last_location_at.replace(tzinfo=timezone.utc) if t.last_location_at.tzinfo is None else now - t.last_location_at
+            age_minutes = int(loc_age.total_seconds() / 60)
+            is_live = age_minutes <= 60
         else:
-            if not technician_name:
-                continue  # Skip techs with no location when doing general query
-            results.append({"שם": t.name, "מיקום": "לא הוגדר מיקום"})
+            is_live = False
+            age_minutes = None
+
+        if has_coords and is_live:
+            lat, lng = t.current_latitude, t.current_longitude
+            location_type = f"חי (לפני {age_minutes} דק')" if age_minutes is not None else "חי"
+        elif has_coords:
+            lat, lng = t.current_latitude, t.current_longitude
+            if age_minutes is not None and age_minutes < 1440:
+                hours = age_minutes // 60
+                location_type = f"ישן — לפני {hours} שעות" if hours > 0 else f"ישן — לפני {age_minutes} דק'"
+            else:
+                location_type = "ישן (יותר מיום)"
+        elif t.base_latitude and t.base_longitude:
+            lat, lng = t.base_latitude, t.base_longitude
+            location_type = "מיקום_בסיס (לא חי)"
+        else:
+            if technician_name:
+                results.append({"שם": t.name, "מיקום": "לא הוגדר מיקום ולא שודר מיקום חי"})
+            continue
+
+        results.append({
+            "שם": t.name,
+            "קישור_מפה": f"https://maps.google.com/?q={lat},{lng}",
+            "סוג_מיקום": location_type,
+            "זמין": t.is_available,
+        })
     if not results:
-        return {"תוצאה": "לא נמצא מיקום זמין — ודא שהוגדר מיקום בסיס לטכנאים בדשבורד"}
+        return {"תוצאה": "לא נמצא מיקום זמין — ודא שהטכנאי שידר מיקום מהאפליקציה"}
     return {"טכנאים": results}
 
 
@@ -1303,6 +1322,7 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 ══ מענה על שיבוצים ומיקום ══
 • אם שואלים איפה טכנאי נמצא (למשל: "באיזה אזור X נמצא?") — חובה להשתמש בכלי get_technician_location. 
 • כאשר אתה מציג מיקום של טכנאי, לעולם אל תרשום קואורדינטות מספריות (קו רוחב/אורך). הצג תמיד אך ורק את קישור המפה (Google Maps) שהתקבל מהכלי, או ציין עיר/רחוב אם ידוע.
+• שדה "סוג_מיקום" בתוצאת הכלי מציין אם המיקום עדכני — הצג אותו למשתמש! "חי (לפני X דק')" = מיקום GPS אמיתי, "ישן — לפני X שעות" = מיקום ישן, "מיקום_בסיס" = כתובת ביתית בלבד. אל תאמר "נמצא כרגע" כאשר המיקום ישן.
 • אם שואלים למה טכנאי הומלץ או שובץ לקריאה — הסבר במדויק שמערכת השיבוץ האוטומטית (AI) מחשבת זמן הגעה חי (פקקים, מרחק), עומס קריאות פתוחות לטכנאי, ורמות מיומנות ספציפיות הנדרשות לאותה מעלית/תקלה.
 
 ══ הפרדה בין תקלות לתחזוקה ══
