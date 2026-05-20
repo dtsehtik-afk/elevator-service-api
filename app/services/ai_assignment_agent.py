@@ -326,6 +326,7 @@ def assign_with_confirmation(
                             call_time=service_call.created_at,
                             call_age_days=max(0, _age_days),
                             call_number=service_call.call_number,
+                            call_created_at=service_call.created_at,
                         )
                     else:
                         whatsapp_service.notify_technician_auto_assigned(
@@ -470,6 +471,7 @@ def assign_with_confirmation(
                 call_time=service_call.created_at,
                 call_age_days=max(0, _age_days),
                 call_number=service_call.call_number,
+                call_created_at=service_call.created_at,
             )
             if _wa_msg_id and isinstance(_wa_msg_id, str):
                 assignment.whatsapp_message_id = _wa_msg_id

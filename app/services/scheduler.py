@@ -1929,19 +1929,19 @@ def _send_morning_maintenance_alerts():
             ServiceCall.description.contains("[maint_pending_notify]"),
         ).all()
 
-        for sc in pending:
-            elev = db.get(Elevator, sc.elevator_id)
-            addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
-            days_str = sc.description.split("[maint_pending_notify]")[0].replace("טיפול מונע ", "").strip()
-            notify_dispatcher(
-                f"🔴 *טיפול מונע דחוף* — {addr}\n"
-                f"⏳ {days_str}\n"
-                f"📅 {elev.next_service_date.strftime('%d/%m/%Y') if elev and elev.next_service_date else ''}"
-            )
-            sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
-            db.commit()
-
         if pending:
+            lines = []
+            for sc in pending:
+                elev = db.get(Elevator, sc.elevator_id)
+                addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+                days_str = sc.description.split("[maint_pending_notify]")[0].replace("טיפול מונע ", "").strip()
+                date_str = elev.next_service_date.strftime("%d/%m/%Y") if elev and elev.next_service_date else ""
+                lines.append(f"• {addr} — {days_str}" + (f" (תאריך: {date_str})" if date_str else ""))
+                sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
+
+            batched = f"🔴 *טיפול מונע דחוף — {len(lines)} מעליות*\n════════════════════\n" + "\n".join(lines)
+            notify_dispatcher(batched)
+            db.commit()
             logger.info("Morning maintenance alerts sent for %d calls", len(pending))
     except Exception as exc:
         logger.error("Morning maintenance alert job failed: %s", exc)

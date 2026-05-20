@@ -136,6 +136,7 @@ def notify_technician_new_call(
     call_time=None,
     call_age_days: int = 0,
     call_number: int = None,
+    call_created_at=None,
 ) -> bool:
     """Send a new-call notification to a technician (broadcast model — first to take wins)."""
     from app.config import get_settings
@@ -166,7 +167,21 @@ def notify_technician_new_call(
     portal_line = f"📱 *פורטל טכנאי:*\n{portal_url}\n" if portal_url else ""
 
     num_str = f" S{call_number:05d}" if call_number else ""
-    if call_age_days > 0:
+    if call_created_at is not None:
+        from datetime import timezone as _tz
+        _now = datetime.now(_tz.utc)
+        _created = call_created_at.replace(tzinfo=_tz.utc) if call_created_at.tzinfo is None else call_created_at
+        _age_sec = int((_now - _created).total_seconds())
+        if _age_sec < 600:
+            title = f"🔔 *קריאת שירות חדשה{num_str}*"
+        elif _age_sec < 3600:
+            title = f"🔄 *קריאה קיימת מלפני {_age_sec // 60} דקות{num_str}*"
+        elif _age_sec < 86400:
+            title = f"🔄 *קריאה קיימת מלפני {_age_sec // 3600} שעות{num_str}*"
+        else:
+            _days = _age_sec // 86400
+            title = f"🔄 *קריאה קיימת מלפני {_days} ימים{num_str} — חזרה לטיפול*"
+    elif call_age_days > 0:
         title = f"🔄 *קריאה מלפני {call_age_days} ימים{num_str} — חזרה לטיפול*"
     else:
         title = f"🔔 *קריאת שירות חדשה{num_str}*"
