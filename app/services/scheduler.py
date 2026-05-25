@@ -1428,8 +1428,16 @@ def _check_pending_assignment_timeouts():
         if orphaned:
             logger.info("🔄 Found %d orphaned OPEN call(s) — attempting assignment", len(orphaned))
             from app.config import get_settings
-            from app.services.whatsapp_service import notify_dispatcher_unassigned
+            from app.services.whatsapp_service import notify_dispatcher_unassigned, _send_message
+            from app.models.technician import Technician as _Tech
             s = get_settings()
+
+            # When re-dispatching multiple calls at once, suppress per-call WhatsApp noise.
+            # We'll send one consolidated message per technician and one for the dispatcher.
+            batch_silent = len(orphaned) > 1
+            # tech_phone → [(addr, fault_type, call_number)]
+            _tech_dispatch_map: dict = {}
+            _dispatcher_redispatch: list = []
 
             for call in orphaned:
                 try:
@@ -1442,7 +1450,7 @@ def _check_pending_assignment_timeouts():
                         ).all()
                     ]
                     next_a = ai_assignment_agent.assign_with_confirmation(
-                        db, call, exclude_tech_ids=rejected_ids
+                        db, call, exclude_tech_ids=rejected_ids, silent=batch_silent
                     )
                     if not next_a:
                         logger.warning("No technician available for orphaned call %s", call.id)
@@ -1459,14 +1467,66 @@ def _check_pending_assignment_timeouts():
                                     call_number=call.call_number,
                                     app_base_url=getattr(s, "app_base_url", ""),
                                 )
-                                # Tag the call so we don't alert again
                                 call.description = (call.description or "") + " [dispatcher_notified]"
                                 db.commit()
                                 logger.info("📢 Dispatcher alerted for unassigned call %s", call.id)
                     else:
                         logger.info("✅ Orphaned call %s re-assigned", call.id)
+                        if batch_silent:
+                            # Collect techs dispatched to this call for consolidated messages
+                            elevator = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+                            addr = f"{elevator.address}, {elevator.city}" if elevator else "כתובת לא ידועה"
+                            num_str = f"S{call.call_number:05d}" if call.call_number else ""
+                            _dispatcher_redispatch.append((addr, call.fault_type, num_str))
+                            # Find all new PENDING_CONFIRMATION assignments for this call
+                            new_asgns = db.query(Assignment).filter(
+                                Assignment.service_call_id == call.id,
+                                Assignment.status == "PENDING_CONFIRMATION",
+                            ).all()
+                            for a in new_asgns:
+                                tech = db.get(_Tech, a.technician_id)
+                                if not tech:
+                                    continue
+                                phone = tech.whatsapp_number or tech.phone
+                                if phone:
+                                    _tech_dispatch_map.setdefault(phone, []).append(
+                                        (addr, call.fault_type, num_str, str(call.id), str(tech.id))
+                                    )
                 except Exception as exc:
                     logger.error("Failed to assign orphaned call %s: %s", call.id, exc)
+
+            # ── Send ONE consolidated WhatsApp per technician ─────────────────
+            if batch_silent and _tech_dispatch_map:
+                from app.config import get_settings as _gs
+                base_url = getattr(_gs(), "app_base_url", "").rstrip("/")
+                portal_url = f"{base_url}/tech" if base_url else ""
+                for tech_phone, call_list in _tech_dispatch_map.items():
+                    lines = "\n".join(
+                        f"• {addr} ({ft})" + (f" [{num}]" if num else "")
+                        for addr, ft, num, _, _ in call_list
+                    )
+                    _send_message(
+                        tech_phone,
+                        f"🔔 *{len(call_list)} קריאות ממתינות לטיפולך*\n"
+                        f"────────────────────\n{lines}\n────────────────────\n"
+                        + (f"📱 {portal_url}\n" if portal_url else "")
+                        + "↩️ כנס לפורטל לקבלה / דחייה של כל קריאה"
+                    )
+
+            # ── Send ONE consolidated dispatcher notification ─────────────────
+            if batch_silent and _dispatcher_redispatch and s.dispatcher_whatsapp:
+                from app.services.whatsapp_service import notify_dispatcher as _nd
+                from app.config import get_settings as _gs
+                base_url = getattr(_gs(), "app_base_url", "").rstrip("/")
+                lines = "\n".join(
+                    f"• {addr} ({ft})" + (f" [{num}]" if num else "")
+                    for addr, ft, num in _dispatcher_redispatch
+                )
+                _nd(
+                    f"📋 *{len(_dispatcher_redispatch)} קריאות שודרו מחדש לטכנאים*\n"
+                    f"────────────────────\n{lines}\n────────────────────\n"
+                    + (f"🔗 {base_url}/calls" if base_url else "")
+                )
 
         # ── Part A: PENDING_CONFIRMATION timeouts ─────────────────────────────
         pending = (
@@ -1516,7 +1576,11 @@ def _check_pending_assignment_timeouts():
                     Assignment.status == "PENDING_CONFIRMATION",
                 ).count() if call else 0
 
-                if remaining == 0 and call and elevator:
+                confirmed_count = db.query(Assignment).filter(
+                    Assignment.service_call_id == call.id,
+                    Assignment.status.in_(["CONFIRMED", "AUTO_ASSIGNED"]),
+                ).count() if call else 0
+                if remaining == 0 and confirmed_count == 0 and call and elevator:
                     call.status = "OPEN"
                     db.commit()
                     from app.config import get_settings
@@ -2071,6 +2135,36 @@ def _run_auto_invoicing():
         db.close()
 
 
+def _auto_refresh_holidays():
+    """Pull next year's Israeli holidays from Hebcal and merge into the DB + memory set.
+
+    Runs Dec 1st so the new year's dates are ready before the calendar turns.
+    """
+    try:
+        from datetime import date
+        import json
+        from app.database import SessionLocal
+        from app.services.working_hours import fetch_holidays_from_hebcal
+        from app.services import working_hours as wh_module
+        from app.routers.settings import _get_setting, _set_setting
+
+        next_year = date.today().year + 1
+        new_dates = fetch_holidays_from_hebcal(next_year)
+
+        db = SessionLocal()
+        try:
+            existing_raw = _get_setting(db, "holidays")
+            existing: set[str] = set(json.loads(existing_raw)) if existing_raw else set()
+            merged = sorted(existing | set(new_dates))
+            _set_setting(db, "holidays", json.dumps(merged))
+            wh_module._HOLIDAYS = set(merged)
+            logger.info(f"Auto-refreshed holidays: +{len(new_dates)} dates for {next_year}, total={len(merged)}")
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error(f"Holiday auto-refresh failed: {exc}")
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -2100,6 +2194,9 @@ def start_scheduler():
     )
     _scheduler.add_job(_geocode_all_elevators, "cron", hour=2, minute=0,
                        id="geocode_nightly", max_instances=1)
+    # Fetch next year's holidays from Hebcal every Dec 1st at 03:00
+    _scheduler.add_job(_auto_refresh_holidays, "cron", month=12, day=1, hour=3, minute=0,
+                       id="holiday_refresh_annual", max_instances=1)
     _scheduler.start()
     logger.info("Background scheduler started (timezone: Asia/Jerusalem)")
 

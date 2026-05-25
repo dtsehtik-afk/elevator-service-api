@@ -89,6 +89,51 @@ def _reload_working_hours(wh_module, data: dict) -> None:
     wh_module._SCHEDULE = new_schedule
 
 
+# ── Holidays ──────────────────────────────────────────────────────────────────
+
+@router.get("/holidays", summary="Get list of closed holiday dates (YYYY-MM-DD)")
+def get_holidays(db: Session = Depends(get_db), _=Depends(require_admin)):
+    raw = _get_setting(db, "holidays")
+    return json.loads(raw) if raw else []
+
+
+class HolidaysPayload(BaseModel):
+    dates: List[str]  # list of "YYYY-MM-DD" strings
+
+
+@router.post("/holidays", summary="Save holiday dates and reload in-memory set (admin only)")
+def save_holidays(payload: HolidaysPayload, db: Session = Depends(get_db), _=Depends(require_admin)):
+    from app.services import working_hours as wh_module
+    _set_setting(db, "holidays", json.dumps(payload.dates))
+    wh_module._HOLIDAYS = set(payload.dates)
+    return {"ok": True}
+
+
+@router.post("/holidays/auto-fetch", summary="Auto-fetch Israeli holidays from Hebcal for current+next year")
+def auto_fetch_holidays(db: Session = Depends(get_db), _=Depends(require_admin)):
+    """Calls Hebcal API, merges with any manually-set dates, saves and hot-reloads."""
+    from datetime import date as _date
+    from app.services.working_hours import fetch_holidays_from_hebcal
+    from app.services import working_hours as wh_module
+
+    current_year = _date.today().year
+    fetched: list[str] = []
+    errors: list[str] = []
+    for year in [current_year, current_year + 1]:
+        try:
+            fetched.extend(fetch_holidays_from_hebcal(year))
+        except Exception as exc:
+            errors.append(f"{year}: {exc}")
+
+    existing_raw = _get_setting(db, "holidays")
+    existing: set[str] = set(json.loads(existing_raw)) if existing_raw else set()
+    merged = sorted(existing | set(fetched))
+
+    _set_setting(db, "holidays", json.dumps(merged))
+    wh_module._HOLIDAYS = set(merged)
+    return {"ok": True, "fetched": len(fetched), "total": len(merged), "dates": merged, "errors": errors}
+
+
 # ── Role permissions ──────────────────────────────────────────────────────────
 
 _DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, List[str]]] = {

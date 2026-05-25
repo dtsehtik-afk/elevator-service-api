@@ -516,6 +516,36 @@ async def lifespan(app: FastAPI):
         logging.getLogger().addHandler(_db_handler)
     except Exception:
         pass
+    # Load persisted working-hours and holidays into memory
+    try:
+        import json as _json
+        from datetime import date as _date
+        from app.database import SessionLocal as _SL
+        from app.routers.settings import _get_setting as _gs, _reload_working_hours, _set_setting as _ss
+        from app.services import working_hours as _wh
+        _cfg_db = _SL()
+        try:
+            _wh_raw = _gs(_cfg_db, "working_hours")
+            if _wh_raw:
+                _reload_working_hours(_wh, _json.loads(_wh_raw))
+            _hol_raw = _gs(_cfg_db, "holidays")
+            if _hol_raw:
+                _wh._HOLIDAYS = set(_json.loads(_hol_raw))
+            else:
+                # First run — seed holidays from Hebcal for current + next year
+                try:
+                    from app.services.working_hours import fetch_holidays_from_hebcal as _fh
+                    _cur = _date.today().year
+                    _fetched = sorted(set(_fh(_cur) + _fh(_cur + 1)))
+                    _ss(_cfg_db, "holidays", _json.dumps(_fetched))
+                    _wh._HOLIDAYS = set(_fetched)
+                    logging.getLogger(__name__).info(f"Seeded {len(_fetched)} holiday dates from Hebcal")
+                except Exception as _he:
+                    logging.getLogger(__name__).warning(f"Holiday seed failed: {_he}")
+        finally:
+            _cfg_db.close()
+    except Exception:
+        pass
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield

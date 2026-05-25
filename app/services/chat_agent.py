@@ -134,6 +134,13 @@ _GEMINI_TOOLS = [{
             }, "required": ["phone"]},
         },
         {
+            "name": "get_my_confirmed_calls",
+            "description": "מחזיר את הקריאות שהטכנאי אישר (לחץ 1 או קיבל ידנית) — לא כולל קריאות שרק נשלחו אליו ולא אושרו. השתמש כשטכנאי שואל 'איזה קריאות אישרתי?' או 'מה שלחתי 1 עליו?'.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "phone": {"type": "STRING", "description": "מספר הטלפון של הטכנאי"},
+            }, "required": ["phone"]},
+        },
+        {
             "name": "get_call_by_number",
             "description": "מחזיר פרטים מלאים על קריאת שירות לפי מספר קריאה. קבל 'S00042' או '42' — שניהם עובדים.",
             "parameters": {"type": "OBJECT", "properties": {
@@ -553,9 +560,11 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
 
         results.append({
             "שם": t.name,
+            "קואורדינטות": f"{lat:.6f}, {lng:.6f}",
             "קישור_מפה": f"https://maps.google.com/?q={lat},{lng}",
             "סוג_מיקום": location_type,
             "זמין": t.is_available,
+            "_הנחיה": "הצג את הקואורדינטות וקישור המפה בלבד — אל תנחש שם עיר או רחוב מהקואורדינטות",
         })
     if not results:
         return {"תוצאה": "לא נמצא מיקום זמין — ודא שהטכנאי שידר מיקום מהאפליקציה"}
@@ -764,6 +773,52 @@ def _get_my_calls(db: Session, phone: str) -> dict:
     if not tech:
         return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
     return _get_technician_route(db, tech.name)
+
+
+def _get_my_confirmed_calls(db: Session, phone: str) -> dict:
+    """Return calls the technician explicitly confirmed (CONFIRMED or AUTO_ASSIGNED assignments)."""
+    from app.models.assignment import Assignment
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("972"):
+        digits = "0" + digits[3:]
+    last9 = digits[-9:]
+    tech = (
+        db.query(Technician)
+        .filter((Technician.phone.contains(last9)) | (Technician.whatsapp_number.contains(last9)))
+        .first()
+    )
+    if not tech:
+        return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
+
+    confirmed_assignments = (
+        db.query(Assignment)
+        .filter(
+            Assignment.technician_id == tech.id,
+            Assignment.status.in_(["CONFIRMED", "AUTO_ASSIGNED"]),
+        )
+        .order_by(Assignment.assigned_at.desc())
+        .limit(20)
+        .all()
+    )
+    if not confirmed_assignments:
+        return {"תוצאה": f"לא נמצאו קריאות מאושרות עבור {tech.name}"}
+
+    results = []
+    for a in confirmed_assignments:
+        call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
+        if not call:
+            continue
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
+        results.append({
+            "מספר_קריאה": f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8],
+            "כתובת": f"{elev.address}, {elev.city}" if elev else "לא ידוע",
+            "סטטוס_קריאה": call.status,
+            "סוג_תקלה": call.fault_type,
+            "תיאור": (call.description or "")[:80],
+            "נפתחה": call.created_at.strftime("%d/%m/%Y %H:%M") if call.created_at else None,
+            "אושר_ב": a.assigned_at.strftime("%d/%m/%Y %H:%M") if a.assigned_at else None,
+        })
+    return {"קריאות_מאושרות": results, "סה_כ": len(results)}
 
 
 def _get_call_by_number(db: Session, call_number_str: str) -> dict:
@@ -1304,6 +1359,8 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
         return _get_technician_route(db, tool_input["technician_name"])
     elif tool_name == "get_my_calls":
         return _get_my_calls(db, tool_input.get("phone", ""))
+    elif tool_name == "get_my_confirmed_calls":
+        return _get_my_confirmed_calls(db, tool_input.get("phone", ""))
     elif tool_name == "get_call_by_number":
         return _get_call_by_number(db, tool_input.get("call_number", ""))
     elif tool_name == "list_technicians":

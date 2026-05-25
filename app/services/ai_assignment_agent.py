@@ -135,17 +135,27 @@ def rank_technicians(
     elev_lat, elev_lng = maps_service.ensure_elevator_coords(db, elevator)
     required_spec = _FAULT_SPEC.get(fault_type)
 
+    _FIELD_ROLES = ("TECHNICIAN", "SENIOR_TECHNICIAN", "MAINTENANCE_TECHNICIAN")
+
     if is_working_hours():
         candidates = (
             db.query(Technician)
-            .filter(Technician.is_active == True, Technician.is_available == True)  # noqa: E712
+            .filter(
+                Technician.is_active == True,  # noqa: E712
+                Technician.is_available == True,  # noqa: E712
+                Technician.role.in_(_FIELD_ROLES),
+            )
             .all()
         )
     else:
         # Outside working hours — only the on-call technician
         candidates = (
             db.query(Technician)
-            .filter(Technician.is_active == True, Technician.is_on_call == True)  # noqa: E712
+            .filter(
+                Technician.is_active == True,  # noqa: E712
+                Technician.is_on_call == True,  # noqa: E712
+                Technician.role.in_(_FIELD_ROLES),
+            )
             .all()
         )
 
@@ -242,6 +252,7 @@ def assign_with_confirmation(
     service_call: ServiceCall,
     exclude_tech_ids: list[uuid.UUID] | None = None,
     needs_confirmation: bool = True,
+    silent: bool = False,
 ) -> Optional[Assignment]:
     """
     Broadcast model: ALL available technicians receive the call simultaneously.
@@ -305,7 +316,7 @@ def assign_with_confirmation(
                         desc = f"{desc}\n{ctx}".strip() if desc else ctx
                     if getattr(service_call, "is_elevator_stopped", False):
                         desc = f"🚨 מעלית עומדת!\n{desc}".strip()
-                    if needs_confirmation:
+                    if needs_confirmation and not silent:
                         _age_days = (datetime.now(timezone.utc) - (service_call.created_at.replace(tzinfo=timezone.utc) if service_call.created_at.tzinfo is None else service_call.created_at)).days
                         whatsapp_service.notify_technician_new_call(
                             phone=phone,
@@ -328,7 +339,7 @@ def assign_with_confirmation(
                             call_number=service_call.call_number,
                             call_created_at=service_call.created_at,
                         )
-                    else:
+                    elif not silent:
                         whatsapp_service.notify_technician_auto_assigned(
                             phone=phone,
                             technician_name=resp_tech.name,
@@ -444,7 +455,7 @@ def assign_with_confirmation(
             first_assignment = assignment
 
         phone = tech.whatsapp_number or tech.phone
-        if phone:
+        if phone and not silent:
             ctx = _elevator_context(db, elevator.id)
             desc = _clean_description(service_call.description or "")
             if ctx:
@@ -487,12 +498,13 @@ def assign_with_confirmation(
     ))
     db.commit()
 
-    tech_names = ", ".join(c.technician.name for c in candidates)
-    whatsapp_service.notify_dispatcher(
-        f"📋 קריאה שודרה ל-{len(candidates)} טכנאים: {tech_names}\n"
-        f"📍 {elevator.address}, {elevator.city}\n"
-        f"⭐ מומלץ: *{recommended_name}*"
-    )
+    if not silent:
+        tech_names = ", ".join(c.technician.name for c in candidates)
+        whatsapp_service.notify_dispatcher(
+            f"📋 קריאה שודרה ל-{len(candidates)} טכנאים: {tech_names}\n"
+            f"📍 {elevator.address}, {elevator.city}\n"
+            f"⭐ מומלץ: *{recommended_name}*"
+        )
 
     return first_assignment
 

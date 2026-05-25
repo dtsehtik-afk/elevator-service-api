@@ -1,6 +1,9 @@
 """Working hours helper for Accord Elevators (Israel timezone)."""
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import logging
+
+logger = logging.getLogger(__name__)
 
 _IL_TZ = ZoneInfo("Asia/Jerusalem")
 
@@ -15,12 +18,18 @@ _SCHEDULE = {
     # 5 = Sat: not present → closed
 }
 
+# Set of closed dates in YYYY-MM-DD format (holidays, special closures).
+# Loaded from DB on startup; updated via POST /settings/holidays without restart.
+_HOLIDAYS: set[str] = set()
+
 _DAY_NAMES = {6: "ראשון", 0: "שני", 1: "שלישי", 2: "רביעי", 3: "חמישי", 4: "שישי"}
 
 
 def is_working_hours(now: datetime | None = None) -> bool:
     """Return True if current Israel time is within working hours."""
     now = (now or datetime.now(_IL_TZ)).astimezone(_IL_TZ)
+    if now.strftime("%Y-%m-%d") in _HOLIDAYS:
+        return False
     slot = _SCHEDULE.get(now.weekday())
     if not slot:
         return False
@@ -28,6 +37,32 @@ def is_working_hours(now: datetime | None = None) -> bool:
     start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
     end   = now.replace(hour=eh, minute=em, second=0, microsecond=0)
     return start <= now < end
+
+
+def fetch_holidays_from_hebcal(year: int) -> list[str]:
+    """Fetch Israeli public holiday dates from Hebcal API for a given year.
+
+    Uses Israel mode (i=on) so only first-day Yom Tov is returned — no diaspora second days.
+    Returns sorted list of YYYY-MM-DD strings.
+    """
+    import httpx
+    url = (
+        f"https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&min=off"
+        f"&mod=off&nx=off&year={year}&month=x&ss=off&mf=off&c=off"
+        f"&geo=none&M=on&s=off&i=on"
+    )
+    resp = httpx.get(url, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    dates: list[str] = []
+    for item in data.get("items", []):
+        if item.get("category") == "holiday":
+            d = item.get("date", "")
+            if d and len(d) == 10:
+                dates.append(d)
+    result = sorted(set(dates))
+    logger.info(f"Hebcal: fetched {len(result)} holiday dates for {year}")
+    return result
 
 
 def get_working_hours_str() -> str:

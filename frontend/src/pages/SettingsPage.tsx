@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import {
   Stack, Title, Paper, Table, Switch, TextInput, Button, Group, Text, Tabs,
   SegmentedControl, SimpleGrid, Card, useMantineColorScheme, Badge, Alert,
-  PinInput, Loader,
+  PinInput, Loader, ActionIcon,
 } from '@mantine/core'
+import { IconTrash } from '@tabler/icons-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
@@ -123,6 +124,47 @@ export default function SettingsPage() {
     onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
   })
 
+  // ── Holidays ──────────────────────────────────────────────────────────────
+  const { data: holidaysData } = useQuery<string[]>({
+    queryKey: ['holidays'],
+    queryFn: async () => (await client.get('/settings/holidays')).data,
+  })
+  const [holidayDates, setHolidayDates] = useState<string[] | null>(null)
+  const effectiveHolidays: string[] = holidayDates ?? holidaysData ?? []
+  const [newHoliday, setNewHoliday] = useState('')
+
+  const saveHolidays = useMutation({
+    mutationFn: (dates: string[]) => client.post('/settings/holidays', { dates }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['holidays'] })
+      setHolidayDates(null)
+      notifications.show({ message: '✅ ימי חג עודכנו', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
+  })
+
+  const autoFetchHolidays = useMutation({
+    mutationFn: () => client.post('/settings/holidays/auto-fetch'),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['holidays'] })
+      setHolidayDates(null)
+      notifications.show({ message: `✅ נמשכו ${res.data.fetched} ימי חג, סה"כ ${res.data.total} תאריכים`, color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה במשיכת לוח שנה', color: 'red' }),
+  })
+
+  function addHoliday() {
+    const d = newHoliday.trim()
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return
+    if (effectiveHolidays.includes(d)) return
+    setHolidayDates([...effectiveHolidays, d].sort())
+    setNewHoliday('')
+  }
+
+  function removeHoliday(d: string) {
+    setHolidayDates(effectiveHolidays.filter(x => x !== d))
+  }
+
   return (
     <Stack gap="lg" dir="rtl">
       <Title order={2}>⚙️ הגדרות מערכת</Title>
@@ -130,6 +172,7 @@ export default function SettingsPage() {
       <Tabs defaultValue="hours">
         <Tabs.List mb="md">
           <Tabs.Tab value="hours">🕐 שעות עבודה</Tabs.Tab>
+          <Tabs.Tab value="holidays">📅 ימי חג</Tabs.Tab>
           <Tabs.Tab value="nav">🗂️ עריכת תפריט</Tabs.Tab>
           <Tabs.Tab value="display">🎨 תצוגה</Tabs.Tab>
           <Tabs.Tab value="security">🔐 אבטחה</Tabs.Tab>
@@ -187,6 +230,75 @@ export default function SettingsPage() {
                 loading={saveHours.isPending}
                 disabled={!hoursForm}
                 onClick={() => saveHours.mutate(schedule)}
+              >
+                שמור שינויים
+              </Button>
+            </Group>
+          </Paper>
+        </Tabs.Panel>
+
+        {/* Holidays */}
+        <Tabs.Panel value="holidays">
+          <Paper withBorder radius="md" p="lg">
+            <Group justify="space-between" mb="md" align="flex-start">
+              <Text size="sm" c="dimmed" maw={480}>
+                הגדר תאריכים שבהם המשרד סגור (חגים, מועדים מיוחדים). בתאריכים אלו המערכת תתנהג כמחוץ לשעות עבודה.
+              </Text>
+              <Button
+                variant="light"
+                color="grape"
+                loading={autoFetchHolidays.isPending}
+                onClick={() => autoFetchHolidays.mutate()}
+              >
+                🗓️ רענן מלוח שנה עברי
+              </Button>
+            </Group>
+            <Group mb="md" align="flex-end">
+              <TextInput
+                label="הוסף תאריך (YYYY-MM-DD)"
+                placeholder="2026-09-22"
+                value={newHoliday}
+                onChange={e => setNewHoliday(e.target.value)}
+                w={200}
+                dir="ltr"
+                onKeyDown={e => e.key === 'Enter' && addHoliday()}
+              />
+              <Button onClick={addHoliday} variant="light">הוסף</Button>
+            </Group>
+            {effectiveHolidays.length === 0 ? (
+              <Text size="sm" c="dimmed">אין ימי חג מוגדרים</Text>
+            ) : (
+              <Table>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>תאריך</Table.Th>
+                    <Table.Th>יום בשבוע</Table.Th>
+                    <Table.Th></Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {effectiveHolidays.map(d => {
+                    const dayName = new Date(d + 'T12:00:00').toLocaleDateString('he-IL', { weekday: 'long' })
+                    return (
+                      <Table.Tr key={d}>
+                        <Table.Td style={{ fontFamily: 'monospace' }}>{d}</Table.Td>
+                        <Table.Td>{dayName}</Table.Td>
+                        <Table.Td>
+                          <ActionIcon color="red" variant="subtle" onClick={() => removeHoliday(d)}>
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Table.Td>
+                      </Table.Tr>
+                    )
+                  })}
+                </Table.Tbody>
+              </Table>
+            )}
+            <Group justify="flex-end" mt="md">
+              <Button
+                loading={saveHolidays.isPending}
+                disabled={holidayDates === null}
+                onClick={() => saveHolidays.mutate(effectiveHolidays)}
               >
                 שמור שינויים
               </Button>
