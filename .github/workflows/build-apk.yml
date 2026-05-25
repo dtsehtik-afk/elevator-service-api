@@ -50,7 +50,7 @@ jobs:
       - name: Add location permissions to AndroidManifest
         working-directory: frontend/android/app/src/main
         run: |
-          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\n</manifest>|' AndroidManifest.xml
+          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>\n</manifest>|' AndroidManifest.xml
 
       - name: Decode keystore
         run: |

@@ -12,6 +12,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor } from '@capacitor/core'
+import { BackgroundRunner } from '@capacitor/background-runner'
 import { useAuthStore } from '../stores/authStore'
 import { login as apiLogin } from '../api/auth'
 import client from '../api/client'
@@ -291,7 +292,16 @@ function useGPS(techId: string | null) {
   }
 
   useEffect(() => {
-    if (!techId) return
+    if (!techId) {
+      if (Capacitor.isNativePlatform()) {
+        BackgroundRunner.dispatchEvent({
+          label: 'com.akord.elevators.location',
+          event: 'setTechId',
+          details: { techId: '' },
+        }).catch(() => {})
+      }
+      return
+    }
     cancelledRef.current = false
 
     ;(async () => {
@@ -303,6 +313,13 @@ function useGPS(techId: string | null) {
             setStatus('error')
             return
           }
+          // Store techId for background WorkManager job and request "always" location
+          BackgroundRunner.dispatchEvent({
+            label: 'com.akord.elevators.location',
+            event: 'setTechId',
+            details: { techId },
+          }).catch(() => {})
+          BackgroundRunner.requestPermissions({ apis: ['geolocation'] }).catch(() => {})
         }
 
         const id = await Geolocation.watchPosition(

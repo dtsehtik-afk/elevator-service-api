@@ -9,6 +9,16 @@ const config: CapacitorConfig = {
     url: 'https://lift-agent.com',
     cleartext: false,
   },
+  plugins: {
+    BackgroundRunner: {
+      label: 'com.akord.elevators.location',
+      src: 'background-runner.js',
+      event: 'backgroundFetch',
+      repeat: true,
+      interval: 30,
+      autoStart: true,
+    },
+  },
 }
 
 export default config
