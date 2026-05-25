@@ -6,6 +6,7 @@
 # Claude
 # .claude/ — allow commands to be tracked
 !.claude/commands/
+.claude/worktrees/
 
 # Vite cache
 .vite/
