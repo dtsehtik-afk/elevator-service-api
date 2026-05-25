@@ -733,7 +733,7 @@ def _get_technician_route(db: Session, technician_name: str) -> dict:
     assignments = (
         db.query(Assignment)
         .filter(Assignment.technician_id == tech.id,
-                Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]))
+                Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]))
         .all()
     )
     route = []
@@ -755,7 +755,10 @@ def _get_technician_route(db: Session, technician_name: str) -> dict:
             "תאריך_פתיחה": call.created_at.strftime("%d/%m %H:%M") if call.created_at else "",
         })
     route.sort(key=lambda x: ("CRITICAL" not in x["עדיפות"], "HIGH" not in x["עדיפות"]))
-    return {"טכנאי": tech.name, "קריאות": route, "סה_כ": len(route)}
+    from app.config import get_settings
+    base_url = getattr(get_settings(), "app_base_url", "").rstrip("/")
+    portal_url = f"{base_url}/tech" if base_url else ""
+    return {"טכנאי": tech.name, "קריאות": route, "סה_כ": len(route), "לינק_למפה_ולניהול": portal_url}
 
 
 def _get_my_calls(db: Session, phone: str) -> dict:

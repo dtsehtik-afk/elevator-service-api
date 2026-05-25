@@ -985,7 +985,7 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
     result = []
     for a in assignments:
         call = db.query(ServiceCall).filter(ServiceCall.id == a.service_call_id).first()
-        if not call or call.status not in ("OPEN", "ASSIGNED", "IN_PROGRESS"):
+        if not call or call.status in ("CLOSED", "RESOLVED", "CANCELLED"):
             continue
         # Maintenance calls will be sent too, but frontend will filter them into the Maintenance tab
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first() if call.elevator_id else None
@@ -1000,7 +1000,7 @@ def my_calls_data(tech_id: str, db: Session = Depends(get_db)):
                     InspectionReport.elevator_id == elev.id,
                     InspectionReport.report_status.in_(["OPEN", "PARTIAL"]),
                 )
-                .order_by(InspectionReport.created_at.desc())
+                .order_by(InspectionReport.processed_at.desc())
                 .first()
             )
             if open_report:
