@@ -47,14 +47,8 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
-      - name: Patch javaVersion to 17 in variables.gradle
-        run: |
-          VARS="frontend/android/variables.gradle"
-          echo "=== variables.gradle before ==="
-          cat "$VARS"
-          sed -i 's/VERSION_21/VERSION_17/g' "$VARS"
-          echo "=== variables.gradle after ==="
-          cat "$VARS"
+      - name: Patch Gradle files for Kotlin compatibility
+        run: python3 .github/patch-gradle.py
 
       - name: Copy background-runner native AAR
         working-directory: frontend
