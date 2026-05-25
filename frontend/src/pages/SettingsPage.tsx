@@ -145,6 +145,10 @@ export default function SettingsPage() {
   const autoFetchHolidays = useMutation({
     mutationFn: () => client.post('/settings/holidays/auto-fetch'),
     onSuccess: (res) => {
+      if (!res.data.ok) {
+        notifications.show({ message: `שגיאה משרת: ${res.data.error || res.data.errors?.join(', ')}`, color: 'red' })
+        return
+      }
       qc.invalidateQueries({ queryKey: ['holidays'] })
       setHolidayDates(null)
       notifications.show({ message: `✅ נמשכו ${res.data.fetched} ימי חג, סה"כ ${res.data.total} תאריכים`, color: 'green' })
