@@ -49,36 +49,14 @@ jobs:
 
       - name: Patch Java/Kotlin version to 17
         run: |
-          # Gradle init script — runs before any project script, overrides jvmTarget
-          # for capacitor-background-runner which uses old Kotlin that doesn't know JVM 21
           mkdir -p ~/.gradle/init.d
-          cat > ~/.gradle/init.d/fix-bg-runner-jvm.gradle << 'EOF'
-allprojects {
-    afterEvaluate { proj ->
-        if (proj.name.contains('background') && proj.name.contains('runner')) {
-            proj.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile.class).configureEach {
-                kotlinOptions.jvmTarget = "17"
-            }
-            proj.android?.compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-            }
-        }
-    }
-}
-EOF
-          echo "Init script created:"
-          cat ~/.gradle/init.d/fix-bg-runner-jvm.gradle
-
-          # Also patch files as belt-and-suspenders
+          cp .github/fix-bg-runner-jvm.gradle ~/.gradle/init.d/
           find frontend/android/capacitor-background-runner -name "*.gradle" 2>/dev/null | while read f; do
             sed -i "s/jvmTarget = '21'/jvmTarget = '17'/g" "$f"
             sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$f"
             sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$f"
             sed -i 's/VERSION_21/VERSION_17/g' "$f"
             sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9][0-9]*/kotlin-gradle-plugin:1.9.21/g' "$f"
-            echo "=== $f after patch ==="
-            cat "$f"
           done
 
       - name: Copy background-runner native AAR

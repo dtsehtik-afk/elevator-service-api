@@ -1,0 +1,9 @@
+allprojects {
+    afterEvaluate { proj ->
+        if (proj.name.contains('background') && proj.name.contains('runner')) {
+            proj.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile.class).configureEach {
+                kotlinOptions.jvmTarget = "17"
+            }
+        }
+    }
+}
