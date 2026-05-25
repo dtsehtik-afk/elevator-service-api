@@ -40,6 +40,13 @@ const SECTIONS: Section[] = [
     children: [],
   },
   {
+    id: 'calendar',
+    label: 'יומן',
+    icon: '📅',
+    path: '/calendar',
+    children: [],
+  },
+  {
     id: 'service',
     label: 'שירות',
     icon: '🔧',

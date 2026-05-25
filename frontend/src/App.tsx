@@ -34,6 +34,7 @@ import ProjectsPage from './pages/ProjectsPage'
 import WhatsAppAgentPage from './pages/WhatsAppAgentPage'
 import SupportPage from './pages/SupportPage'
 import PartRequestsPage from './pages/PartRequestsPage'
+import CalendarPage from './pages/CalendarPage'
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -59,6 +60,7 @@ export default function App() {
                   {/* Field service */}
                   <Route path="/elevators" element={<ElevatorsPage />} />
                   <Route path="/elevators/:id" element={<ElevatorDetailPage />} />
+                  <Route path="/calendar" element={<CalendarPage />} />
                   <Route path="/calls" element={<CallsPage />} />
                   <Route path="/pending-calls" element={<PendingCallsPage />} />
                   <Route path="/technicians" element={<TechniciansPage />} />

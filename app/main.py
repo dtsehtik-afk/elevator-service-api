@@ -28,6 +28,7 @@ from app.routers import addresses as addresses_router
 from app.routers import projects as projects_router
 from app.routers import admin_console as admin_console_router
 from app.routers import search as search_router
+from app.routers import calendar as calendar_router
 from app.auth.router import router as auth_router
 
 settings = get_settings()
@@ -98,6 +99,9 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
                 "CREATE INDEX IF NOT EXISTS ix_elevators_customer_id ON elevators (customer_id)",
                 "ALTER TABLE buildings ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
+                
+                # Calendar: meeting_date on leads
+                "ALTER TABLE leads ADD COLUMN IF NOT EXISTS meeting_date TIMESTAMPTZ",
                 "CREATE INDEX IF NOT EXISTS ix_buildings_customer_id ON buildings (customer_id)",
                 # Report Builder: saved_views, custom_fields, custom_field_values
                 """CREATE TABLE IF NOT EXISTS saved_views (
@@ -648,7 +652,8 @@ app.include_router(ai_router.router)
 app.include_router(bot_qa_router.router)
 app.include_router(projects_router.router)
 app.include_router(admin_console_router.router)
-app.include_router(search_router.router)
+app.include_router(search_router.router, prefix="/api/v1")
+app.include_router(calendar_router.router, prefix="/api/v1")
 app.include_router(consultants_router.router)
 app.include_router(part_requests_router.router, prefix="/part-requests", tags=["Part Requests"])
 app.include_router(activity_log_router.router)
