@@ -143,6 +143,16 @@ export default function SettingsPage() {
     onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
   })
 
+  const autoFetchHolidays = useMutation({
+    mutationFn: () => client.post('/settings/holidays/auto-fetch'),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['holidays'] })
+      setHolidayDates(null)
+      notifications.show({ message: `✅ נמשכו ${res.data.fetched} ימי חג, סה"כ ${res.data.total} תאריכים`, color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה במשיכת לוח שנה', color: 'red' }),
+  })
+
   function addHoliday() {
     const d = newHoliday.trim()
     if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return
@@ -230,9 +240,19 @@ export default function SettingsPage() {
         {/* Holidays */}
         <Tabs.Panel value="holidays">
           <Paper withBorder radius="md" p="lg">
-            <Text size="sm" c="dimmed" mb="md">
-              הגדר תאריכים שבהם המשרד סגור (חגים, מועדים מיוחדים). בתאריכים אלו המערכת תתנהג כמחוץ לשעות עבודה.
-            </Text>
+            <Group justify="space-between" mb="md" align="flex-start">
+              <Text size="sm" c="dimmed" maw={480}>
+                הגדר תאריכים שבהם המשרד סגור (חגים, מועדים מיוחדים). בתאריכים אלו המערכת תתנהג כמחוץ לשעות עבודה.
+              </Text>
+              <Button
+                variant="light"
+                color="grape"
+                loading={autoFetchHolidays.isPending}
+                onClick={() => autoFetchHolidays.mutate()}
+              >
+                🗓️ רענן מלוח שנה עברי
+              </Button>
+            </Group>
             <Group mb="md" align="flex-end">
               <TextInput
                 label="הוסף תאריך (YYYY-MM-DD)"

@@ -2135,6 +2135,36 @@ def _run_auto_invoicing():
         db.close()
 
 
+def _auto_refresh_holidays():
+    """Pull next year's Israeli holidays from Hebcal and merge into the DB + memory set.
+
+    Runs Dec 1st so the new year's dates are ready before the calendar turns.
+    """
+    try:
+        from datetime import date
+        import json
+        from app.database import SessionLocal
+        from app.services.working_hours import fetch_holidays_from_hebcal
+        from app.services import working_hours as wh_module
+        from app.routers.settings import _get_setting, _set_setting
+
+        next_year = date.today().year + 1
+        new_dates = fetch_holidays_from_hebcal(next_year)
+
+        db = SessionLocal()
+        try:
+            existing_raw = _get_setting(db, "holidays")
+            existing: set[str] = set(json.loads(existing_raw)) if existing_raw else set()
+            merged = sorted(existing | set(new_dates))
+            _set_setting(db, "holidays", json.dumps(merged))
+            wh_module._HOLIDAYS = set(merged)
+            logger.info(f"Auto-refreshed holidays: +{len(new_dates)} dates for {next_year}, total={len(merged)}")
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error(f"Holiday auto-refresh failed: {exc}")
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -2164,6 +2194,9 @@ def start_scheduler():
     )
     _scheduler.add_job(_geocode_all_elevators, "cron", hour=2, minute=0,
                        id="geocode_nightly", max_instances=1)
+    # Fetch next year's holidays from Hebcal every Dec 1st at 03:00
+    _scheduler.add_job(_auto_refresh_holidays, "cron", month=12, day=1, hour=3, minute=0,
+                       id="holiday_refresh_annual", max_instances=1)
     _scheduler.start()
     logger.info("Background scheduler started (timezone: Asia/Jerusalem)")
 
