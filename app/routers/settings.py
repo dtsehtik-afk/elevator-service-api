@@ -126,11 +126,22 @@ def auto_fetch_holidays(db: Session = Depends(get_db), _=Depends(require_admin))
             errors.append(f"{year}: {exc}")
 
     existing_raw = _get_setting(db, "holidays")
-    existing: set[str] = set(json.loads(existing_raw)) if existing_raw else set()
+    existing = set()
+    if existing_raw:
+        try:
+            parsed = json.loads(existing_raw)
+            if isinstance(parsed, list):
+                existing = set(parsed)
+        except Exception as e:
+            errors.append(f"DB parse error: {e}")
+
     merged = sorted(existing | set(fetched))
 
-    _set_setting(db, "holidays", json.dumps(merged))
-    wh_module._HOLIDAYS = set(merged)
+    try:
+        _set_setting(db, "holidays", json.dumps(merged))
+        wh_module._HOLIDAYS = set(merged)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "errors": errors}
     return {"ok": True, "fetched": len(fetched), "total": len(merged), "dates": merged, "errors": errors}
 
 
