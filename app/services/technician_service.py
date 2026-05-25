@@ -105,6 +105,7 @@ def update_location(
         return None
     tech.current_latitude = latitude
     tech.current_longitude = longitude
+    tech.last_location_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(tech)
     return tech

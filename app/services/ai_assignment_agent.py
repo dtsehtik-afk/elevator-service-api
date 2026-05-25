@@ -73,9 +73,16 @@ class CandidateScore:
 
 
 def _tech_location(tech: Technician) -> tuple[float, float]:
-    """Return the technician's best available coordinates."""
-    if tech.current_latitude and tech.current_longitude:
-        return tech.current_latitude, tech.current_longitude
+    """Return the technician's best available coordinates.
+    Only use live GPS if it was updated recently (within 90 mins)."""
+    if tech.current_latitude and tech.current_longitude and tech.last_location_at:
+        from datetime import datetime, timezone as _tz
+        now = datetime.now(_tz.utc)
+        tech_tz = tech.last_location_at.tzinfo or _tz.utc
+        age = (now - tech.last_location_at.replace(tzinfo=tech_tz)).total_seconds()
+        if age < 5400:  # 90 minutes
+            return tech.current_latitude, tech.current_longitude
+
     if tech.base_latitude and tech.base_longitude:
         return tech.base_latitude, tech.base_longitude
     # Fallback: parse city from area_codes or use Afula as default
