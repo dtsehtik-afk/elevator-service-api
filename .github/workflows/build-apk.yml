@@ -48,7 +48,15 @@ jobs:
         run: npx cap sync android
 
       - name: Patch Gradle files for Kotlin compatibility
-        run: python3 .github/patch-gradle.py
+        run: |
+          # Force background-runner to use Kotlin 2.x (which supports jvmTarget=21).
+          # background-runner checks project.hasProperty("kotlin_version") — gradle.properties
+          # is the cleanest way to set a project property without touching generated files.
+          echo "kotlin_version=2.0.21" >> frontend/android/gradle.properties
+          echo "=== gradle.properties ==="
+          cat frontend/android/gradle.properties
+          echo "=== variables.gradle ==="
+          cat frontend/android/variables.gradle 2>/dev/null || echo NOT_FOUND
 
       - name: Copy background-runner native AAR
         working-directory: frontend
@@ -79,11 +87,8 @@ jobs:
           cat frontend/android/variables.gradle 2>/dev/null || echo NOT_FOUND
           echo "=== root build.gradle ==="
           cat frontend/android/build.gradle 2>/dev/null || echo NOT_FOUND
-          echo "=== capacitor-background-runner *.gradle ==="
-          find frontend/android/capacitor-background-runner -name "*.gradle" -o -name "*.gradle.kts" 2>/dev/null | while read f; do
-            echo "--- $f ---"
-            cat "$f"
-          done
+          echo "=== background-runner build.gradle (node_modules) ==="
+          cat frontend/node_modules/@capacitor/background-runner/android/build.gradle 2>/dev/null || echo NOT_FOUND
 
       - name: Build APK
         working-directory: frontend/android
