@@ -4,7 +4,6 @@ import {
   SegmentedControl, SimpleGrid, Card, useMantineColorScheme, Badge, Alert,
   PinInput, Loader, ActionIcon,
 } from '@mantine/core'
-import { IconTrash } from '@tabler/icons-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import client from '../api/client'
@@ -284,8 +283,8 @@ export default function SettingsPage() {
                         <Table.Td style={{ fontFamily: 'monospace' }}>{d}</Table.Td>
                         <Table.Td>{dayName}</Table.Td>
                         <Table.Td>
-                          <ActionIcon color="red" variant="subtle" onClick={() => removeHoliday(d)}>
-                            <IconTrash size={14} />
+                          <ActionIcon color="red" variant="subtle" onClick={() => removeHoliday(d)} title="הסר">
+                            ✕
                           </ActionIcon>
                         </Table.Td>
                       </Table.Tr>
