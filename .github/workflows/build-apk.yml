@@ -47,18 +47,14 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
-      - name: Patch background-runner build.gradle in node_modules
+      - name: Patch javaVersion to 17 in variables.gradle
         run: |
-          BGRUNNER="frontend/node_modules/@capacitor/background-runner/android/build.gradle"
-          echo "=== Before patch ==="
-          cat "$BGRUNNER"
-          sed -i "s/jvmTarget = '21'/jvmTarget = '17'/g" "$BGRUNNER"
-          sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$BGRUNNER"
-          sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$BGRUNNER"
-          sed -i 's/VERSION_21/VERSION_17/g' "$BGRUNNER"
-          sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9][0-9]*/kotlin-gradle-plugin:1.9.21/g' "$BGRUNNER"
-          echo "=== After patch ==="
-          cat "$BGRUNNER"
+          VARS="frontend/android/variables.gradle"
+          echo "=== variables.gradle before ==="
+          cat "$VARS"
+          sed -i 's/VERSION_21/VERSION_17/g' "$VARS"
+          echo "=== variables.gradle after ==="
+          cat "$VARS"
 
       - name: Copy background-runner native AAR
         working-directory: frontend
