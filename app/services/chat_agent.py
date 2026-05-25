@@ -724,12 +724,15 @@ def _transfer_to_quote(db: Session, call_id: str, notes: str = "") -> dict:
     return {"success": True, "call_number": call.call_number, "quote_needed": True}
 
 
-def _get_technician_route(db: Session, technician_name: str) -> dict:
+def _get_technician_route(db: Session, tech_id: str = None, technician_name: str = None) -> dict:
     """Return open assigned calls for a technician, ordered as a work route."""
     from app.models.assignment import Assignment
-    tech = db.query(Technician).filter(Technician.name.ilike(f"%{technician_name}%")).first()
+    if tech_id:
+        tech = db.query(Technician).filter(Technician.id == tech_id).first()
+    else:
+        tech = db.query(Technician).filter(Technician.name.ilike(f"%{technician_name}%")).first()
     if not tech:
-        return {"error": f"הטכנאי '{technician_name}' לא נמצא"}
+        return {"error": f"הטכנאי לא נמצא"}
     assignments = (
         db.query(Assignment)
         .filter(Assignment.technician_id == tech.id,
@@ -775,7 +778,7 @@ def _get_my_calls(db: Session, phone: str) -> dict:
     )
     if not tech:
         return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
-    return _get_technician_route(db, tech.name)
+    return _get_technician_route(db, tech_id=tech.id)
 
 
 def _get_my_confirmed_calls(db: Session, phone: str) -> dict:
@@ -839,7 +842,7 @@ def _get_call_by_number(db: Session, call_number_str: str) -> dict:
     asgn = (
         db.query(Assignment)
         .filter(Assignment.service_call_id == call.id, Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]))
-        .order_by(Assignment.created_at.desc())
+        .order_by(Assignment.assigned_at.desc())
         .first()
     )
     if asgn:
