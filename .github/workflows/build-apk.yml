@@ -49,8 +49,19 @@ jobs:
 
       - name: Patch background-runner Kotlin jvmTarget
         run: |
-          find frontend/android/capacitor-background-runner -name "build.gradle" | xargs \
-            sed -i 's/jvmTarget = ["\x27]21["\x27]/jvmTarget = "17"/g' 2>/dev/null || true
+          BGRUNNER=$(find frontend/android/capacitor-background-runner -name "build.gradle" -o -name "build.gradle.kts" 2>/dev/null | head -1)
+          if [ -n "$BGRUNNER" ]; then
+            echo "=== Before patch: $BGRUNNER ==="
+            cat "$BGRUNNER"
+            sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$BGRUNNER"
+            sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$BGRUNNER"
+            sed -i 's/VERSION_21/VERSION_17/g' "$BGRUNNER"
+            echo "=== After patch ==="
+            cat "$BGRUNNER"
+          else
+            echo "WARNING: capacitor-background-runner build.gradle not found"
+            find frontend/android -name "build.gradle" 2>/dev/null
+          fi
 
       - name: Copy background-runner native AAR
         working-directory: frontend
