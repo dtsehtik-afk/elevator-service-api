@@ -6,7 +6,7 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { useNavigate } from 'react-router-dom';
 import { IconExternalLink, IconCalendarEvent } from '@tabler/icons-react';
-import api from '../services/api';
+import client from '../api/client';
 
 // Map our backend types to FullCalendar colors
 const TYPE_COLORS: Record<string, string> = {
@@ -45,7 +45,7 @@ export default function CalendarPage() {
       const start = new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().split('T')[0];
       const end = new Date(d.getFullYear(), d.getMonth() + 3, 0).toISOString().split('T')[0];
       
-      const res = await api.get(`/calendar/events?start=${start}&end=${end}`);
+      const res = await client.get(`/api/v1/calendar/events?start=${start}&end=${end}`);
       const mapped = res.data.events.map((e: any) => ({
         id: e.id,
         title: e.title,
