@@ -47,21 +47,29 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
-      - name: Patch background-runner Kotlin jvmTarget
+      - name: Patch Java/Kotlin version to 17
         run: |
-          BGRUNNER=$(find frontend/android/capacitor-background-runner -name "build.gradle" -o -name "build.gradle.kts" 2>/dev/null | head -1)
-          if [ -n "$BGRUNNER" ]; then
-            echo "=== Before patch: $BGRUNNER ==="
-            cat "$BGRUNNER"
-            sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$BGRUNNER"
-            sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$BGRUNNER"
-            sed -i 's/VERSION_21/VERSION_17/g' "$BGRUNNER"
-            echo "=== After patch ==="
-            cat "$BGRUNNER"
-          else
-            echo "WARNING: capacitor-background-runner build.gradle not found"
-            find frontend/android -name "build.gradle" 2>/dev/null
-          fi
+          # 1. Patch variables.gradle — central version definition for all modules
+          VARS="frontend/android/variables.gradle"
+          echo "=== variables.gradle before ==="
+          cat "$VARS" 2>/dev/null || echo "not found"
+          sed -i 's/VERSION_21/VERSION_17/g' "$VARS" 2>/dev/null || true
+          echo "=== variables.gradle after ==="
+          cat "$VARS" 2>/dev/null || true
+
+          # 2. Patch every *.gradle in capacitor-background-runner (all syntaxes)
+          echo "=== Patching capacitor-background-runner gradle files ==="
+          find frontend/android/capacitor-background-runner -name "*.gradle" -o -name "*.gradle.kts" 2>/dev/null | while read f; do
+            echo "--- $f ---"
+            cat "$f"
+            sed -i "s/jvmTarget = '21'/jvmTarget = '17'/g" "$f"
+            sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$f"
+            sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$f"
+            sed -i 's/VERSION_21/VERSION_17/g' "$f"
+            sed -i "s/kotlin_version = '1\.9\.[0-9]*/kotlin_version = '1.9.21/g" "$f"
+            echo "--- after ---"
+            cat "$f"
+          done
 
       - name: Copy background-runner native AAR
         working-directory: frontend
