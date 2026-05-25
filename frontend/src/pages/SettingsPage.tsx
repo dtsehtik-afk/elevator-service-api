@@ -124,16 +124,18 @@ export default function SettingsPage() {
   })
 
   // ── Holidays ──────────────────────────────────────────────────────────────
-  const { data: holidaysData } = useQuery<string[]>({
+  type HolidayItem = { date: string; name: string }
+  const { data: holidaysData } = useQuery<HolidayItem[]>({
     queryKey: ['holidays'],
     queryFn: async () => (await client.get('/settings/holidays')).data,
   })
-  const [holidayDates, setHolidayDates] = useState<string[] | null>(null)
-  const effectiveHolidays: string[] = holidayDates ?? holidaysData ?? []
+  const [holidayDates, setHolidayDates] = useState<HolidayItem[] | null>(null)
+  const effectiveHolidays: HolidayItem[] = holidayDates ?? holidaysData ?? []
   const [newHoliday, setNewHoliday] = useState('')
+  const [newHolidayName, setNewHolidayName] = useState('')
 
   const saveHolidays = useMutation({
-    mutationFn: (dates: string[]) => client.post('/settings/holidays', { dates }),
+    mutationFn: (dates: HolidayItem[]) => client.post('/settings/holidays', { dates }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['holidays'] })
       setHolidayDates(null)
@@ -158,14 +160,16 @@ export default function SettingsPage() {
 
   function addHoliday() {
     const d = newHoliday.trim()
+    const n = newHolidayName.trim() || 'חג מותאם אישית'
     if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return
-    if (effectiveHolidays.includes(d)) return
-    setHolidayDates([...effectiveHolidays, d].sort())
+    if (effectiveHolidays.some(h => h.date === d)) return
+    setHolidayDates([...effectiveHolidays, { date: d, name: n }].sort((a, b) => a.date.localeCompare(b.date)))
     setNewHoliday('')
+    setNewHolidayName('')
   }
 
   function removeHoliday(d: string) {
-    setHolidayDates(effectiveHolidays.filter(x => x !== d))
+    setHolidayDates(effectiveHolidays.filter(x => x.date !== d))
   }
 
   return (
@@ -264,6 +268,13 @@ export default function SettingsPage() {
                 onChange={e => setNewHoliday(e.target.value)}
                 w={200}
                 dir="ltr"
+              />
+              <TextInput
+                label="שם החג"
+                placeholder="חג משלי"
+                value={newHolidayName}
+                onChange={e => setNewHolidayName(e.target.value)}
+                w={150}
                 onKeyDown={e => e.key === 'Enter' && addHoliday()}
               />
               <Button onClick={addHoliday} variant="light">הוסף</Button>
@@ -275,19 +286,21 @@ export default function SettingsPage() {
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>תאריך</Table.Th>
+                    <Table.Th>שם החג</Table.Th>
                     <Table.Th>יום בשבוע</Table.Th>
                     <Table.Th></Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {effectiveHolidays.map(d => {
-                    const dayName = new Date(d + 'T12:00:00').toLocaleDateString('he-IL', { weekday: 'long' })
+                  {effectiveHolidays.map(item => {
+                    const dayName = new Date(item.date + 'T12:00:00').toLocaleDateString('he-IL', { weekday: 'long' })
                     return (
-                      <Table.Tr key={d}>
-                        <Table.Td style={{ fontFamily: 'monospace' }}>{d}</Table.Td>
+                      <Table.Tr key={item.date}>
+                        <Table.Td style={{ fontFamily: 'monospace' }}>{item.date}</Table.Td>
+                        <Table.Td>{item.name}</Table.Td>
                         <Table.Td>{dayName}</Table.Td>
                         <Table.Td>
-                          <ActionIcon color="red" variant="subtle" onClick={() => removeHoliday(d)} title="הסר">
+                          <ActionIcon color="red" variant="subtle" onClick={() => removeHoliday(item.date)} title="הסר">
                             ✕
                           </ActionIcon>
                         </Table.Td>

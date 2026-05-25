@@ -2154,10 +2154,23 @@ def _auto_refresh_holidays():
         db = SessionLocal()
         try:
             existing_raw = _get_setting(db, "holidays")
-            existing: set[str] = set(json.loads(existing_raw)) if existing_raw else set()
-            merged = sorted(existing | set(new_dates))
+            existing_dict = {}
+            if existing_raw:
+                parsed = json.loads(existing_raw)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, dict) and "date" in item:
+                            existing_dict[item["date"]] = item.get("name", "")
+                        elif isinstance(item, str):
+                            existing_dict[item] = "חג ישן"
+            
+            for item in new_dates:
+                existing_dict[item["date"]] = item["name"]
+
+            merged = [{"date": d, "name": existing_dict[d]} for d in sorted(existing_dict.keys())]
+            
             _set_setting(db, "holidays", json.dumps(merged))
-            wh_module._HOLIDAYS = set(merged)
+            wh_module._HOLIDAYS = set(existing_dict.keys())
             logger.info(f"Auto-refreshed holidays: +{len(new_dates)} dates for {next_year}, total={len(merged)}")
         finally:
             db.close()

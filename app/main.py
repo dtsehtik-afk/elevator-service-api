@@ -530,15 +530,24 @@ async def lifespan(app: FastAPI):
                 _reload_working_hours(_wh, _json.loads(_wh_raw))
             _hol_raw = _gs(_cfg_db, "holidays")
             if _hol_raw:
-                _wh._HOLIDAYS = set(_json.loads(_hol_raw))
+                _parsed = _json.loads(_hol_raw)
+                _wh._HOLIDAYS = {i["date"] if isinstance(i, dict) else i for i in _parsed}
             else:
                 # First run — seed holidays from Hebcal for current + next year
                 try:
                     from app.services.working_hours import fetch_holidays_from_hebcal as _fh
                     _cur = _date.today().year
-                    _fetched = sorted(set(_fh(_cur) + _fh(_cur + 1)))
+                    _f1 = _fh(_cur)
+                    _f2 = _fh(_cur + 1)
+                    _fetched = []
+                    _seen = set()
+                    for item in _f1 + _f2:
+                        if item["date"] not in _seen:
+                            _seen.add(item["date"])
+                            _fetched.append(item)
+                    _fetched = sorted(_fetched, key=lambda x: x["date"])
                     _ss(_cfg_db, "holidays", _json.dumps(_fetched))
-                    _wh._HOLIDAYS = set(_fetched)
+                    _wh._HOLIDAYS = {i["date"] for i in _fetched}
                     logging.getLogger(__name__).info(f"Seeded {len(_fetched)} holiday dates from Hebcal")
                 except Exception as _he:
                     logging.getLogger(__name__).warning(f"Holiday seed failed: {_he}")

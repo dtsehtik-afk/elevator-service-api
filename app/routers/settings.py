@@ -98,15 +98,19 @@ def get_holidays(db: Session = Depends(get_db), _=Depends(require_admin)):
     return json.loads(raw) if raw else []
 
 
+class HolidayItem(BaseModel):
+    date: str
+    name: str
+
 class HolidaysPayload(BaseModel):
-    dates: List[str]  # list of "YYYY-MM-DD" strings
+    dates: List[HolidayItem]
 
 
 @router.post("/holidays", summary="Save holiday dates and reload in-memory set (admin only)")
 def save_holidays(payload: HolidaysPayload, db: Session = Depends(get_db), _=Depends(require_admin)):
     from app.services import working_hours as wh_module
-    _set_setting(db, "holidays", json.dumps(payload.dates))
-    wh_module._HOLIDAYS = set(payload.dates)
+    _set_setting(db, "holidays", json.dumps([d.dict() for d in payload.dates]))
+    wh_module._HOLIDAYS = {d.date for d in payload.dates}
     return {"ok": True}
 
 
@@ -118,7 +122,7 @@ def auto_fetch_holidays(db: Session = Depends(get_db), _=Depends(require_admin))
     from app.services import working_hours as wh_module
 
     current_year = _date.today().year
-    fetched: list[str] = []
+    fetched: list[dict] = []
     errors: list[str] = []
     for year in [current_year, current_year + 1]:
         try:
@@ -127,20 +131,28 @@ def auto_fetch_holidays(db: Session = Depends(get_db), _=Depends(require_admin))
             errors.append(f"{year}: {exc}")
 
     existing_raw = _get_setting(db, "holidays")
-    existing = set()
+    existing_dict = {}
     if existing_raw:
         try:
             parsed = json.loads(existing_raw)
             if isinstance(parsed, list):
-                existing = set(parsed)
+                for item in parsed:
+                    if isinstance(item, dict) and "date" in item:
+                        existing_dict[item["date"]] = item.get("name", "")
+                    elif isinstance(item, str): # legacy migration
+                        existing_dict[item] = "חג ישן"
         except Exception as e:
             errors.append(f"DB parse error: {e}")
 
-    merged = sorted(existing | set(fetched))
+    # Merge fetched into existing
+    for item in fetched:
+        existing_dict[item["date"]] = item["name"]
+
+    merged = [{"date": d, "name": existing_dict[d]} for d in sorted(existing_dict.keys())]
 
     try:
         _set_setting(db, "holidays", json.dumps(merged))
-        wh_module._HOLIDAYS = set(merged)
+        wh_module._HOLIDAYS = set(existing_dict.keys())
     except Exception as e:
         return {"ok": False, "error": str(e), "errors": errors}
     return {"ok": True, "fetched": len(fetched), "total": len(merged), "dates": merged, "errors": errors}

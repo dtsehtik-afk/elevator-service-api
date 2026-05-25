@@ -39,12 +39,12 @@ def is_working_hours(now: datetime | None = None) -> bool:
     return start <= now < end
 
 
-def fetch_holidays_from_hebcal(year: int) -> list[str]:
+def fetch_holidays_from_hebcal(year: int) -> list[dict]:
     """Fetch Israeli public holiday dates from Hebcal API for a given year.
 
     Uses Israel mode (i=on) so only first-day Yom Tov is returned — no diaspora second days.
     Filters exclusively for statutory public holidays (Yemei Shabaton).
-    Returns sorted list of YYYY-MM-DD strings.
+    Returns sorted list of dicts: {"date": "YYYY-MM-DD", "name": "Holiday Name"}.
     """
     import httpx
     url = (
@@ -55,7 +55,7 @@ def fetch_holidays_from_hebcal(year: int) -> list[str]:
     resp = httpx.get(url, timeout=15)
     resp.raise_for_status()
     data = resp.json()
-    dates: list[str] = []
+    dates_dict = {}
     
     valid_prefixes = (
         "Rosh Hashana",
@@ -77,9 +77,19 @@ def fetch_holidays_from_hebcal(year: int) -> list[str]:
         if any(title.startswith(prefix) for prefix in valid_prefixes):
             d = item.get("date", "")
             if d and len(d) == 10:
-                dates.append(d)
+                # Use Hebrew names if we can map them, otherwise English
+                hebrew_name = title
+                if title.startswith("Rosh Hashana"): hebrew_name = "ראש השנה"
+                elif title.startswith("Yom Kippur"): hebrew_name = "יום כיפור"
+                elif title.startswith("Sukkot I"): hebrew_name = "סוכות (ראשון)"
+                elif title.startswith("Shmini Atzeret"): hebrew_name = "שמחת תורה"
+                elif title.startswith("Pesach I"): hebrew_name = "פסח (ראשון)"
+                elif title.startswith("Pesach VII"): hebrew_name = "שביעי של פסח"
+                elif title.startswith("Shavuot"): hebrew_name = "שבועות"
+                elif title.startswith("Yom HaAtzma"): hebrew_name = "יום העצמאות"
+                dates_dict[d] = hebrew_name
                 
-    result = sorted(set(dates))
+    result = [{"date": d, "name": dates_dict[d]} for d in sorted(dates_dict.keys())]
     logger.info(f"Hebcal: fetched {len(result)} statutory holiday dates for {year}")
     return result
 
