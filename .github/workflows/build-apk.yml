@@ -82,6 +82,18 @@ jobs:
           mkdir -p ~/.android
           echo "${{ secrets.KEYSTORE_BASE64 }}" | tr -d '\n\r ' | base64 --decode > ~/.android/debug.keystore
 
+      - name: Debug gradle files
+        run: |
+          echo "=== variables.gradle ==="
+          cat frontend/android/variables.gradle 2>/dev/null || echo NOT_FOUND
+          echo "=== root build.gradle ==="
+          cat frontend/android/build.gradle 2>/dev/null || echo NOT_FOUND
+          echo "=== capacitor-background-runner *.gradle ==="
+          find frontend/android/capacitor-background-runner -name "*.gradle" -o -name "*.gradle.kts" 2>/dev/null | while read f; do
+            echo "--- $f ---"
+            cat "$f"
+          done
+
       - name: Build APK
         working-directory: frontend/android
         run: ./gradlew assembleDebug
