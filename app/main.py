@@ -516,6 +516,25 @@ async def lifespan(app: FastAPI):
         logging.getLogger().addHandler(_db_handler)
     except Exception:
         pass
+    # Load persisted working-hours and holidays into memory
+    try:
+        from app.database import SessionLocal as _SL
+        from app.routers.settings import _get_setting as _gs, _reload_working_hours
+        from app.services import working_hours as _wh
+        _cfg_db = _SL()
+        try:
+            _wh_raw = _gs(_cfg_db, "working_hours")
+            if _wh_raw:
+                import json as _json
+                _reload_working_hours(_wh, _json.loads(_wh_raw))
+            _hol_raw = _gs(_cfg_db, "holidays")
+            if _hol_raw:
+                import json as _json2
+                _wh._HOLIDAYS = set(_json2.loads(_hol_raw))
+        finally:
+            _cfg_db.close()
+    except Exception:
+        pass
     from app.services.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     yield

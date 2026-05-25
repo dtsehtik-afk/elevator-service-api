@@ -15,12 +15,18 @@ _SCHEDULE = {
     # 5 = Sat: not present → closed
 }
 
+# Set of closed dates in YYYY-MM-DD format (holidays, special closures).
+# Loaded from DB on startup; updated via POST /settings/holidays without restart.
+_HOLIDAYS: set[str] = set()
+
 _DAY_NAMES = {6: "ראשון", 0: "שני", 1: "שלישי", 2: "רביעי", 3: "חמישי", 4: "שישי"}
 
 
 def is_working_hours(now: datetime | None = None) -> bool:
     """Return True if current Israel time is within working hours."""
     now = (now or datetime.now(_IL_TZ)).astimezone(_IL_TZ)
+    if now.strftime("%Y-%m-%d") in _HOLIDAYS:
+        return False
     slot = _SCHEDULE.get(now.weekday())
     if not slot:
         return False

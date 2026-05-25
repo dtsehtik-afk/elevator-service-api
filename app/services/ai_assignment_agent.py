@@ -135,17 +135,27 @@ def rank_technicians(
     elev_lat, elev_lng = maps_service.ensure_elevator_coords(db, elevator)
     required_spec = _FAULT_SPEC.get(fault_type)
 
+    _FIELD_ROLES = ("TECHNICIAN", "SENIOR_TECHNICIAN", "MAINTENANCE_TECHNICIAN")
+
     if is_working_hours():
         candidates = (
             db.query(Technician)
-            .filter(Technician.is_active == True, Technician.is_available == True)  # noqa: E712
+            .filter(
+                Technician.is_active == True,  # noqa: E712
+                Technician.is_available == True,  # noqa: E712
+                Technician.role.in_(_FIELD_ROLES),
+            )
             .all()
         )
     else:
         # Outside working hours — only the on-call technician
         candidates = (
             db.query(Technician)
-            .filter(Technician.is_active == True, Technician.is_on_call == True)  # noqa: E712
+            .filter(
+                Technician.is_active == True,  # noqa: E712
+                Technician.is_on_call == True,  # noqa: E712
+                Technician.role.in_(_FIELD_ROLES),
+            )
             .all()
         )
 
