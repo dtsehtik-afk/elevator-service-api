@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.auth.dependencies import get_current_user_or_none, require_auth
+from app.auth.dependencies import get_current_user
 from app.services.calendar_aggregator import fetch_calendar_events, generate_ics_feed
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
@@ -15,7 +15,7 @@ def get_events(
     start: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end: date = Query(..., description="End date (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
-    user=Depends(require_auth)
+    user=Depends(get_current_user)
 ):
     """
     Returns events for the frontend calendar.
