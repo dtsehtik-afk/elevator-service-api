@@ -57,35 +57,26 @@ def fetch_holidays_from_hebcal(year: int) -> list[dict]:
     data = resp.json()
     dates_dict = {}
     
-    valid_prefixes = (
-        "Rosh Hashana",
-        "Yom Kippur",
-        "Sukkot I",
-        "Shmini Atzeret",
-        "Pesach I",
-        "Pesach VII",
-        "Shavuot",
-        "Yom HaAtzma"
-    )
-    
     for item in data.get("items", []):
         title = item.get("title", "")
-        # Exclude Erev and Chol HaMoed
-        if "Erev" in title or "CH\"M" in title:
-            continue
         # Only keep statutory public holidays
-        if any(title.startswith(prefix) for prefix in valid_prefixes):
+        is_valid = False
+        if title.startswith("Rosh Hashana"): is_valid = True
+        elif title.startswith("Yom HaAtzma"): is_valid = True
+        elif title in ("Yom Kippur", "Sukkot I", "Shmini Atzeret", "Pesach I", "Pesach VII", "Shavuot"): is_valid = True
+        
+        if is_valid:
             d = item.get("date", "")
             if d and len(d) == 10:
                 # Use Hebrew names if we can map them, otherwise English
                 hebrew_name = title
                 if title.startswith("Rosh Hashana"): hebrew_name = "ראש השנה"
-                elif title.startswith("Yom Kippur"): hebrew_name = "יום כיפור"
-                elif title.startswith("Sukkot I"): hebrew_name = "סוכות (ראשון)"
-                elif title.startswith("Shmini Atzeret"): hebrew_name = "שמחת תורה"
-                elif title.startswith("Pesach I"): hebrew_name = "פסח (ראשון)"
-                elif title.startswith("Pesach VII"): hebrew_name = "שביעי של פסח"
-                elif title.startswith("Shavuot"): hebrew_name = "שבועות"
+                elif title == "Yom Kippur": hebrew_name = "יום כיפור"
+                elif title == "Sukkot I": hebrew_name = "סוכות (ראשון)"
+                elif title == "Shmini Atzeret": hebrew_name = "שמחת תורה"
+                elif title == "Pesach I": hebrew_name = "פסח (ראשון)"
+                elif title == "Pesach VII": hebrew_name = "שביעי של פסח"
+                elif title == "Shavuot": hebrew_name = "שבועות"
                 elif title.startswith("Yom HaAtzma"): hebrew_name = "יום העצמאות"
                 dates_dict[d] = hebrew_name
                 

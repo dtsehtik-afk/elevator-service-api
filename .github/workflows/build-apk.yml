@@ -49,25 +49,35 @@ jobs:
 
       - name: Patch Java/Kotlin version to 17
         run: |
-          # 1. Patch variables.gradle — central version definition for all modules
-          VARS="frontend/android/variables.gradle"
-          echo "=== variables.gradle before ==="
-          cat "$VARS" 2>/dev/null || echo "not found"
-          sed -i 's/VERSION_21/VERSION_17/g' "$VARS" 2>/dev/null || true
-          echo "=== variables.gradle after ==="
-          cat "$VARS" 2>/dev/null || true
+          # Gradle init script — runs before any project script, overrides jvmTarget
+          # for capacitor-background-runner which uses old Kotlin that doesn't know JVM 21
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/fix-bg-runner-jvm.gradle << 'EOF'
+allprojects {
+    afterEvaluate { proj ->
+        if (proj.name.contains('background') && proj.name.contains('runner')) {
+            proj.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile.class).configureEach {
+                kotlinOptions.jvmTarget = "17"
+            }
+            proj.android?.compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+    }
+}
+EOF
+          echo "Init script created:"
+          cat ~/.gradle/init.d/fix-bg-runner-jvm.gradle
 
-          # 2. Patch every *.gradle in capacitor-background-runner (all syntaxes)
-          echo "=== Patching capacitor-background-runner gradle files ==="
-          find frontend/android/capacitor-background-runner -name "*.gradle" -o -name "*.gradle.kts" 2>/dev/null | while read f; do
-            echo "--- $f ---"
-            cat "$f"
+          # Also patch files as belt-and-suspenders
+          find frontend/android/capacitor-background-runner -name "*.gradle" 2>/dev/null | while read f; do
             sed -i "s/jvmTarget = '21'/jvmTarget = '17'/g" "$f"
             sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$f"
             sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$f"
             sed -i 's/VERSION_21/VERSION_17/g' "$f"
-            sed -i "s/kotlin_version = '1\.9\.[0-9]*/kotlin_version = '1.9.21/g" "$f"
-            echo "--- after ---"
+            sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9][0-9]*/kotlin-gradle-plugin:1.9.21/g' "$f"
+            echo "=== $f after patch ==="
             cat "$f"
           done
 

@@ -144,6 +144,9 @@ def auto_fetch_holidays(db: Session = Depends(get_db), _=Depends(require_admin))
         except Exception as e:
             errors.append(f"DB parse error: {e}")
 
+    # Remove legacy garbage strings before merging
+    existing_dict = {k: v for k, v in existing_dict.items() if v != "חג ישן"}
+
     # Merge fetched into existing
     for item in fetched:
         existing_dict[item["date"]] = item["name"]
