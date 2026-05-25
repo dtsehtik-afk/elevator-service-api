@@ -47,17 +47,18 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
-      - name: Patch Java/Kotlin version to 17
+      - name: Patch background-runner build.gradle in node_modules
         run: |
-          mkdir -p ~/.gradle/init.d
-          cp .github/fix-bg-runner-jvm.gradle ~/.gradle/init.d/
-          find frontend/android/capacitor-background-runner -name "*.gradle" 2>/dev/null | while read f; do
-            sed -i "s/jvmTarget = '21'/jvmTarget = '17'/g" "$f"
-            sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$f"
-            sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$f"
-            sed -i 's/VERSION_21/VERSION_17/g' "$f"
-            sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9][0-9]*/kotlin-gradle-plugin:1.9.21/g' "$f"
-          done
+          BGRUNNER="frontend/node_modules/@capacitor/background-runner/android/build.gradle"
+          echo "=== Before patch ==="
+          cat "$BGRUNNER"
+          sed -i "s/jvmTarget = '21'/jvmTarget = '17'/g" "$BGRUNNER"
+          sed -i 's/jvmTarget = "21"/jvmTarget = "17"/g' "$BGRUNNER"
+          sed -i 's/JvmTarget\.JVM_21/JvmTarget.JVM_17/g' "$BGRUNNER"
+          sed -i 's/VERSION_21/VERSION_17/g' "$BGRUNNER"
+          sed -i 's/kotlin-gradle-plugin:1\.9\.[0-9][0-9]*/kotlin-gradle-plugin:1.9.21/g' "$BGRUNNER"
+          echo "=== After patch ==="
+          cat "$BGRUNNER"
 
       - name: Copy background-runner native AAR
         working-directory: frontend
