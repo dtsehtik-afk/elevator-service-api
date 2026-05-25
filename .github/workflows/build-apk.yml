@@ -47,6 +47,19 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
+      - name: Copy background-runner native AAR
+        working-directory: frontend
+        run: |
+          AAR="node_modules/@capacitor/background-runner/android/src/main/libs/android-js-engine-release.aar"
+          if [ -f "$AAR" ]; then
+            mkdir -p android/app/libs
+            cp "$AAR" android/app/libs/
+            echo "Copied android-js-engine-release.aar to app/libs"
+          else
+            echo "WARNING: AAR not found at $AAR"
+            find node_modules/@capacitor/background-runner -name "*.aar" 2>/dev/null || true
+          fi
+
       - name: Add location permissions to AndroidManifest
         working-directory: frontend/android/app/src/main
         run: |
