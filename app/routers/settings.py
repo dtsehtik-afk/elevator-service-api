@@ -36,10 +36,11 @@ def _get_setting(db: Session, key: str) -> Optional[str]:
 
 def _set_setting(db: Session, key: str, value: str) -> None:
     from sqlalchemy import text
+    import uuid
     db.execute(
-        text("INSERT INTO system_settings (key, value) VALUES (:k, :v) "
+        text("INSERT INTO system_settings (id, key, value) VALUES (:id, :k, :v) "
              "ON CONFLICT (key) DO UPDATE SET value = :v, updated_at = now()"),
-        {"k": key, "v": value},
+        {"id": str(uuid.uuid4()), "k": key, "v": value},
     )
     db.commit()
 
