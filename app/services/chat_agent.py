@@ -1226,8 +1226,19 @@ def _close_my_active_call(db: Session, phone: str, resolution_notes: str = "", q
 
 
 def _get_my_route_by_phone(db: Session, phone: str) -> dict:
-    """Return the current route for the technician identified by phone."""
-    return _get_my_calls(db, phone)
+    """Return the optimized current route for the technician identified by phone."""
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
+    
+    from app.services.route_service import build_route, format_route_message
+    stops, suggestions = build_route(db, tech)
+    msg = format_route_message(tech.name, stops, suggestions)
+    return {
+        "תוצאה": "המסלול חושב בהצלחה",
+        "טקסט_מסלול_מלא": msg,
+        "_הנחיה": "עליך להציג את 'טקסט_מסלול_מלא' במלואו בדיוק כפי שהוא (כולל אימוג'ים, קישורים למפה, והמלצות), מבלי לשנות או לתמצת כלום."
+    }
 
 
 def _request_call_from_dispatcher(db: Session, phone: str, address_hint: str = "") -> dict:
@@ -1362,7 +1373,7 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
     elif tool_name == "transfer_to_quote":
         return _transfer_to_quote(db, tool_input["call_id"], tool_input.get("notes", ""))
     elif tool_name == "get_technician_route":
-        return _get_technician_route(db, tool_input["technician_name"])
+        return _get_technician_route(db, technician_name=tool_input["technician_name"])
     elif tool_name == "get_my_calls":
         return _get_my_calls(db, tool_input.get("phone", ""))
     elif tool_name == "get_my_confirmed_calls":

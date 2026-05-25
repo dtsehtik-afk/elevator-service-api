@@ -439,16 +439,19 @@ def receive_whatsapp(
         logger.warning("📍 Location msg from %s | type=%s | lat=%s lng=%s | raw_loc=%s",
                        phone, msg_type, lat, lng, loc)
         if lat is not None and lng is not None:
-            tech = _find_tech_by_phone_local(db, phone)
-            if tech:
+            techs = _find_techs_by_phone_local(db, phone)
+            if techs:
                 from datetime import datetime, timezone as _tz
-                tech.current_latitude  = float(lat)
-                tech.current_longitude = float(lng)
-                tech.last_location_at  = datetime.now(_tz.utc)
+                now = datetime.now(_tz.utc)
+                for tech in techs:
+                    tech.current_latitude  = float(lat)
+                    tech.current_longitude = float(lng)
+                    tech.last_location_at  = now
                 db.commit()
-                logger.warning("📍 Location saved for %s: %.4f, %.4f", tech.name, float(lat), float(lng))
+                tech_names = ", ".join([t.name for t in techs])
+                logger.warning("📍 Location saved for %s: %.4f, %.4f", tech_names, float(lat), float(lng))
                 from app.services.whatsapp_service import _send_message
-                _send_message(phone, f"📍 המיקום שלך התעדכן בהצלחה, {tech.name}.")
+                _send_message(phone, f"📍 המיקום התעדכן בהצלחה.")
                 return {"status": "location_updated"}
             else:
                 logger.warning("📍 Location received but no tech found for phone=%s", phone)
@@ -722,7 +725,13 @@ def _save_caller_phone(elevator, phone: str, db) -> None:
 
 
 def _find_tech_by_phone_local(db, phone: str):
-    """Find technician by last 9 digits of phone number."""
+    """Find first technician by last 9 digits of phone number."""
+    techs = _find_techs_by_phone_local(db, phone)
+    return techs[0] if techs else None
+
+
+def _find_techs_by_phone_local(db, phone: str):
+    """Find all technicians by last 9 digits of phone number."""
     from app.models.technician import Technician as TechModel
     digits = "".join(c for c in phone if c.isdigit())
     if digits.startswith("972"):
@@ -734,7 +743,7 @@ def _find_tech_by_phone_local(db, phone: str):
             (TechModel.phone.contains(last9)) |
             (TechModel.whatsapp_number.contains(last9))
         )
-        .first()
+        .all()
     )
 
 
