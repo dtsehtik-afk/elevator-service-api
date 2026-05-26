@@ -287,7 +287,7 @@ function useGPS(techId: string | null) {
 
   const doSend = (tid: string, lat: number, lng: number) => {
     const now = Date.now()
-    if (now - lastSentMsRef.current < 30000) return  // throttle: max once per 30s
+    if (now - lastSentMsRef.current < 5000) return  // throttle: max once per 5s
     lastSentMsRef.current = now
     sendLocation(tid, lat, lng)
       .then(() => { setLastSentAt(new Date()); setStatus('active') })
@@ -349,18 +349,6 @@ function useGPS(techId: string | null) {
           return
         }
         watchIdRef.current = id
-
-        // Heartbeat: even if device doesn't move (watchPosition may not fire),
-        // force a fresh location every 60s
-        heartbeatRef.current = setInterval(() => {
-          if (cancelledRef.current) return
-          Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 0, timeout: 15000 })
-            .then(pos => {
-              if ((pos.coords.accuracy ?? 9999) > 150) return  // reject stale/poor fix
-              doSend(techId, pos.coords.latitude, pos.coords.longitude)
-            })
-            .catch(() => {})
-        }, 60000)
 
       } catch {
         if (!cancelledRef.current) setStatus('error')
