@@ -1796,6 +1796,16 @@ def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "
 
     if extra_system:
         system_text += f"\n\n{extra_system}"
+
+    # Inject current timestamp so Gemini knows history is stale
+    from datetime import datetime, timezone
+    now_str = datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
+    system_text += (
+        f"\n\nהשעה הנוכחית היא {now_str}. "
+        "חשוב מאוד: מיקום טכנאים מתעדכן בזמן אמת ומידע על מיקום בהיסטוריית השיחה מיושן ואינו מהימן. "
+        "בכל שאלה על מיקום טכנאי — חובה לקרוא לכלי get_technician_location מחדש, ללא יוצא מן הכלל."
+    )
+
     with httpx.Client(timeout=30) as client:
         for _iteration in range(6):
             payload = {
