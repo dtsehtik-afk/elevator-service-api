@@ -75,6 +75,8 @@ class Technician(Base):
     last_location_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set by bot when it wants a fresh GPS pull from the technician's app
     location_requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    # FCM token for silent push notifications (location wake-up)
+    fcm_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

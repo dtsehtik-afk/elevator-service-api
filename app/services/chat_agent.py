@@ -528,6 +528,19 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
     now = datetime.now(timezone.utc)
     stale_techs = []  # collect techs with stale location so we can request a pull
 
+    # Send FCM silent push to relevant technicians so their app wakes up and
+    # sends fresh GPS.  We fire-and-forget — the existing 15s polling loop will
+    # pick up the updated location; we return whatever is currently in the DB.
+    for t in techs:
+        if technician_name and technician_name.lower() not in t.name.lower():
+            continue
+        if t.fcm_token:
+            try:
+                from app.services.fcm_service import send_location_request
+                send_location_request(t.fcm_token)
+            except Exception:
+                pass
+
     for t in techs:
         if technician_name and technician_name.lower() not in t.name.lower():
             continue

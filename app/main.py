@@ -467,6 +467,8 @@ async def lifespan(app: FastAPI):
                 # MFA — TOTP fields on technicians
                 "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64)",
                 "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+                # FCM token for silent push (location wake-up)
+                "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS fcm_token TEXT",
                 # MFA — login history
                 """CREATE TABLE IF NOT EXISTS login_history (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

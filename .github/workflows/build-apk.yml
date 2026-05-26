@@ -44,6 +44,13 @@ jobs:
         working-directory: frontend
         run: npx cap add android || true
 
+      - name: Copy google-services.json for FCM
+        working-directory: frontend
+        run: |
+          mkdir -p android/app
+          cp google-services.json android/app/google-services.json
+          echo "google-services.json copied to android/app/"
+
       - name: Sync Capacitor
         working-directory: frontend
         run: npx cap sync android
@@ -93,10 +100,10 @@ jobs:
             find node_modules/@capacitor/background-runner -name "*.aar" 2>/dev/null || true
           fi
 
-      - name: Add location permissions to AndroidManifest
+      - name: Add location and notification permissions to AndroidManifest
         working-directory: frontend/android/app/src/main
         run: |
-          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>\n</manifest>|' AndroidManifest.xml
+          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n</manifest>|' AndroidManifest.xml
 
       - name: Decode keystore
         run: |
