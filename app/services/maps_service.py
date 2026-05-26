@@ -47,8 +47,10 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
 }
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+_NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 _last_nominatim_call = 0.0   # rate-limit: 1 req/sec
 _geocode_cache: dict[str, Optional[tuple[float, float]]] = {}  # avoid repeated calls
+_reverse_cache: dict[str, str] = {}  # (lat3, lon3) → place label
 
 
 def geocode_address(address: str, city: str) -> Optional[tuple[float, float]]:
@@ -93,6 +95,52 @@ def geocode_address(address: str, city: str) -> Optional[tuple[float, float]]:
     _geocode_cache[query] = None  # cache the failure too
     return None
 
+
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    """Return a human-readable place name for the given coordinates (Hebrew where possible).
+    Uses Nominatim reverse geocoding with in-memory cache (rounded to ~100 m grid).
+    Returns 'לא ידוע' on failure.
+    """
+    global _last_nominatim_call
+    # Round to 3 decimal places (~100 m) for cache key
+    cache_key = f"{lat:.3f},{lon:.3f}"
+    if cache_key in _reverse_cache:
+        return _reverse_cache[cache_key]
+
+    try:
+        elapsed = time.monotonic() - _last_nominatim_call
+        if elapsed < 1.1:
+            time.sleep(1.1 - elapsed)
+
+        resp = httpx.get(
+            _NOMINATIM_REVERSE_URL,
+            params={"lat": lat, "lon": lon, "format": "json", "accept-language": "he"},
+            headers={"User-Agent": "elevator-service-api/1.0 (contact@akord.co.il)"},
+            timeout=8,
+        )
+        _last_nominatim_call = time.monotonic()
+        if resp.is_success:
+            data = resp.json()
+            addr = data.get("address", {})
+            # Prefer village/suburb/neighbourhood over city for accurate small-settlement names
+            place = (
+                addr.get("village")
+                or addr.get("hamlet")
+                or addr.get("suburb")
+                or addr.get("neighbourhood")
+                or addr.get("town")
+                or addr.get("city")
+                or addr.get("county")
+                or data.get("display_name", "לא ידוע").split(",")[0]
+            )
+            _reverse_cache[cache_key] = place
+            return place
+    except Exception as exc:
+        logger.warning("Nominatim reverse geocoding error: %s", exc)
+
+    _reverse_cache[cache_key] = "לא ידוע"
+    return "לא ידוע"
 
 
 def ensure_elevator_coords(db: Session, elevator) -> tuple[float, float]:

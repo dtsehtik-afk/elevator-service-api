@@ -593,13 +593,20 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
             stale_techs.append(t.name)
             continue
 
+        try:
+            from app.services.maps_service import reverse_geocode
+            place_name = reverse_geocode(lat, lng)
+        except Exception:
+            place_name = "לא ידוע"
+
         results.append({
             "שם": t.name,
+            "מיקום": place_name,
             "קואורדינטות": f"{lat:.6f}, {lng:.6f}",
             "קישור_מפה": f"https://maps.google.com/?q={lat},{lng}",
             "סוג_מיקום": location_type,
             "זמין": t.is_available,
-            "_הנחיה": "חובה לציין במפורש למשתמש את ה'סוג_מיקום' (למשל 'מעודכן מלפני שעתיים' או 'חי') כדי שידע עד כמה המיקום עדכני. הצג גם את קישור המפה ואל תנחש שם עיר.",
+            "_הנחיה": "השתמש בשדה 'מיקום' כשם המקום — אל תנחש ואל תמציא שמות ערים אחרים.",
         })
 
     # Persist location_requested_at for all matched technicians
