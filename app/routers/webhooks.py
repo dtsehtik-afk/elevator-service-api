@@ -441,17 +441,31 @@ def receive_whatsapp(
         if lat is not None and lng is not None:
             techs = _find_techs_by_phone_local(db, phone)
             if techs:
-                from datetime import datetime, timezone as _tz
+                from datetime import datetime, timezone as _tz, timedelta
                 now = datetime.now(_tz.utc)
+                updated = []
+                skipped = []
                 for tech in techs:
+                    # Don't overwrite a recent app-based location (last 5 min)
+                    # to prevent WhatsApp live-location from clobbering native GPS
+                    if tech.last_location_at:
+                        age = (now - tech.last_location_at.replace(tzinfo=_tz.utc)
+                               if tech.last_location_at.tzinfo is None
+                               else now - tech.last_location_at)
+                        if age < timedelta(minutes=5) and msg_type == "liveLocationMessage":
+                            skipped.append(tech.name)
+                            continue
                     tech.current_latitude  = float(lat)
                     tech.current_longitude = float(lng)
                     tech.last_location_at  = now
+                    updated.append(tech.name)
                 db.commit()
-                tech_names = ", ".join([t.name for t in techs])
-                logger.warning("📍 Location saved for %s: %.4f, %.4f", tech_names, float(lat), float(lng))
-                from app.services.whatsapp_service import _send_message
-                _send_message(phone, f"📍 המיקום התעדכן בהצלחה.")
+                if updated:
+                    logger.warning("📍 Location saved for %s: %.4f, %.4f", ", ".join(updated), float(lat), float(lng))
+                    from app.services.whatsapp_service import _send_message
+                    _send_message(phone, f"📍 המיקום התעדכן בהצלחה.")
+                if skipped:
+                    logger.warning("📍 Live location skipped for %s — app GPS is fresher", ", ".join(skipped))
                 return {"status": "location_updated"}
             else:
                 logger.warning("📍 Location received but no tech found for phone=%s", phone)
