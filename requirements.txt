@@ -28,6 +28,7 @@ google-auth>=2.29.0                # Service account credentials
 python-dateutil>=2.9.0             # contract_renewal date math
 pyotp>=2.9.0                       # TOTP 2FA (Google Authenticator)
 qrcode[pil]>=7.4.0                 # QR code generation for TOTP setup
+firebase-admin>=6.5.0              # FCM push notifications (location wake-up)
 
 # Test dependencies
 pytest>=8.0.0

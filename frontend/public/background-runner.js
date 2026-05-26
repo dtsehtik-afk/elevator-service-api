@@ -21,8 +21,9 @@ addEventListener('backgroundFetch', async (resolve, _reject, _args) => {
     if (!techId) { resolve(); return }
 
     const pos = await Geolocation.getCurrentPosition({
-      enableHighAccuracy: false,
-      timeout: 10000,
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
     })
 
     await fetch(`https://lift-agent.com/webhooks/location/${techId}`, {

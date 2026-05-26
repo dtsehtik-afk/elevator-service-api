@@ -528,6 +528,19 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
     now = datetime.now(timezone.utc)
     stale_techs = []  # collect techs with stale location so we can request a pull
 
+    # Send FCM silent push to relevant technicians so their app wakes up and
+    # sends fresh GPS.  We fire-and-forget — the existing 15s polling loop will
+    # pick up the updated location; we return whatever is currently in the DB.
+    for t in techs:
+        if technician_name and technician_name.lower() not in t.name.lower():
+            continue
+        if t.fcm_token:
+            try:
+                from app.services.fcm_service import send_location_request
+                send_location_request(t.fcm_token)
+            except Exception:
+                pass
+
     for t in techs:
         if technician_name and technician_name.lower() not in t.name.lower():
             continue
@@ -1614,6 +1627,13 @@ def _load_conversation_history(db: Session, phone: str, limit: int = 20) -> list
                 continue
             role = "user" if m.direction == "in" else "model"
             turns.append({"role": role, "parts": [{"text": text}]})
+        # Strip model responses that contain location data — they go stale instantly
+        # and cause Gemini to reuse cached coordinates instead of calling the tool
+        def _is_location_response(text: str) -> bool:
+            return "maps.google.com" in text or "קואורדינטות" in text or "סוג מיקום" in text
+
+        turns = [t for t in turns if not (t["role"] == "model" and _is_location_response(t["parts"][0]["text"]))]
+
         # Gemini requires alternating roles — merge consecutive same-role turns
         merged = []
         for turn in turns:
@@ -1783,6 +1803,16 @@ def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "
 
     if extra_system:
         system_text += f"\n\n{extra_system}"
+
+    # Inject current timestamp so Gemini knows history is stale
+    from datetime import datetime, timezone
+    now_str = datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
+    system_text += (
+        f"\n\nהשעה הנוכחית היא {now_str}. "
+        "חשוב מאוד: מיקום טכנאים מתעדכן בזמן אמת ומידע על מיקום בהיסטוריית השיחה מיושן ואינו מהימן. "
+        "בכל שאלה על מיקום טכנאי — חובה לקרוא לכלי get_technician_location מחדש, ללא יוצא מן הכלל."
+    )
+
     with httpx.Client(timeout=30) as client:
         for _iteration in range(6):
             payload = {

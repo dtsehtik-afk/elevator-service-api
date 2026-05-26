@@ -613,34 +613,7 @@ def _poll_whatsapp_replies():
 
                 db = SessionLocal()
                 try:
-                    if msg_kind == "liveLocationMessage":
-                        # Live location → update technician's current position
-                        loc = msg_data.get("liveLocationMessageData", {})
-                        lat, lng = loc.get("latitude"), loc.get("longitude")
-                        if lat and lng:
-                            from app.models.technician import Technician
-                            digits = "".join(c for c in phone if c.isdigit())
-                            if digits.startswith("972"):
-                                digits = "0" + digits[3:]
-                            tech = (db.query(Technician)
-                                    .filter(Technician.phone.contains(digits[-9:]) |
-                                            Technician.whatsapp_number.contains(digits[-9:]))
-                                    .first())
-                            if tech:
-                                prev_lat = tech.current_latitude
-                                tech.current_latitude  = float(lat)
-                                tech.current_longitude = float(lng)
-                                db.commit()
-                                logger.info("📍 Live location updated for %s", tech.name)
-
-                                # First location of the day → send daily route
-                                if not prev_lat:
-                                    try:
-                                        _send_route_throttled(db, tech)
-                                    except Exception as exc:
-                                        logger.error("Route build failed for %s: %s", tech.name, exc)
-
-                    elif msg_kind == "locationMessage":
+                    if msg_kind == "locationMessage":
                         # Static pin → save as elevator coordinates for the active call
                         loc = msg_data.get("locationMessageData", {})
                         lat, lng = loc.get("latitude"), loc.get("longitude")

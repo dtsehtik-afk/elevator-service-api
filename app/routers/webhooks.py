@@ -428,36 +428,9 @@ def receive_whatsapp(
         logger.warning("⏭️ Duplicate webhook ignored: idMessage=%s", msg_id)
         return {"status": "duplicate"}
 
-    # ── Location message ──────────────────────────────────────────────────────
+    # ── Location message — ignored (app GPS is the only source of truth) ────────
     if msg_type in ("locationMessage", "liveLocationMessage"):
-        loc = (
-            msg_data.get("locationMessageData")
-            or msg_data.get("liveLocationMessageData")
-            or {}
-        )
-        lat, lng = loc.get("latitude"), loc.get("longitude")
-        logger.warning("📍 Location msg from %s | type=%s | lat=%s lng=%s | raw_loc=%s",
-                       phone, msg_type, lat, lng, loc)
-        if lat is not None and lng is not None:
-            techs = _find_techs_by_phone_local(db, phone)
-            if techs:
-                from datetime import datetime, timezone as _tz
-                now = datetime.now(_tz.utc)
-                for tech in techs:
-                    tech.current_latitude  = float(lat)
-                    tech.current_longitude = float(lng)
-                    tech.last_location_at  = now
-                db.commit()
-                tech_names = ", ".join([t.name for t in techs])
-                logger.warning("📍 Location saved for %s: %.4f, %.4f", tech_names, float(lat), float(lng))
-                from app.services.whatsapp_service import _send_message
-                _send_message(phone, f"📍 המיקום התעדכן בהצלחה.")
-                return {"status": "location_updated"}
-            else:
-                logger.warning("📍 Location received but no tech found for phone=%s", phone)
-        else:
-            logger.warning("📍 Location msg with no coordinates from %s | full msg_data=%s", phone, msg_data)
-        return {"status": "location_empty"}
+        return {"status": "location_ignored"}
 
     # ── Voice message — transcribe with Gemini ───────────────────────────────
     # Only transcribe for registered system users — skip unknown numbers silently
@@ -987,6 +960,33 @@ def update_location(
     db.commit()
     logger.warning("📍 Live location updated for %s: %.4f, %.4f", tech.name, payload.latitude, payload.longitude)
     return {"status": "ok", "name": tech.name}
+
+
+# ── FCM token registration ────────────────────────────────────────────────────
+
+@router.post(
+    "/fcm-token/{tech_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Save FCM push token for a technician (called from mobile app on login)",
+)
+def save_fcm_token(tech_id: str, payload: dict, db: Session = Depends(get_db)):
+    """Store the FCM device token so the server can send silent push notifications."""
+    from app.models.technician import Technician
+    import uuid as _uuid
+    token = payload.get("token", "")
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+    try:
+        tech_uuid = _uuid.UUID(tech_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tech_id")
+    tech = db.query(Technician).filter(Technician.id == tech_uuid).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    tech.fcm_token = token
+    db.commit()
+    logger.info("FCM token saved for technician %s", tech.name)
+    return {"status": "ok"}
 
 
 # ── Manual trigger: morning location request ─────────────────────────────────
