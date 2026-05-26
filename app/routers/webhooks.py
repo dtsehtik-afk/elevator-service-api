@@ -452,7 +452,7 @@ def receive_whatsapp(
                         age = (now - tech.last_location_at.replace(tzinfo=_tz.utc)
                                if tech.last_location_at.tzinfo is None
                                else now - tech.last_location_at)
-                        if age < timedelta(minutes=5) and msg_type == "liveLocationMessage":
+                        if age < timedelta(minutes=5):
                             skipped.append(tech.name)
                             continue
                     tech.current_latitude  = float(lat)
