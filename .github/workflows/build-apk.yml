@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - 'frontend/**'
+      - '.github/workflows/build-apk.yml'
 
 jobs:
   build-apk:
@@ -115,7 +116,7 @@ jobs:
 
       - name: Build APK
         working-directory: frontend/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
