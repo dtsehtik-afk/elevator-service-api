@@ -1,23 +1,55 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
-import { Stack, Title, Group, Text, Badge, Paper, Loader, Center } from '@mantine/core'
+import { MapContainer, TileLayer, CircleMarker, Popup, Marker, Tooltip } from 'react-leaflet'
+import { Stack, Title, Group, Text, Badge, Paper, Loader, Center, Switch } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { listElevators } from '../api/elevators'
 import { listCalls } from '../api/calls'
 import { getMe } from '../api/auth'
+import { listTechnicians } from '../api/technicians'
 import 'leaflet/dist/leaflet.css'
+import L from 'leaflet'
 
 import { useState } from 'react'
+
+// Build a coloured SVG pin for technicians
+function techIcon(color: string) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:36px;height:36px;border-radius:50% 50% 50% 0;
+      background:${color};border:3px solid white;
+      transform:rotate(-45deg);
+      box-shadow:0 2px 6px rgba(0,0,0,.4)">
+    </div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -38],
+  })
+}
+
+function staleness(ts: string | null): { label: string; color: string } {
+  if (!ts) return { label: 'לא ידוע', color: '#868e96' }
+  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000)
+  if (mins < 5)  return { label: `לפני ${mins} דק'`, color: '#2f9e44' }
+  if (mins < 30) return { label: `לפני ${mins} דק'`, color: '#f59f00' }
+  return { label: `לפני ${mins} דק'`, color: '#e03131' }
+}
 
 export default function MapPage() {
   const navigate = useNavigate()
   const [, setDummy] = useState(0) // for re-render
+  const [showTechs, setShowTechs] = useState(true)
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: getMe })
   const { data: elevators = [], isLoading: loadingElevs } = useQuery({
     queryKey: ['elevators', 'map'],
     queryFn: () => listElevators({ limit: 2000 }),
+  })
+  const { data: technicians = [], isLoading: loadingTechs } = useQuery({
+    queryKey: ['technicians', 'map'],
+    queryFn: listTechnicians,
+    refetchInterval: 30000, // refresh every 30s
   })
 
   // Calls assigned to me (ASSIGNED/IN_PROGRESS) + open unassigned calls
@@ -31,7 +63,12 @@ export default function MapPage() {
     queryFn: () => listCalls({ status: 'OPEN', limit: 500 }),
   })
 
-  const isLoading = loadingElevs || loadingMy || loadingOpen
+  const isLoading = loadingElevs || loadingMy || loadingOpen || loadingTechs
+
+  const techsWithLocation = useMemo(
+    () => technicians.filter(t => t.current_latitude && t.current_longitude),
+    [technicians]
+  )
 
   const elevMap = useMemo(() => {
     const m: Record<string, typeof elevators[0]> = {}
@@ -70,9 +107,17 @@ export default function MapPage() {
         <Title order={2}>🗺️ מפת קריאות ({mapped.length})</Title>
       </Group>
 
-      <Group gap="xs">
-        <Badge color="blue" variant="light">🔵 הקריאות שלי ({myCalls.filter(c => !['CLOSED','CANCELLED'].includes(c.status) && elevMap[c.elevator_id]?.latitude).length})</Badge>
-        <Badge color="red" variant="light">🔴 ממתינות לשיוך ({unassigned.filter(c => elevMap[c.elevator_id]?.latitude).length})</Badge>
+      <Group gap="xs" justify="space-between">
+        <Group gap="xs">
+          <Badge color="blue" variant="light">🔵 הקריאות שלי ({myCalls.filter(c => !['CLOSED','CANCELLED'].includes(c.status) && elevMap[c.elevator_id]?.latitude).length})</Badge>
+          <Badge color="red" variant="light">🔴 ממתינות לשיוך ({unassigned.filter(c => elevMap[c.elevator_id]?.latitude).length})</Badge>
+          <Badge color="green" variant="light">📍 טכנאים עם מיקום ({techsWithLocation.length})</Badge>
+        </Group>
+        <Switch
+          label="הצג טכנאים"
+          checked={showTechs}
+          onChange={e => setShowTechs(e.currentTarget.checked)}
+        />
       </Group>
 
       <Paper withBorder radius="md" style={{ overflow: 'hidden', position: 'relative' }}>
@@ -118,6 +163,35 @@ export default function MapPage() {
               </Popup>
             </CircleMarker>
           ))}
+
+          {showTechs && techsWithLocation.map(t => {
+            const { label, color } = staleness(t.last_location_at)
+            const lat = t.current_latitude!
+            const lng = t.current_longitude!
+            return (
+              <Marker key={t.id} position={[lat, lng]} icon={techIcon(color)}>
+                <Tooltip permanent direction="top" offset={[0, -38]}
+                  className="" opacity={0.95}>
+                  <span style={{ fontWeight: 600, fontSize: 12 }}>{t.name}</span>
+                </Tooltip>
+                <Popup>
+                  <div style={{ minWidth: 210, fontFamily: 'sans-serif', direction: 'rtl' }}>
+                    <b>👷 {t.name}</b><br />
+                    <small style={{ color }}>⏱ {label}</small><br />
+                    <small style={{ color: '#555' }}>
+                      {lat.toFixed(6)}, {lng.toFixed(6)}
+                    </small><br />
+                    <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+                      <a href={`https://maps.google.com/?q=${lat},${lng}`}
+                         target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>🗺 Google Maps</a>
+                      <a href={`https://waze.com/ul?ll=${lat},${lng}`}
+                         target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>🚘 Waze</a>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            )
+          })}
         </MapContainer>
       </Paper>
     </Stack>
