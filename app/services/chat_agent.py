@@ -270,6 +270,14 @@ _GEMINI_TOOLS = [{
                 "tags": {"type": "STRING", "description": "מילות מפתח מופרדות בפסיקים"},
             }, "required": ["question", "answer"]},
         },
+        {
+            "name": "transfer_to_monitoring",
+            "description": "מעביר קריאת שירות לסטטוס מעקב (MONITORING) ומוסיף הערות. השתמש כאשר הבעיה נפתרה זמנית ויש לעקוב, או כאשר המשתמש אומר 'העבר למעקב', 'מעקב', 'עקוב'. השתמש רק לאחר קבלת אישור מפורש מהמשתמש.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "call_id": {"type": "STRING", "description": "UUID של הקריאה"},
+                "notes": {"type": "STRING", "description": "הערות — מה קרה ולמה עוברים למעקב"},
+            }, "required": ["call_id"]},
+        },
     ]
 }]
 
@@ -763,6 +771,24 @@ def _transfer_to_quote(db: Session, call_id: str, notes: str = "") -> dict:
         call.resolution_notes = f"{existing}\n[הצעת מחיר]: {notes}".strip()
     db.commit()
     return {"success": True, "call_number": call.call_number, "quote_needed": True}
+
+
+def _transfer_to_monitoring(db: Session, call_id: str, notes: str = "") -> dict:
+    """Set service call status to MONITORING."""
+    import uuid as _uuid
+    try:
+        cid = _uuid.UUID(call_id)
+    except ValueError:
+        return {"error": "מזהה קריאה לא תקין"}
+    call = db.query(ServiceCall).filter(ServiceCall.id == cid).first()
+    if not call:
+        return {"error": "הקריאה לא נמצאה"}
+    call.status = "MONITORING"
+    if notes:
+        existing = call.resolution_notes or ""
+        call.resolution_notes = f"{existing}\n[מעקב]: {notes}".strip()
+    db.commit()
+    return {"success": True, "call_number": call.call_number, "status": "MONITORING"}
 
 
 def _get_technician_route(db: Session, tech_id: str = None, technician_name: str = None) -> dict:
@@ -1413,6 +1439,8 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
         return _assign_service_call(db, tool_input["call_id"], tool_input["technician_name"])
     elif tool_name == "transfer_to_quote":
         return _transfer_to_quote(db, tool_input["call_id"], tool_input.get("notes", ""))
+    elif tool_name == "transfer_to_monitoring":
+        return _transfer_to_monitoring(db, tool_input["call_id"], tool_input.get("notes", ""))
     elif tool_name == "get_technician_route":
         return _get_technician_route(db, technician_name=tool_input["technician_name"])
     elif tool_name == "get_my_calls":
@@ -1579,9 +1607,10 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 
 ══ כלל אישור — לכל פעולה שמשנה נתונים ══
 כל פעולה שמשנה, יוצרת או מוחקת נתונים חייבת אישור מפורש לפני הביצוע.
-כולל: סגירת קריאה, שיבוץ טכנאי, העברה להצעת מחיר, ועוד.
+כולל: סגירת קריאה, שיבוץ טכנאי, העברה להצעת מחיר, העברה למעקב, ועוד.
 אזהרה חמורה לגבי סגירת קריאות: לעולם אל תסגור מספר קריאות במקביל, גם אם נראה לך שהתבקשת. סגור אך ורק קריאה בודדת אחת, לאחר וידוא זהותה (מס' קריאה), ולעולם אל תשתמש בהודעה הקולית כ"הערות סגירה" אלא אם התבקשת מפורשות!
-אישור תקף: כן / לא / 1 / 2 / אישור / ביטול. הודעה עמומה — המתן.
+אישור תקף: כן / לא / 1 / 2 / אישור / ביטול / בסדר / אוקיי / ok / yep.
+כלל ברזל: אם שאלת "האם לבצע X?" ובתגובה הבאה המשתמש כתב רק "כן" או "אישור" או "בסדר" — בצע מיד. אסור לשאול שוב "האם...?". שאלת אישור אחת בלבד לכל פעולה.
 
 ══ כלל הרשאות ══
 פרטי ההרשאות של המשתמש יסופקו בהקשר. הצג רק מידע שהתפקיד שלו מורשה לראות.
@@ -1600,7 +1629,8 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 • "התחלתי / אני שם / מתחיל לטפל" → mark_call_in_progress()
 
 כלל ברזל: close_my_active_call ו-take_service_call — בצע מיד כשהכוונה ברורה. אל תבקש אישור חוזר.
-כלל ברזל: close_service_call (הכלי הישן לסגירה לפי call_id) — דורש אישור מפורש לפני ביצוע."""
+כלל ברזל: close_service_call (הכלי הישן לסגירה לפי call_id) — דורש אישור מפורש לפני ביצוע.
+• "העבר למעקב / מעקב" + מספר קריאה → get_call_by_number → transfer_to_monitoring(call_id=..., notes=...)  [דורש אישור]"""
 
 
 def _load_conversation_history(db: Session, phone: str, limit: int = 20) -> list:
@@ -1932,6 +1962,14 @@ _ANTHROPIC_TOOLS = [
     {
         "name": "transfer_to_quote",
         "description": "מסמן קריאה כדורשת הצעת מחיר. השתמש רק לאחר קבלת אישור מפורש.",
+        "input_schema": {"type": "object", "properties": {
+            "call_id": {"type": "string"},
+            "notes": {"type": "string"},
+        }, "required": ["call_id"]},
+    },
+    {
+        "name": "transfer_to_monitoring",
+        "description": "מעביר קריאה לסטטוס מעקב (MONITORING). השתמש רק לאחר קבלת אישור מפורש.",
         "input_schema": {"type": "object", "properties": {
             "call_id": {"type": "string"},
             "notes": {"type": "string"},
