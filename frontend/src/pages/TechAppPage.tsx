@@ -13,6 +13,7 @@ import 'leaflet/dist/leaflet.css'
 import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor } from '@capacitor/core'
 import { BackgroundRunner } from '@capacitor/background-runner'
+import { PushNotifications } from '@capacitor/push-notifications'
 import { useAuthStore } from '../stores/authStore'
 import { login as apiLogin } from '../api/auth'
 import client from '../api/client'
@@ -682,6 +683,63 @@ function TechMain() {
   const techId = me?.id ?? null
 
   const { status: gpsStatus, lastSentAt } = useGPS(techId)
+
+  // ── FCM: register push token + handle silent location-request pushes ──────
+  useEffect(() => {
+    if (!techId || !Capacitor.isNativePlatform()) return
+
+    const setupFCM = async () => {
+      try {
+        const permission = await PushNotifications.requestPermissions()
+        if (permission.receive !== 'granted') return
+
+        await PushNotifications.register()
+
+        // Save FCM token to server whenever it is issued / rotated
+        PushNotifications.addListener('registration', async (token) => {
+          try {
+            await fetch(`${BASE}/webhooks/fcm-token/${techId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: token.value }),
+            })
+          } catch { /* ignore — server will get the token on next registration */ }
+        })
+
+        // Handle push while app is in foreground
+        PushNotifications.addListener('pushNotificationReceived', (notification) => {
+          if (notification.data?.type === 'location_request') {
+            Geolocation.getCurrentPosition({
+              enableHighAccuracy: true,
+              maximumAge: 0,
+              timeout: 15000,
+            }).then(pos => {
+              sendLocation(techId, pos.coords.latitude, pos.coords.longitude)
+            }).catch(() => {})
+          }
+        })
+
+        // Handle push when app was backgrounded or closed
+        PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+          if (action.notification.data?.type === 'location_request') {
+            Geolocation.getCurrentPosition({
+              enableHighAccuracy: true,
+              maximumAge: 0,
+              timeout: 15000,
+            }).then(pos => {
+              sendLocation(techId, pos.coords.latitude, pos.coords.longitude)
+            }).catch(() => {})
+          }
+        })
+      } catch { /* FCM not available (web / simulator) — silently skip */ }
+    }
+
+    setupFCM()
+
+    return () => {
+      PushNotifications.removeAllListeners()
+    }
+  }, [techId])
 
   const { data: pending = [], isLoading } = useQuery({
     queryKey: ['pending', techId],

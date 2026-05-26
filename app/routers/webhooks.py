@@ -950,6 +950,33 @@ def update_location(
     return {"status": "ok", "name": tech.name}
 
 
+# ── FCM token registration ────────────────────────────────────────────────────
+
+@router.post(
+    "/fcm-token/{tech_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Save FCM push token for a technician (called from mobile app on login)",
+)
+def save_fcm_token(tech_id: str, payload: dict, db: Session = Depends(get_db)):
+    """Store the FCM device token so the server can send silent push notifications."""
+    from app.models.technician import Technician
+    import uuid as _uuid
+    token = payload.get("token", "")
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+    try:
+        tech_uuid = _uuid.UUID(tech_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tech_id")
+    tech = db.query(Technician).filter(Technician.id == tech_uuid).first()
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+    tech.fcm_token = token
+    db.commit()
+    logger.info("FCM token saved for technician %s", tech.name)
+    return {"status": "ok"}
+
+
 # ── Manual trigger: morning location request ─────────────────────────────────
 
 @router.post(

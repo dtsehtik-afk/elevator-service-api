@@ -73,6 +73,8 @@ class Technician(Base):
     current_longitude: Mapped[float] = mapped_column(Float, nullable=True)
     # Timestamp of last successful live location update (for reminder logic)
     last_location_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    # FCM token for silent push notifications (location wake-up)
+    fcm_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
