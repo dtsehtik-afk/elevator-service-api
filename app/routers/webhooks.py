@@ -923,6 +923,43 @@ if ('wakeLock' in navigator) {{
     return HTMLResponse(content=html)
 
 
+@router.get(
+    "/location-request/{tech_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Check if fresh GPS is requested for this technician (polled by tech app)",
+)
+def check_location_request(tech_id: str, db: Session = Depends(get_db)):
+    """
+    The technician app polls this every 15 seconds.
+    Returns {requested: true} when the WhatsApp bot has flagged that it needs a fresh location.
+    The request is only valid for 2 minutes and only if it is newer than the last GPS update.
+    """
+    from app.models.technician import Technician
+    from datetime import datetime, timezone
+    import uuid as _uuid
+    try:
+        tech = db.query(Technician).filter(Technician.id == _uuid.UUID(tech_id)).first()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tech_id")
+    if not tech:
+        raise HTTPException(status_code=404, detail="Technician not found")
+
+    requested = False
+    if tech.location_requested_at:
+        req_at = tech.location_requested_at
+        # Normalise to UTC-aware
+        if req_at.tzinfo is None:
+            req_at = req_at.replace(tzinfo=timezone.utc)
+        last_loc = tech.last_location_at
+        if last_loc and last_loc.tzinfo is None:
+            last_loc = last_loc.replace(tzinfo=timezone.utc)
+        # Only pending if newer than last GPS update
+        if not last_loc or req_at > last_loc:
+            age = (datetime.now(timezone.utc) - req_at).total_seconds()
+            requested = age < 120  # expire after 2 minutes
+    return {"requested": requested}
+
+
 @router.post(
     "/location/{technician_id}",
     status_code=status.HTTP_200_OK,
@@ -945,6 +982,8 @@ def update_location(
     tech.current_latitude  = payload.latitude
     tech.current_longitude = payload.longitude
     tech.last_location_at  = datetime.now(timezone.utc)
+    # Clear any pending location request now that fresh GPS has been received
+    tech.location_requested_at = None
     db.commit()
     logger.warning("📍 Live location updated for %s: %.4f, %.4f", tech.name, payload.latitude, payload.longitude)
     return {"status": "ok", "name": tech.name}

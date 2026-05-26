@@ -40,6 +40,7 @@ def _get_client_ip(request: Request) -> str:
 
 def _record_login(db: Session, technician_id, ip: str, user_agent: str, success: bool):
     try:
+        nested = db.begin_nested()
         db.execute(
             text(
                 "INSERT INTO login_history (technician_id, ip_address, user_agent, success) "
@@ -47,20 +48,27 @@ def _record_login(db: Session, technician_id, ip: str, user_agent: str, success:
             ),
             {"tid": str(technician_id), "ip": ip, "ua": user_agent[:500], "ok": success},
         )
+        nested.commit()
         db.commit()
     except Exception:
-        db.rollback()
+        try:
+            nested.rollback()
+        except Exception:
+            pass
 
 
 def _is_new_ip(db: Session, technician_id, ip: str) -> bool:
-    row = db.execute(
-        text(
-            "SELECT 1 FROM login_history WHERE technician_id = :tid AND ip_address = :ip "
-            "AND success = TRUE LIMIT 1"
-        ),
-        {"tid": str(technician_id), "ip": ip},
-    ).fetchone()
-    return row is None
+    try:
+        row = db.execute(
+            text(
+                "SELECT 1 FROM login_history WHERE technician_id = :tid AND ip_address = :ip "
+                "AND success = TRUE LIMIT 1"
+            ),
+            {"tid": str(technician_id), "ip": ip},
+        ).fetchone()
+        return row is None
+    except Exception:
+        return False
 
 
 def _alert_admins_new_ip(db: Session, user: Technician, ip: str):

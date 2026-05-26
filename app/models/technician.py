@@ -73,6 +73,8 @@ class Technician(Base):
     current_longitude: Mapped[float] = mapped_column(Float, nullable=True)
     # Timestamp of last successful live location update (for reminder logic)
     last_location_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set by bot when it wants a fresh GPS pull from the technician's app
+    location_requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
     totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
