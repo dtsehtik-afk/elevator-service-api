@@ -14,6 +14,9 @@ import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor } from '@capacitor/core'
 import { BackgroundRunner } from '@capacitor/background-runner'
 import { PushNotifications } from '@capacitor/push-notifications'
+import { registerPlugin } from '@capacitor/core'
+import type { BackgroundGeolocationPlugin } from '@capacitor-community/background-geolocation'
+const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation')
 import { useAuthStore } from '../stores/authStore'
 import { login as apiLogin } from '../api/auth'
 import client from '../api/client'
@@ -268,26 +271,22 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 function useGPS(techId: string | null) {
   const [status, setStatus] = useState<'idle' | 'active' | 'error'>('idle')
   const [lastSentAt, setLastSentAt] = useState<Date | null>(null)
-  const watchIdRef = useRef<string | null>(null)
-  const cancelledRef = useRef(false)
-  const lastSentMsRef = useRef(0)
-  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const bgWatcherRef = useRef<string | null>(null)
   const locationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastSentMsRef = useRef(0)
 
   const stop = () => {
-    cancelledRef.current = true
-    if (watchIdRef.current !== null) {
-      Geolocation.clearWatch({ id: watchIdRef.current }).catch(() => {})
-      watchIdRef.current = null
+    if (bgWatcherRef.current !== null) {
+      BackgroundGeolocation.removeWatcher({ id: bgWatcherRef.current }).catch(() => {})
+      bgWatcherRef.current = null
     }
-    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null }
     if (locationPollRef.current) { clearInterval(locationPollRef.current); locationPollRef.current = null }
     setStatus('idle')
   }
 
   const doSend = (tid: string, lat: number, lng: number, accuracy?: number) => {
     const now = Date.now()
-    if (now - lastSentMsRef.current < 5000) return  // throttle: max once per 5s
+    if (now - lastSentMsRef.current < 5000) return
     lastSentMsRef.current = now
     sendLocation(tid, lat, lng, accuracy)
       .then(() => { setLastSentAt(new Date()); setStatus('active') })
@@ -295,7 +294,6 @@ function useGPS(techId: string | null) {
   }
 
   const doSendImmediate = (tid: string, lat: number, lng: number, accuracy?: number) => {
-    // Bypass throttle — called when bot explicitly requests fresh GPS
     lastSentMsRef.current = Date.now()
     sendLocation(tid, lat, lng, accuracy)
       .then(() => { setLastSentAt(new Date()); setStatus('active') })
@@ -303,55 +301,32 @@ function useGPS(techId: string | null) {
   }
 
   useEffect(() => {
-    if (!techId) {
-      if (Capacitor.isNativePlatform()) {
-        BackgroundRunner.dispatchEvent({
-          label: 'com.akord.elevators.location',
-          event: 'setTechId',
-          details: { techId: '' },
-        }).catch(() => {})
-      }
-      return
-    }
-    cancelledRef.current = false
+    if (!techId) { stop(); return }
 
     ;(async () => {
       try {
-        if (Capacitor.isNativePlatform()) {
-          const perm = await Geolocation.requestPermissions()
-          if (cancelledRef.current) return
-          if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
-            setStatus('error')
-            return
-          }
-          // Store techId for background WorkManager job and request "always" location
-          BackgroundRunner.dispatchEvent({
-            label: 'com.akord.elevators.location',
-            event: 'setTechId',
-            details: { techId },
-          }).catch(() => {})
-          BackgroundRunner.requestPermissions({ apis: ['geolocation'] }).catch(() => {})
-        }
-
-        const id = await Geolocation.watchPosition(
-          // maximumAge: 0 — never return a cached GPS position
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
-          (pos, err) => {
-            if (err || !pos) { setStatus('error'); return }
-            // Reject poor-accuracy fixes (stale cache / cell-tower fallback)
-            if ((pos.coords.accuracy ?? 9999) > 150) return
-            doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
+        // BackgroundGeolocation creates a native Foreground Service on Android —
+        // runs continuously even when the app is minimised, exactly like Waze.
+        const watcherId = await BackgroundGeolocation.addWatcher(
+          {
+            backgroundMessage: 'מעקב מיקום פעיל — לחץ לפתיחת האפליקציה',
+            backgroundTitle: 'Lift Agent',
+            requestPermissions: true,
+            stationaryRadius: 30,  // metres of movement to wake up when stationary
+            distanceFilter: 15,    // metres between updates when moving
+          },
+          (position, error) => {
+            if (error) { setStatus('error'); return }
+            if (!position) return
+            // Reject poor-accuracy fixes (network/cached fallback)
+            if ((position.accuracy ?? 9999) > 150) return
+            doSend(techId, position.latitude, position.longitude, position.accuracy ?? undefined)
           }
         )
-
-        if (cancelledRef.current) {
-          Geolocation.clearWatch({ id }).catch(() => {})
-          return
-        }
-        watchIdRef.current = id
-
+        bgWatcherRef.current = watcherId
+        setStatus('active')
       } catch {
-        if (!cancelledRef.current) setStatus('error')
+        setStatus('error')
       }
     })()
 
