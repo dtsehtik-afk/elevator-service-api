@@ -953,6 +953,17 @@ def update_location(
     if not tech:
         raise HTTPException(status_code=404, detail="Technician not found")
 
+    # Geofence: reject coordinates clearly outside Israel (lat 29.0–33.5, lon 34.0–35.9)
+    # Longitude cap 35.9 catches Jordanian territory at latitude ~32°N (Jordan starts ~35.5°E there)
+    ISRAEL_LAT_MIN, ISRAEL_LAT_MAX = 29.0, 33.5
+    ISRAEL_LON_MIN, ISRAEL_LON_MAX = 34.0, 35.9
+    if not (ISRAEL_LAT_MIN <= payload.latitude <= ISRAEL_LAT_MAX and
+            ISRAEL_LON_MIN <= payload.longitude <= ISRAEL_LON_MAX):
+        logger.warning("📍 GPS outside Israel rejected for %s: (%.4f, %.4f)",
+                       tech.name, payload.latitude, payload.longitude)
+        return {"status": "rejected", "reason": "outside_israel",
+                "lat": payload.latitude, "lon": payload.longitude}
+
     # Sanity check: reject implausibly large jumps (>120 km in <5 min = bad GPS fix)
     if tech.current_latitude and tech.current_longitude and tech.last_location_at:
         from math import radians, sin, cos, sqrt, atan2
