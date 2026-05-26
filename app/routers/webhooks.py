@@ -966,27 +966,30 @@ def update_location(
         return {"status": "rejected", "reason": "outside_israel",
                 "lat": payload.latitude, "lon": payload.longitude}
 
-    # Sanity check: reject implausibly large jumps (>120 km in <5 min = bad GPS fix)
+    # Velocity sanity check: reject if implied speed > 250 km/h (catches network/cell ghost fixes)
+    # Applies when last fix is within the past hour; older fixes allow any location.
     if tech.current_latitude and tech.current_longitude and tech.last_location_at:
         from math import radians, sin, cos, sqrt, atan2
-        from datetime import timedelta
         age = datetime.now(timezone.utc) - (
             tech.last_location_at.replace(tzinfo=timezone.utc)
             if tech.last_location_at.tzinfo is None else tech.last_location_at
         )
-        if age < timedelta(minutes=5):
+        age_seconds = age.total_seconds()
+        if 0 < age_seconds < 3600:
             R = 6371
             lat1, lon1 = radians(tech.current_latitude), radians(tech.current_longitude)
             lat2, lon2 = radians(payload.latitude), radians(payload.longitude)
             dlat, dlon = lat2 - lat1, lon2 - lon1
             a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
             dist_km = 2 * R * atan2(sqrt(a), sqrt(1 - a))
-            if dist_km > 120:
-                logger.warning("📍 GPS jump rejected for %s: %.1f km in %.0f s (%.4f,%.4f → %.4f,%.4f)",
-                               tech.name, dist_km, age.total_seconds(),
+            speed_kmh = dist_km / (age_seconds / 3600)
+            if speed_kmh > 250:
+                logger.warning("📍 GPS velocity rejected for %s: %.1f km in %.0f s = %.0f km/h (%.4f,%.4f → %.4f,%.4f)",
+                               tech.name, dist_km, age_seconds, speed_kmh,
                                tech.current_latitude, tech.current_longitude,
                                payload.latitude, payload.longitude)
-                return {"status": "rejected", "reason": "implausible_jump", "distance_km": round(dist_km, 1)}
+                return {"status": "rejected", "reason": "implausible_velocity",
+                        "distance_km": round(dist_km, 1), "speed_kmh": round(speed_kmh)}
 
     tech.current_latitude  = payload.latitude
     tech.current_longitude = payload.longitude
