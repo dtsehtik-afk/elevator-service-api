@@ -262,6 +262,14 @@ _GEMINI_TOOLS = [{
             }, "required": ["incoming_call_id", "elevator_id"]},
         },
         {
+            "name": "plan_weekly_route",
+            "description": "בונה תוכנית עבודה לימים הקרובים — מחלק את כל הקריאות הפתוחות לפי עדיפות וקרבה גיאוגרפית, X קריאות ביום. השתמש כאשר הטכנאי מבקש 'תכנן שבוע', 'כמה ימים קדימה', 'חלק לי את העבודה', 'תבנה מסלול לימים הקרובים'.",
+            "parameters": {"type": "OBJECT", "properties": {
+                "calls_per_day": {"type": "INTEGER", "description": "מספר קריאות ביום (ברירת מחדל: 8)"},
+                "days": {"type": "INTEGER", "description": "מספר ימים לתכנון (ברירת מחדל: 5)"},
+            }, "required": []},
+        },
+        {
             "name": "save_to_qa",
             "description": "שמור שאלה ותשובה חדשה למאגר הידע (QA) של הבוט. השתמש בזה כאשר ענית על שאלה חדשה שהתשובה עליה חשובה, או כאשר למדת מידע חדש מהמשתמש שכדאי לזכור לעתיד.",
             "parameters": {"type": "OBJECT", "properties": {
@@ -1408,6 +1416,116 @@ def _mark_call_in_progress(db: Session, phone: str) -> dict:
     }
 
 
+def _plan_weekly_route(db: Session, phone: str, calls_per_day: int = 8, days: int = 5) -> dict:
+    """Split all open calls for the technician across upcoming days by priority + geography."""
+    from app.models.assignment import Assignment
+    from datetime import date, timedelta
+
+    tech = _find_tech_by_phone(db, phone)
+    if not tech:
+        return {"error": "הטכנאי לא זוהה במערכת"}
+
+    # Collect all open/assigned calls
+    assigned_call_ids = {
+        a.service_call_id
+        for a in db.query(Assignment)
+        .filter(
+            Assignment.technician_id == tech.id,
+            Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]),
+        )
+        .all()
+    }
+    calls_raw = []
+    for call_id in assigned_call_ids:
+        call = db.query(ServiceCall).filter(
+            ServiceCall.id == call_id,
+            ServiceCall.status.notin_(["CLOSED", "RESOLVED", "CANCELLED"]),
+        ).first()
+        if not call:
+            continue
+        elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+        if not elev:
+            continue
+        from app.services.maps_service import ensure_elevator_coords
+        lat, lng = ensure_elevator_coords(db, elev)
+        calls_raw.append({
+            "call": call,
+            "elev": elev,
+            "lat": lat,
+            "lng": lng,
+            "priority_w": {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}.get(call.priority, 2),
+        })
+
+    if not calls_raw:
+        return {"תוצאה": "אין קריאות פתוחות ממתינות לתכנון"}
+
+    # Sort: CRITICAL first, then greedy nearest-neighbor within each priority tier
+    calls_raw.sort(key=lambda x: x["priority_w"])
+
+    # Greedy nearest-neighbor pass across ALL calls
+    from app.services.route_service import _haversine_km
+    start_lat = tech.current_latitude or 32.08
+    start_lng = tech.current_longitude or 34.78
+    ordered = []
+    pool = list(calls_raw)
+    cur_lat, cur_lng = start_lat, start_lng
+
+    while pool:
+        best_idx = 0
+        best_score = float("inf")
+        for i, item in enumerate(pool):
+            dist = _haversine_km(cur_lat, cur_lng, item["lat"], item["lng"])
+            score = dist + item["priority_w"] * 5  # weight priority
+            if score < best_score:
+                best_score = score
+                best_idx = i
+        chosen = pool.pop(best_idx)
+        ordered.append(chosen)
+        cur_lat, cur_lng = chosen["lat"], chosen["lng"]
+
+    # Split into daily chunks; skip Saturdays
+    _PRIORITY_HE = {"CRITICAL": "קריטי 🔴", "HIGH": "גבוה 🟠", "MEDIUM": "בינוני 🟡", "LOW": "נמוך 🟢"}
+    plan = []
+    today = date.today()
+    chunk_start = 0
+    for day_offset in range(days * 2):  # extra range to skip Saturdays
+        if chunk_start >= len(ordered):
+            break
+        day = today + timedelta(days=day_offset + 1)
+        if day.weekday() == 5:  # Saturday
+            continue
+        chunk = ordered[chunk_start: chunk_start + calls_per_day]
+        chunk_start += calls_per_day
+        day_calls = []
+        for item in chunk:
+            call = item["call"]
+            elev = item["elev"]
+            day_calls.append({
+                "קריאה": f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8],
+                "כתובת": f"{elev.address}, {elev.city}",
+                "עדיפות": _PRIORITY_HE.get(call.priority, call.priority),
+                "תיאור": (call.description or "")[:60],
+            })
+        plan.append({
+            "יום": day.strftime("%A %d/%m").replace("Monday", "שני").replace("Tuesday", "שלישי")
+                       .replace("Wednesday", "רביעי").replace("Thursday", "חמישי")
+                       .replace("Friday", "שישי").replace("Sunday", "ראשון"),
+            "תאריך": day.strftime("%d/%m/%Y"),
+            "מספר_קריאות": len(day_calls),
+            "קריאות": day_calls,
+        })
+        if len(plan) >= days:
+            break
+
+    return {
+        "טכנאי": tech.name,
+        "סה_כ_קריאות": len(ordered),
+        "ימים_בתוכנית": len(plan),
+        "תוכנית": plan,
+        "_הנחיה": "הצג את התוכנית יום אחד אחרי השני עם כל הקריאות. ציין בכל יום את מספר הקריאות ואת הכתובות לפי סדר.",
+    }
+
+
 # ── Tool dispatcher ───────────────────────────────────────────────────────────
 
 def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") -> Any:
@@ -1478,6 +1596,12 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
         return _close_my_active_call(db, phone, tool_input.get("resolution_notes", ""), tool_input.get("quote_needed", False))
     elif tool_name == "get_my_route":
         return _get_my_route_by_phone(db, phone)
+    elif tool_name == "plan_weekly_route":
+        return _plan_weekly_route(
+            db, phone,
+            calls_per_day=int(tool_input.get("calls_per_day", 8)),
+            days=int(tool_input.get("days", 5)),
+        )
     elif tool_name == "request_call_from_dispatcher":
         return _request_call_from_dispatcher(db, phone, tool_input.get("address_hint", ""))
     elif tool_name == "mark_call_in_progress":
