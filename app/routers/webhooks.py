@@ -952,6 +952,29 @@ def update_location(
     ).first()
     if not tech:
         raise HTTPException(status_code=404, detail="Technician not found")
+
+    # Sanity check: reject implausibly large jumps (>120 km in <5 min = bad GPS fix)
+    if tech.current_latitude and tech.current_longitude and tech.last_location_at:
+        from math import radians, sin, cos, sqrt, atan2
+        from datetime import timedelta
+        age = datetime.now(timezone.utc) - (
+            tech.last_location_at.replace(tzinfo=timezone.utc)
+            if tech.last_location_at.tzinfo is None else tech.last_location_at
+        )
+        if age < timedelta(minutes=5):
+            R = 6371
+            lat1, lon1 = radians(tech.current_latitude), radians(tech.current_longitude)
+            lat2, lon2 = radians(payload.latitude), radians(payload.longitude)
+            dlat, dlon = lat2 - lat1, lon2 - lon1
+            a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+            dist_km = 2 * R * atan2(sqrt(a), sqrt(1 - a))
+            if dist_km > 120:
+                logger.warning("📍 GPS jump rejected for %s: %.1f km in %.0f s (%.4f,%.4f → %.4f,%.4f)",
+                               tech.name, dist_km, age.total_seconds(),
+                               tech.current_latitude, tech.current_longitude,
+                               payload.latitude, payload.longitude)
+                return {"status": "rejected", "reason": "implausible_jump", "distance_km": round(dist_km, 1)}
+
     tech.current_latitude  = payload.latitude
     tech.current_longitude = payload.longitude
     tech.last_location_at  = datetime.now(timezone.utc)
