@@ -93,16 +93,30 @@ jobs:
           echo "=== push-notifications build.gradle after patch ==="
           grep -n "VERSION\|jvmTarget\|compileOptions\|sourceCompatibility\|targetCompatibility" "$PN" || true
 
-          # 6. capacitor-geolocation — patch defensively
+          # 6. capacitor-geolocation — patch Java AND Kotlin target
           GEO="frontend/node_modules/@capacitor/geolocation/android/build.gradle"
-          [ -f "$GEO" ] && sed -i 's/VERSION_21/VERSION_17/g' "$GEO" || true
+          if [ -f "$GEO" ]; then
+            sed -i 's/VERSION_21/VERSION_17/g' "$GEO"
+            if ! grep -q 'kotlinOptions' "$GEO"; then
+              sed -i 's/    compileOptions {/    kotlinOptions {\n        jvmTarget = "17"\n    }\n    compileOptions {/' "$GEO"
+            fi
+            echo "=== geolocation build.gradle (kotlin+java) ==="
+            grep -n "VERSION\|jvmTarget\|compileOptions\|kotlinOptions" "$GEO" || true
+          fi
 
-          # 7. capacitor-community/background-geolocation — patch defensively
+          # 7. capacitor-push-notifications — patch Kotlin target too
+          if ! grep -q 'kotlinOptions' "$PN"; then
+            sed -i 's/    compileOptions {/    kotlinOptions {\n        jvmTarget = "17"\n    }\n    compileOptions {/' "$PN"
+          fi
+
+          # 8. capacitor-community/background-geolocation — patch defensively
           BGGEO="frontend/node_modules/@capacitor-community/background-geolocation/android/build.gradle"
           if [ -f "$BGGEO" ]; then
             sed -i 's/VERSION_21/VERSION_17/g' "$BGGEO"
-            echo "=== background-geolocation build.gradle after patch ==="
-            grep -n "VERSION\|jvmTarget\|compileOptions" "$BGGEO" || true
+            if ! grep -q 'kotlinOptions' "$BGGEO"; then
+              sed -i 's/    compileOptions {/    kotlinOptions {\n        jvmTarget = "17"\n    }\n    compileOptions {/' "$BGGEO"
+            fi
+            grep -n "VERSION\|jvmTarget\|compileOptions\|kotlinOptions" "$BGGEO" || true
           fi
 
       - name: Copy background-runner native AAR
