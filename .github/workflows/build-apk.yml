@@ -104,11 +104,6 @@ jobs:
             grep -n "VERSION\|jvmTarget\|compileOptions\|kotlinOptions" "$GEO" || true
           fi
 
-          # 7. capacitor-push-notifications — patch Kotlin target too
-          if ! grep -q 'kotlinOptions' "$PN"; then
-            sed -i 's/    compileOptions {/    kotlinOptions {\n        jvmTarget = "17"\n    }\n    compileOptions {/' "$PN"
-          fi
-
           # 8. capacitor-community/background-geolocation — patch defensively
           BGGEO="frontend/node_modules/@capacitor-community/background-geolocation/android/build.gradle"
           if [ -f "$BGGEO" ]; then
