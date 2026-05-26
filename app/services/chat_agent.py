@@ -1627,6 +1627,13 @@ def _load_conversation_history(db: Session, phone: str, limit: int = 20) -> list
                 continue
             role = "user" if m.direction == "in" else "model"
             turns.append({"role": role, "parts": [{"text": text}]})
+        # Strip model responses that contain location data — they go stale instantly
+        # and cause Gemini to reuse cached coordinates instead of calling the tool
+        def _is_location_response(text: str) -> bool:
+            return "maps.google.com" in text or "קואורדינטות" in text or "סוג מיקום" in text
+
+        turns = [t for t in turns if not (t["role"] == "model" and _is_location_response(t["parts"][0]["text"]))]
+
         # Gemini requires alternating roles — merge consecutive same-role turns
         merged = []
         for turn in turns:
