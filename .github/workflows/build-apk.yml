@@ -91,18 +91,18 @@ jobs:
           PN="frontend/node_modules/@capacitor/push-notifications/android/build.gradle"
           sed -i 's/VERSION_21/VERSION_17/g' "$PN"
           echo "=== push-notifications build.gradle after patch ==="
-          grep -n "VERSION\|jvmTarget\|compileOptions\|sourceCompatibility\|targetCompatibility" "$PN"
+          grep -n "VERSION\|jvmTarget\|compileOptions\|sourceCompatibility\|targetCompatibility" "$PN" || true
 
           # 6. capacitor-geolocation — patch defensively
           GEO="frontend/node_modules/@capacitor/geolocation/android/build.gradle"
-          sed -i 's/VERSION_21/VERSION_17/g' "$GEO"
+          [ -f "$GEO" ] && sed -i 's/VERSION_21/VERSION_17/g' "$GEO" || true
 
           # 7. capacitor-community/background-geolocation — patch defensively
           BGGEO="frontend/node_modules/@capacitor-community/background-geolocation/android/build.gradle"
           if [ -f "$BGGEO" ]; then
             sed -i 's/VERSION_21/VERSION_17/g' "$BGGEO"
             echo "=== background-geolocation build.gradle after patch ==="
-            grep -n "VERSION\|jvmTarget\|compileOptions" "$BGGEO"
+            grep -n "VERSION\|jvmTarget\|compileOptions" "$BGGEO" || true
           fi
 
       - name: Copy background-runner native AAR
