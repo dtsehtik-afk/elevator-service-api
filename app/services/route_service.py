@@ -81,7 +81,7 @@ def build_route(
     tech_lng = technician.current_longitude
     if not tech_lat or not tech_lng:
         logger.warning("Technician %s has no GPS — cannot build route", technician.name)
-        return []
+        return [], []
 
     # ── Collect candidate calls ───────────────────────────────────────────────
     candidates: list[dict] = []

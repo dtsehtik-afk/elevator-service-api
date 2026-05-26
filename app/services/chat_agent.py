@@ -227,7 +227,7 @@ _GEMINI_TOOLS = [{
         },
         {
             "name": "get_my_route",
-            "description": "מחזיר את רשימת הקריאות הפתוחות המשובצות לטכנאי הנוכחי כמסלול עבודה. השתמש כאשר הטכנאי שואל 'מה יש לי', 'שלח מסלול', 'הקריאות שלי', 'סדר יום'.",
+            "description": "מחזיר את המסלול המסודר של הטכנאי כולל קישור ל-Google Maps עם כל העצירות. השתמש כאשר הטכנאי שואל 'מה יש לי', 'שלח מסלול', 'הקריאות שלי', 'סדר יום', 'מסלול על המפה', 'קישור למפה', 'תציג מפה'.",
             "parameters": {"type": "OBJECT", "properties": {}, "required": []},
         },
         {
@@ -1308,13 +1308,48 @@ def _close_my_active_call(db: Session, phone: str, resolution_notes: str = "", q
 
 
 def _get_my_route_by_phone(db: Session, phone: str) -> dict:
-    """Return the optimized current route for the technician identified by phone."""
+    """Return the optimized current route for the technician identified by phone, with a Google Maps link."""
     tech = _find_tech_by_phone(db, phone)
     if not tech:
         return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
-    
-    from app.services.route_service import build_route, format_route_message
+
+    from app.services.route_service import build_route, format_route_message, RouteStop
+    from app.services.maps_service import ensure_elevator_coords
+    from app.models.assignment import Assignment
+
     stops, suggestions = build_route(db, tech)
+
+    # Fallback: if no GPS — build priority-ordered route without nearest-neighbor
+    if not stops:
+        assigned_ids = {
+            a.service_call_id
+            for a in db.query(Assignment)
+            .filter(Assignment.technician_id == tech.id,
+                    Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]))
+            .all()
+        }
+        _PRI_W = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+        pool = []
+        for cid in assigned_ids:
+            call = db.query(ServiceCall).filter(
+                ServiceCall.id == cid, ServiceCall.status.notin_(["CLOSED", "RESOLVED"])
+            ).first()
+            if not call:
+                continue
+            elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+            if not elev:
+                continue
+            lat, lng = ensure_elevator_coords(db, elev)
+            _FAULT_HE = {"STUCK": "מעלית תקועה 🚨", "DOOR": "תקלת דלת", "ELECTRICAL": "חשמלית",
+                         "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית"}
+            pool.append(RouteStop(
+                call_id=str(call.id), elevator_id=str(elev.id),
+                address=elev.address, city=elev.city, building=elev.building_name or "",
+                fault_type=_FAULT_HE.get(call.fault_type, call.fault_type),
+                priority=call.priority, lat=lat, lng=lng, travel_minutes=0,
+            ))
+        stops = sorted(pool, key=lambda s: _PRI_W.get(s.priority, 2))
+
     msg = format_route_message(tech.name, stops, suggestions)
     return {
         "תוצאה": "המסלול חושב בהצלחה",
