@@ -526,6 +526,8 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
     techs = db.query(Technician).filter(Technician.is_active == True).all()  # noqa: E712
     results = []
     now = datetime.now(timezone.utc)
+    stale_techs = []  # collect techs with stale location so we can request a pull
+
     for t in techs:
         if technician_name and technician_name.lower() not in t.name.lower():
             continue
@@ -540,6 +542,13 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
             is_live = False
             age_minutes = None
 
+        # Flag location request on the DB record so the app picks it up within 15 s
+        # Always request a refresh regardless of staleness so the next query gets fresh data
+        try:
+            t.location_requested_at = now
+        except Exception:
+            pass
+
         if has_coords and is_live:
             lat, lng = t.current_latitude, t.current_longitude
             location_type = f"חי (לפני {age_minutes} דק')" if age_minutes is not None else "חי"
@@ -550,12 +559,17 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
                 location_type = f"ישן — לפני {hours} שעות" if hours > 0 else f"ישן — לפני {age_minutes} דק'"
             else:
                 location_type = "ישן (יותר מיום)"
+            # Mark as stale so we can append the pull-request notice
+            if age_minutes is not None and age_minutes > 3:
+                stale_techs.append(t.name)
         elif t.base_latitude and t.base_longitude:
             lat, lng = t.base_latitude, t.base_longitude
             location_type = "מיקום_בסיס (לא חי)"
+            stale_techs.append(t.name)
         else:
             if technician_name:
                 results.append({"שם": t.name, "מיקום": "לא הוגדר מיקום ולא שודר מיקום חי"})
+            stale_techs.append(t.name)
             continue
 
         results.append({
@@ -566,9 +580,23 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
             "זמין": t.is_available,
             "_הנחיה": "חובה לציין במפורש למשתמש את ה'סוג_מיקום' (למשל 'מעודכן מלפני שעתיים' או 'חי') כדי שידע עד כמה המיקום עדכני. הצג גם את קישור המפה ואל תנחש שם עיר.",
         })
+
+    # Persist location_requested_at for all matched technicians
+    try:
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
     if not results:
         return {"תוצאה": "לא נמצא מיקום זמין — ודא שהטכנאי שידר מיקום מהאפליקציה"}
-    return {"טכנאים": results}
+
+    response: dict = {"טכנאים": results}
+    if stale_techs:
+        response["הודעה"] = "🔄 שלחתי בקשה לעדכון מיקום בזמן אמת. ניתן לשאול שוב בעוד 30 שניות."
+    return response
 
 
 def _search_by_phone(db: Session, phone: str) -> list[dict]:

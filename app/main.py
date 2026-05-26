@@ -495,6 +495,8 @@ async def lifespan(app: FastAPI):
                         ALTER TABLE system_settings ALTER COLUMN modules DROP NOT NULL;
                     END IF;
                 END $$""",
+                # Real-time location pull: bot sets this to trigger app GPS fetch
+                "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS location_requested_at TIMESTAMPTZ",
             ]:
                 _conn.execute(_text(_col_sql))
         _conn.commit()

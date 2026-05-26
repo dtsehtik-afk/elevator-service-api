@@ -271,6 +271,7 @@ function useGPS(techId: string | null) {
   const cancelledRef = useRef(false)
   const lastSentMsRef = useRef(0)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const locationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stop = () => {
     cancelledRef.current = true
@@ -279,6 +280,7 @@ function useGPS(techId: string | null) {
       watchIdRef.current = null
     }
     if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null }
+    if (locationPollRef.current) { clearInterval(locationPollRef.current); locationPollRef.current = null }
     setStatus('idle')
   }
 
@@ -286,6 +288,14 @@ function useGPS(techId: string | null) {
     const now = Date.now()
     if (now - lastSentMsRef.current < 30000) return  // throttle: max once per 30s
     lastSentMsRef.current = now
+    sendLocation(tid, lat, lng)
+      .then(() => { setLastSentAt(new Date()); setStatus('active') })
+      .catch(() => {})
+  }
+
+  const doSendImmediate = (tid: string, lat: number, lng: number) => {
+    // Bypass throttle — called when bot explicitly requests fresh GPS
+    lastSentMsRef.current = Date.now()
     sendLocation(tid, lat, lng)
       .then(() => { setLastSentAt(new Date()); setStatus('active') })
       .catch(() => {})
@@ -352,6 +362,34 @@ function useGPS(techId: string | null) {
     })()
 
     return () => stop()
+  }, [techId])
+
+  // ── Location-request poll: bot triggers this when it needs fresh GPS ──────
+  // Polls /webhooks/location-request/{techId} every 15 s.
+  // When requested=true, immediately fires getCurrentPosition (bypasses throttle).
+  useEffect(() => {
+    if (!techId) return
+    locationPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${BASE}/webhooks/location-request/${techId}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (!data.requested) return
+        // Bot wants fresh GPS — get it now
+        Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000,
+        }).then(pos => {
+          doSendImmediate(techId, pos.coords.latitude, pos.coords.longitude)
+        }).catch(() => {})
+      } catch {
+        // network failure — ignore silently
+      }
+    }, 15000)
+    return () => {
+      if (locationPollRef.current) { clearInterval(locationPollRef.current); locationPollRef.current = null }
+    }
   }, [techId])
 
   return { status, lastSentAt }
