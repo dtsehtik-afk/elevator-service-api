@@ -162,8 +162,8 @@ async function reassignElevator(techId: string, elevatorId: string) {
   await client.post(`/webhooks/reassign-elevator-json/${techId}`, null, { params: { elevator_id: elevatorId } })
 }
 
-async function sendLocation(techId: string, lat: number, lng: number) {
-  await client.post(`/webhooks/location/${techId}`, { latitude: lat, longitude: lng })
+async function sendLocation(techId: string, lat: number, lng: number, accuracy?: number) {
+  await client.post(`/webhooks/location/${techId}`, { latitude: lat, longitude: lng, accuracy })
 }
 
 async function fetchMaintenance(techId: string): Promise<MaintenanceItem[]> {
@@ -285,19 +285,19 @@ function useGPS(techId: string | null) {
     setStatus('idle')
   }
 
-  const doSend = (tid: string, lat: number, lng: number) => {
+  const doSend = (tid: string, lat: number, lng: number, accuracy?: number) => {
     const now = Date.now()
     if (now - lastSentMsRef.current < 5000) return  // throttle: max once per 5s
     lastSentMsRef.current = now
-    sendLocation(tid, lat, lng)
+    sendLocation(tid, lat, lng, accuracy)
       .then(() => { setLastSentAt(new Date()); setStatus('active') })
       .catch(() => {})
   }
 
-  const doSendImmediate = (tid: string, lat: number, lng: number) => {
+  const doSendImmediate = (tid: string, lat: number, lng: number, accuracy?: number) => {
     // Bypass throttle — called when bot explicitly requests fresh GPS
     lastSentMsRef.current = Date.now()
-    sendLocation(tid, lat, lng)
+    sendLocation(tid, lat, lng, accuracy)
       .then(() => { setLastSentAt(new Date()); setStatus('active') })
       .catch(() => {})
   }
@@ -340,7 +340,7 @@ function useGPS(techId: string | null) {
             if (err || !pos) { setStatus('error'); return }
             // Reject poor-accuracy fixes (stale cache / cell-tower fallback)
             if ((pos.coords.accuracy ?? 9999) > 150) return
-            doSend(techId, pos.coords.latitude, pos.coords.longitude)
+            doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
           }
         )
 
@@ -376,7 +376,7 @@ function useGPS(techId: string | null) {
           timeout: 10000,
         }).then(pos => {
           if ((pos.coords.accuracy ?? 9999) > 150) return  // reject stale/poor fix
-          doSendImmediate(techId, pos.coords.latitude, pos.coords.longitude)
+          doSendImmediate(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
         }).catch(() => {})
       } catch {
         // network failure — ignore silently

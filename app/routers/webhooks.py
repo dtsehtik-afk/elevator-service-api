@@ -725,6 +725,7 @@ def _find_techs_by_phone_local(db, phone: str):
 class LocationUpdate(BaseModel):
     latitude: float
     longitude: float
+    accuracy: float | None = None  # metres — sent by app for diagnostics
 
 
 @router.get(
@@ -959,8 +960,9 @@ def update_location(
     ISRAEL_LON_MIN, ISRAEL_LON_MAX = 34.0, 35.9
     if not (ISRAEL_LAT_MIN <= payload.latitude <= ISRAEL_LAT_MAX and
             ISRAEL_LON_MIN <= payload.longitude <= ISRAEL_LON_MAX):
-        logger.warning("📍 GPS outside Israel rejected for %s: (%.4f, %.4f)",
-                       tech.name, payload.latitude, payload.longitude)
+        logger.warning("📍 GPS outside Israel rejected for %s: (%.4f, %.4f) accuracy=%sm",
+                       tech.name, payload.latitude, payload.longitude,
+                       f"{payload.accuracy:.0f}" if payload.accuracy is not None else "?")
         return {"status": "rejected", "reason": "outside_israel",
                 "lat": payload.latitude, "lon": payload.longitude}
 
@@ -992,7 +994,9 @@ def update_location(
     # Clear any pending location request now that fresh GPS has been received
     tech.location_requested_at = None
     db.commit()
-    logger.warning("📍 Live location updated for %s: %.4f, %.4f", tech.name, payload.latitude, payload.longitude)
+    logger.warning("📍 Live location updated for %s: %.4f, %.4f (accuracy: %sm)",
+                   tech.name, payload.latitude, payload.longitude,
+                   f"{payload.accuracy:.0f}" if payload.accuracy is not None else "?")
     return {"status": "ok", "name": tech.name}
 
 
