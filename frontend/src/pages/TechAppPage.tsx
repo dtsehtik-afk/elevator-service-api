@@ -338,6 +338,8 @@ function useGPS(techId: string | null) {
           { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
           (pos, err) => {
             if (err || !pos) { setStatus('error'); return }
+            // Reject poor-accuracy fixes (stale cache / cell-tower fallback)
+            if ((pos.coords.accuracy ?? 9999) > 150) return
             doSend(techId, pos.coords.latitude, pos.coords.longitude)
           }
         )
@@ -353,7 +355,10 @@ function useGPS(techId: string | null) {
         heartbeatRef.current = setInterval(() => {
           if (cancelledRef.current) return
           Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 0, timeout: 15000 })
-            .then(pos => doSend(techId, pos.coords.latitude, pos.coords.longitude))
+            .then(pos => {
+              if ((pos.coords.accuracy ?? 9999) > 150) return  // reject stale/poor fix
+              doSend(techId, pos.coords.latitude, pos.coords.longitude)
+            })
             .catch(() => {})
         }, 60000)
 
@@ -382,6 +387,7 @@ function useGPS(techId: string | null) {
           maximumAge: 0,
           timeout: 10000,
         }).then(pos => {
+          if ((pos.coords.accuracy ?? 9999) > 150) return  // reject stale/poor fix
           doSendImmediate(techId, pos.coords.latitude, pos.coords.longitude)
         }).catch(() => {})
       } catch {
