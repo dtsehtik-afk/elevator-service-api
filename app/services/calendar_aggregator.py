@@ -98,9 +98,11 @@ def fetch_calendar_events(db: Session, start_date: date, end_date: date) -> List
         # If it's a specific time, pass it as ISO string with time
         date_str = target_date.isoformat()
         
+        el = call.elevator
+        location = f"{el.address}, {el.city}" if el else call.reported_by
         events.append({
             "id": f"call-{call.id}",
-            "title": f"קריאת שירות: {call.address}",
+            "title": f"קריאת שירות: {location}",
             "date": date_str,
             "type": "service_call",
             "allDay": False,

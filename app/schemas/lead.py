@@ -19,6 +19,7 @@ class LeadCreate(BaseModel):
     estimated_value: Optional[float] = None
     customer_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
+    meeting_date: Optional[datetime] = None
 
 
 class LeadUpdate(BaseModel):
@@ -33,6 +34,7 @@ class LeadUpdate(BaseModel):
     estimated_value: Optional[float] = None
     customer_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
+    meeting_date: Optional[datetime] = None
 
 
 class LeadResponse(BaseModel):
@@ -49,6 +51,7 @@ class LeadResponse(BaseModel):
     customer_id: Optional[uuid.UUID] = None
     customer_name: Optional[str] = None
     notes: Optional[str] = None
+    meeting_date: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
