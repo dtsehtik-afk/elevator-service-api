@@ -49,7 +49,11 @@ def _enrich(p: Project) -> ProjectResponse:
     r.task_count = len(p.tasks)
     r.customer_name = p.customer.name if p.customer else None
     r.responsible_technician_name = p.responsible_technician.name if p.responsible_technician else None
-    r.management_company_name = p.management_company.name if p.management_company else None
+    if p.consultant:
+        r.consultant_name = p.consultant.name
+        r.consultant_phone = p.consultant.phone
+        r.consultant_email = p.consultant.email
+        r.consultant_contacts = p.consultant.consultant_contacts or []
     return r
 
 

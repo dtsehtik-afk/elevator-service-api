@@ -53,7 +53,7 @@ class ProjectBase(BaseModel):
     customer_id: Optional[uuid.UUID] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
-    management_company_id: Optional[uuid.UUID] = None
+    consultant_id: Optional[uuid.UUID] = None
     responsible_technician_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
 
@@ -77,7 +77,7 @@ class ProjectUpdate(BaseModel):
     customer_id: Optional[uuid.UUID] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
-    management_company_id: Optional[uuid.UUID] = None
+    consultant_id: Optional[uuid.UUID] = None
     responsible_technician_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
 
@@ -89,7 +89,10 @@ class ProjectResponse(ProjectBase):
     task_count: int = 0
     customer_name: Optional[str] = None
     responsible_technician_name: Optional[str] = None
-    management_company_name: Optional[str] = None
+    consultant_name: Optional[str] = None
+    consultant_phone: Optional[str] = None
+    consultant_email: Optional[str] = None
+    consultant_contacts: list = []
     model_config = {"from_attributes": True}
 
 

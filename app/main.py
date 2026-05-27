@@ -414,7 +414,7 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES customers(id) ON DELETE SET NULL",
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS contact_person VARCHAR(150)",
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(50)",
-                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS management_company_id UUID REFERENCES management_companies(id) ON DELETE SET NULL",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS consultant_id UUID REFERENCES consultants(id) ON DELETE SET NULL",
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS responsible_technician_id UUID REFERENCES technicians(id) ON DELETE SET NULL",
                 "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5,2)",
                 "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS vat_percent NUMERIC(5,2) DEFAULT 18",

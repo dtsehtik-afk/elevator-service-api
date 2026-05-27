@@ -177,12 +177,14 @@ const PROJECT_TYPE_LABELS: Record<string, string> = {
   MODERNIZATION: 'מודרניזציה',
 }
 
-function ProjectForm({ form, setForm, technicians, mgmtCompanies, onSubmit, loading, submitLabel }: {
+function ProjectForm({ form, setForm, technicians, consultantsList, onSubmit, loading, submitLabel }: {
   form: any; setForm: (fn: (f: any) => any) => void
-  technicians: any[]; mgmtCompanies: any[]
+  technicians: any[]; consultantsList: any[]
   onSubmit: () => void; loading: boolean; submitLabel: string
 }) {
   const f = (key: string) => (val: any) => setForm((prev: any) => ({ ...prev, [key]: val === '' ? null : val }))
+  const selectedConsultant = consultantsList.find((c: any) => c.id === form.consultant_id) || null
+
   return (
     <Stack gap="sm">
       <TextInput label="שם פרויקט" required value={form.name || ''} onChange={e => setForm((p: any) => ({ ...p, name: e.target.value }))} />
@@ -203,15 +205,43 @@ function ProjectForm({ form, setForm, technicians, mgmtCompanies, onSubmit, load
         <TextInput label="איש קשר" value={form.contact_person || ''} onChange={e => setForm((p: any) => ({ ...p, contact_person: e.target.value }))} />
         <TextInput label="טלפון איש קשר" value={form.contact_phone || ''} onChange={e => setForm((p: any) => ({ ...p, contact_phone: e.target.value }))} />
       </Group>
-      <Select label="חברת ניהול" value={form.management_company_id || null} onChange={f('management_company_id')} clearable searchable
-        data={mgmtCompanies.map((m: any) => ({ value: m.id, label: m.name }))} />
+
+      <Divider label="יועץ" labelPosition="right" />
+      <Select
+        label="יועץ"
+        placeholder="בחר יועץ..."
+        value={form.consultant_id || null}
+        onChange={f('consultant_id')}
+        clearable searchable
+        data={consultantsList.map((c: any) => ({ value: c.id, label: c.name }))}
+      />
+      {selectedConsultant && (
+        <Paper withBorder p="sm" radius="md" bg="gray.0">
+          <Stack gap={4}>
+            <Text size="sm" fw={600}>🧑‍💼 {selectedConsultant.name}</Text>
+            {selectedConsultant.phone && <Text size="xs" c="dimmed">📞 {selectedConsultant.phone}</Text>}
+            {selectedConsultant.email && <Text size="xs" c="dimmed">✉️ {selectedConsultant.email}</Text>}
+            {(selectedConsultant.consultant_contacts || []).length > 0 && (
+              <>
+                <Text size="xs" fw={500} mt={4}>אנשי קשר:</Text>
+                {(selectedConsultant.consultant_contacts as any[]).map((ct: any, i: number) => (
+                  <Text key={i} size="xs" c="dimmed">
+                    {ct.name && `${ct.name}`}{ct.phone && ` · ${ct.phone}`}{ct.email && ` · ${ct.email}`}
+                  </Text>
+                ))}
+              </>
+            )}
+            {selectedConsultant.notes && <Text size="xs" c="dimmed" fs="italic">{selectedConsultant.notes}</Text>}
+          </Stack>
+        </Paper>
+      )}
 
       <Divider label="מיקום ופרטי אתר" labelPosition="right" />
       <Group grow>
         <TextInput label="כתובת" value={form.address || ''} onChange={e => setForm((p: any) => ({ ...p, address: e.target.value }))} />
         <TextInput label="עיר" value={form.city || ''} onChange={e => setForm((p: any) => ({ ...p, city: e.target.value }))} />
       </Group>
-      <TextInput label="אתר / שם אתר" value={form.site || ''} onChange={e => setForm((p: any) => ({ ...p, site: e.target.value }))} placeholder="שם הפרויקט / שם האתר" />
+      <TextInput label="שם אתר" value={form.site || ''} onChange={e => setForm((p: any) => ({ ...p, site: e.target.value }))} placeholder="שם הפרויקט / האתר" />
 
       <Divider label="פרטי פרויקט" labelPosition="right" />
       <Group grow>
@@ -422,7 +452,7 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const emptyForm = { name: '', site: '', address: '', city: '', status: 'PLANNING', project_type: null, start_date: null, end_date: null, elevator_count: null, manufacturer: '', contract_value: null, customer_id: null, contact_person: '', contact_phone: '', management_company_id: null, responsible_technician_id: null, notes: '' }
+  const emptyForm = { name: '', site: '', address: '', city: '', status: 'PLANNING', project_type: null, start_date: null, end_date: null, elevator_count: null, manufacturer: '', contract_value: null, customer_id: null, contact_person: '', contact_phone: '', consultant_id: null, responsible_technician_id: null, notes: '' }
   const [form, setForm] = useState<any>(emptyForm)
   const [editProjectId, setEditProjectId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<any>({})
@@ -431,9 +461,9 @@ export default function ProjectsPage() {
     queryKey: ['technicians-list'],
     queryFn: () => client.get('/technicians').then(r => r.data),
   })
-  const { data: mgmtCompanies = [] } = useQuery<any[]>({
-    queryKey: ['mgmt-companies-list'],
-    queryFn: () => client.get('/management-companies').then(r => r.data),
+  const { data: consultantsList = [] } = useQuery<any[]>({
+    queryKey: ['consultants-list'],
+    queryFn: () => client.get('/consultants').then(r => r.data),
   })
 
   const { data: projects = [], isLoading } = useQuery<Project[]>({
@@ -567,7 +597,7 @@ export default function ProjectsPage() {
       <Modal opened={createOpen} onClose={() => { setCreateOpen(false); setForm(emptyForm) }} title="פרויקט חדש" dir="rtl" size="lg">
         <ProjectForm
           form={form} setForm={setForm}
-          technicians={technicians} mgmtCompanies={mgmtCompanies}
+          technicians={technicians} consultantsList={consultantsList}
           onSubmit={() => createMut.mutate(form)}
           loading={createMut.isPending} submitLabel="צור פרויקט"
         />
@@ -577,7 +607,7 @@ export default function ProjectsPage() {
       <Modal opened={!!editProjectId} onClose={() => setEditProjectId(null)} title="עריכת פרויקט" dir="rtl" size="lg">
         <ProjectForm
           form={editForm} setForm={setEditForm}
-          technicians={technicians} mgmtCompanies={mgmtCompanies}
+          technicians={technicians} consultantsList={consultantsList}
           onSubmit={() => updateMut.mutate({ id: editProjectId!, data: editForm })}
           loading={updateMut.isPending} submitLabel="שמור"
         />

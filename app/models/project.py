@@ -37,8 +37,8 @@ class Project(Base):
     contact_phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Management & assignment
-    management_company_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("management_companies.id", ondelete="SET NULL"), nullable=True
+    consultant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("consultants.id", ondelete="SET NULL"), nullable=True
     )
     responsible_technician_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("technicians.id", ondelete="SET NULL"), nullable=True
@@ -53,7 +53,7 @@ class Project(Base):
     )
     customer: Mapped[Optional["Customer"]] = relationship("Customer", foreign_keys=[customer_id])
     responsible_technician: Mapped[Optional["Technician"]] = relationship("Technician", foreign_keys=[responsible_technician_id])
-    management_company: Mapped[Optional["ManagementCompany"]] = relationship("ManagementCompany", foreign_keys=[management_company_id])
+    consultant: Mapped[Optional["Consultant"]] = relationship("Consultant", foreign_keys=[consultant_id])
 
 
 class ProjectTask(Base):

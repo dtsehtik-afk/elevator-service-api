@@ -17,8 +17,11 @@ export interface Project {
   customer_name: string | null
   contact_person: string | null
   contact_phone: string | null
-  management_company_id: string | null
-  management_company_name: string | null
+  consultant_id: string | null
+  consultant_name: string | null
+  consultant_phone: string | null
+  consultant_email: string | null
+  consultant_contacts: Array<{ name?: string; phone?: string; email?: string }>
   responsible_technician_id: string | null
   responsible_technician_name: string | null
   notes: string | null
