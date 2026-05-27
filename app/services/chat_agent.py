@@ -1880,6 +1880,7 @@ def _load_conversation_history(db: Session, phone: str, limit: int = 20) -> list
 
 def _load_qa_context(db: Session, question: str, limit: int = 5) -> str:
     """Return a block of relevant Q&A pairs to prepend to the system prompt."""
+    import json as _json
     try:
         from app.models.bot_qa import BotQA
         from sqlalchemy import or_
@@ -1898,7 +1899,18 @@ def _load_qa_context(db: Session, question: str, limit: int = 5) -> str:
             return ""
         lines = ["══ דוגמאות מהניסיון (QA) ══"]
         for p in pairs:
-            lines.append(f"ש: {p.question}\nת: {p.answer}")
+            if getattr(p, "tool_calls_json", None):
+                try:
+                    calls = _json.loads(p.tool_calls_json)
+                    tools_str = " + ".join(
+                        f"{c['tool']}({_json.dumps(c.get('params', {}), ensure_ascii=False)})"
+                        for c in calls
+                    )
+                    lines.append(f"ש: {p.question}\n→ כאשר שואלים כך — קרא ל: {tools_str}")
+                except Exception:
+                    lines.append(f"ש: {p.question}\nת: {p.answer}")
+            else:
+                lines.append(f"ש: {p.question}\nת: {p.answer}")
             p.use_count = (p.use_count or 0) + 1
         db.commit()
         return "\n".join(lines)
@@ -1958,7 +1970,7 @@ def _build_role_context(role: str, perms: dict, name: str | None) -> str:
     return "\n".join(lines)
 
 
-def answer_question(db: Session, question: str, asker_name: str = "טכנאי", phone: str = "", with_history: bool = False) -> str:
+def answer_question(db: Session, question: str, asker_name: str = "טכנאי", phone: str = "", with_history: bool = False) -> tuple[str, list]:
     """
     Answer a free-text Hebrew question about the system using Gemini + tool use.
 
@@ -1970,7 +1982,7 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
         with_history: Whether to load conversation history (True only for quoted/reply messages)
 
     Returns:
-        Hebrew answer string to send back via WhatsApp
+        Tuple of (Hebrew answer string, list of tool calls used)
     """
     from app.config import get_settings
     s = get_settings()
@@ -2009,18 +2021,21 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
 
     if s.anthropic_api_key:
         try:
-            return _answer_anthropic(s, question, asker_name, db=db, extra_system=extra)
+            ans = _answer_anthropic(s, question, asker_name, db=db, extra_system=extra)
+            return ans, []
         except Exception as exc:
             logger.warning("Anthropic fallback also failed: %s", exc)
 
-    return "השירות אינו זמין כרגע — נסה שוב בעוד מספר דקות."
+    return "השירות אינו זמין כרגע — נסה שוב בעוד מספר דקות.", []
 
 
-def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "") -> str:
-    """Run the Gemini tool-use loop and return Hebrew answer."""
+def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "") -> tuple[str, list]:
+    """Run the Gemini tool-use loop and return (Hebrew answer, tool_calls_used list)."""
     from sqlalchemy import text
     import json
-    
+
+    tool_calls_used: list = []
+
     # Try to load prompt from DB
     system_text = _SYSTEM_PROMPT
     try:
@@ -2067,14 +2082,15 @@ def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "
             if not fn_calls:
                 for p in parts:
                     if "text" in p and p["text"]:
-                        return p["text"].strip()
-                return "לא הצלחתי לעבד את השאלה."
+                        return p["text"].strip(), tool_calls_used
+                return "לא הצלחתי לעבד את השאלה.", tool_calls_used
 
             contents.append({"role": "model", "parts": parts})
             fn_responses = []
             for fn_call in fn_calls:
                 name = fn_call["name"]
                 args = fn_call.get("args", {})
+                tool_calls_used.append({"tool": name, "params": dict(args)})
                 logger.warning("🔧 Gemini tool: %s(%s)", name, args)
                 result = _run_tool(db, name, args, phone=phone)
                 fn_responses.append({
@@ -2085,7 +2101,7 @@ def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "
                 })
             contents.append({"role": "user", "parts": fn_responses})
 
-    return "לא הצלחתי לענות על השאלה."
+    return "לא הצלחתי לענות על השאלה.", tool_calls_used
 
 
 _ANTHROPIC_TOOLS = [

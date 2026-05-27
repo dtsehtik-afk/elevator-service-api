@@ -19,3 +19,4 @@ class BotQA(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_by = Column(String(100), nullable=True)  # phone or "system"
+    tool_calls_json = Column(Text, nullable=True)  # JSON: [{"tool": "...", "params": {...}}]

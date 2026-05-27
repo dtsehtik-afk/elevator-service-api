@@ -519,6 +519,12 @@ async def lifespan(app: FastAPI):
                 END $$""",
                 # Real-time location pull: bot sets this to trigger app GPS fetch
                 "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS location_requested_at TIMESTAMPTZ",
+                # WhatsApp message ID + tool calls for like-to-save-QA feature
+                "ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS wa_message_id VARCHAR(100)",
+                "ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS tool_calls_json TEXT",
+                "CREATE INDEX IF NOT EXISTS ix_whatsapp_messages_wa_message_id ON whatsapp_messages(wa_message_id)",
+                # BotQA tool calls storage for like-to-save-QA feature
+                "ALTER TABLE bot_qa ADD COLUMN IF NOT EXISTS tool_calls_json TEXT",
             ]:
                 _conn.execute(_text(_col_sql))
         # Clear any GPS coordinates stored outside Israel's bounding box

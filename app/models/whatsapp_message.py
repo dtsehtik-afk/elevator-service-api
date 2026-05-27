@@ -16,3 +16,5 @@ class WhatsAppMessage(Base):
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     transcription: Mapped[str | None] = mapped_column(Text, nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default="now()")
+    wa_message_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    tool_calls_json: Mapped[str | None] = mapped_column(Text, nullable=True)
