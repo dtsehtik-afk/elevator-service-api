@@ -14,7 +14,7 @@ class TechnicianCreate(BaseModel):
     phone: Optional[str] = None
     whatsapp_number: Optional[str] = None
     password: str = Field(..., min_length=8)
-    role: str = Field("TECHNICIAN", pattern="^(ADMIN|TECHNICIAN|DISPATCHER|CEO|VP|SERVICE_MANAGER|ACCOUNTANT|SECRETARY|SALES|INVENTORY_MANAGER|MAINTENANCE_TECHNICIAN)$")
+    role: str = Field("TECHNICIAN", pattern="^(ADMIN|MANAGER|TECHNICIAN|SENIOR_TECHNICIAN|MAINTENANCE_TECHNICIAN|DISPATCHER|CEO|VP|SERVICE_MANAGER|ACCOUNTANT|SECRETARY|SALES|INVENTORY_MANAGER)$")
     specializations: List[str] = Field(default_factory=list)
     area_codes: List[str] = Field(default_factory=list)
     max_daily_calls: int = Field(8, ge=1, le=20)
@@ -25,7 +25,7 @@ class TechnicianUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=150)
     phone: Optional[str] = None
     whatsapp_number: Optional[str] = None
-    role: Optional[str] = Field(None, pattern="^(ADMIN|TECHNICIAN|DISPATCHER|CEO|VP|SERVICE_MANAGER|ACCOUNTANT|SECRETARY|SALES|INVENTORY_MANAGER|MAINTENANCE_TECHNICIAN)$")
+    role: Optional[str] = Field(None, pattern="^(ADMIN|MANAGER|TECHNICIAN|SENIOR_TECHNICIAN|MAINTENANCE_TECHNICIAN|DISPATCHER|CEO|VP|SERVICE_MANAGER|ACCOUNTANT|SECRETARY|SALES|INVENTORY_MANAGER)$")
     specializations: Optional[List[str]] = None
     area_codes: Optional[List[str]] = None
     max_daily_calls: Optional[int] = Field(None, ge=1, le=20)
