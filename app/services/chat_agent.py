@@ -1748,7 +1748,7 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
                 tags=tool_input.get("tags", ""),
                 created_by=f"ai_agent_{phone}"
             )
-            db.add(qa)
+            db.add(entry)
             db.commit()
             return {"success": True, "message": "המידע נשמר בהצלחה למאגר הידע של הבוט"}
         except Exception as exc:

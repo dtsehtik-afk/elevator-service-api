@@ -594,6 +594,28 @@ def _poll_whatsapp_replies():
             is_incoming = msg_type == "incomingMessageReceived"
             is_outgoing = msg_type == "outgoingMessageReceived"
 
+            # ── Reaction handler ─────────────────────────────────────────────
+            if msg_type == "messageReactionReceived":
+                reaction_data = body.get("messageData", {}).get("reactionMessage", {})
+                reaction_phone = sender.replace("@c.us", "").replace("@s.whatsapp.net", "")
+                try:
+                    from app.database import SessionLocal as _SL
+                    _rdb = _SL()
+                    try:
+                        _handle_reaction(
+                            _rdb,
+                            phone=reaction_phone,
+                            reacted_msg_id=reaction_data.get("messageId", ""),
+                            reaction=reaction_data.get("reaction", ""),
+                        )
+                    finally:
+                        _rdb.close()
+                except Exception as _re:
+                    logger.warning("Reaction handler error: %s", _re)
+                if receipt_id:
+                    httpx.delete(f"{delete_url}/{receipt_id}", timeout=5)
+                continue
+
             # For outgoing messages from the instance, we treat chatId as the "phone"
             # (the technician who the message was sent to — and who presumably replied)
             if is_outgoing:
@@ -1310,45 +1332,85 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
         return
 
     try:
+        import json as _json
         from app.services.chat_agent import answer_question
-        answer = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
-        _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
+        answer, tool_calls = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
+        wa_msg_id = _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
 
-        # Save bot response to conversation history so it appears in the UI
-        # and so the bot can see its own previous replies in future turns
+        # Save bot reply to conversation history (with message ID and tool calls)
         try:
             from app.models.whatsapp_message import WhatsAppMessage
-            db.add(WhatsAppMessage(phone=phone, direction="out", msg_type="text", text=answer))
+            db.add(WhatsAppMessage(
+                phone=phone,
+                direction="out",
+                msg_type="text",
+                text=answer,
+                wa_message_id=wa_msg_id,
+                tool_calls_json=_json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
+            ))
             db.commit()
         except Exception as save_exc:
             logger.warning("Could not save bot reply to history: %s", save_exc)
 
-        # Auto-build QA knowledge base from successful conversations
-        # Skip write-action questions (close/assign/transfer) — those are too specific
-        _write_keywords = ["סגור", "שבץ", "העבר", "הצעת מחיר", "לבטל", "בטל"]
-        if len(answer) > 60 and not any(w in question for w in _write_keywords):
-            try:
-                from app.models.bot_qa import BotQA
-                existing = db.query(BotQA).filter(BotQA.question == question).first()
-                if not existing:
-                    db.add(BotQA(
-                        question=question,
-                        answer=answer,
-                        active=True,
-                        use_count=0,
-                        created_by="auto",
-                    ))
-                    db.commit()
-                else:
-                    existing.answer = answer
-                    existing.updated_at = __import__('datetime').datetime.utcnow()
-                    db.commit()
-            except Exception as qa_exc:
-                logger.warning("Could not auto-save QA pair: %s", qa_exc)
-
     except Exception as exc:
         logger.error("Chat agent error: %s", exc)
         _handle_chat_question_simple(db, phone, question, settings)
+
+
+def _handle_reaction(db, phone: str, reacted_msg_id: str, reaction: str) -> None:
+    """On 👍 reaction to a bot message — save QA entry with tool calls."""
+    if reaction != "👍":
+        return
+    import json as _json
+    from app.models.whatsapp_message import WhatsAppMessage
+    from app.models.bot_qa import BotQA
+    from datetime import datetime
+
+    # Find the bot message that was reacted to
+    bot_msg = (
+        db.query(WhatsAppMessage)
+        .filter(
+            WhatsAppMessage.wa_message_id == reacted_msg_id,
+            WhatsAppMessage.direction == "out",
+        )
+        .first()
+    )
+    if not bot_msg or not bot_msg.tool_calls_json:
+        logger.debug("Reaction 👍 on msg %s — no tool_calls_json found", reacted_msg_id)
+        return
+
+    # Find the user's question that preceded this bot message
+    user_msg = (
+        db.query(WhatsAppMessage)
+        .filter(
+            WhatsAppMessage.phone == phone,
+            WhatsAppMessage.direction == "in",
+            WhatsAppMessage.timestamp < bot_msg.timestamp,
+        )
+        .order_by(WhatsAppMessage.timestamp.desc())
+        .first()
+    )
+    if not user_msg or not user_msg.text:
+        return
+
+    question = user_msg.text.strip()
+
+    existing = db.query(BotQA).filter(BotQA.question == question).first()
+    if existing:
+        existing.tool_calls_json = bot_msg.tool_calls_json
+        existing.updated_at = datetime.utcnow()
+    else:
+        db.add(BotQA(
+            question=question,
+            answer="",
+            tool_calls_json=bot_msg.tool_calls_json,
+            active=True,
+            created_by=f"like_{phone[-4:]}",
+        ))
+    db.commit()
+    logger.info("👍 QA saved for question: %s", question[:60])
+    from app.services.whatsapp_service import _send_message as _snd
+    _snd(phone, "✅ התשובה נשמרה — אשתמש בה לשאלות דומות בעתיד")
 
 
 _REMINDER_AFTER_MINUTES  = 60    # send hourly reminder if call still unconfirmed
