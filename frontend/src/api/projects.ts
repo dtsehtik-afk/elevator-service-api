@@ -25,6 +25,15 @@ export interface Project {
   responsible_technician_id: string | null
   responsible_technician_name: string | null
   notes: string | null
+  // Installation milestones
+  milestone_elevator_arrived: boolean
+  milestone_installation_started: boolean
+  milestone_phase_a: boolean
+  milestone_phase_b: boolean
+  milestone_phase_c: boolean
+  milestone_initial_inspection: boolean
+  milestone_consultant_approved: boolean
+  has_service_contract: boolean
   task_count: number
   created_at: string
   updated_at: string
@@ -62,6 +71,9 @@ export const projectsApi = {
 
   delete: (id: string) =>
     client.delete(`/projects/${id}`),
+
+  updateMilestone: (id: string, field: string, value: boolean) =>
+    client.patch<Project>(`/projects/${id}`, { [field]: value }).then(r => r.data),
 
   createTask: (projectId: string, data: Partial<ProjectTask>) =>
     client.post<ProjectTask>(`/projects/${projectId}/tasks`, data).then(r => r.data),

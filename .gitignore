@@ -29,7 +29,7 @@ build/
 
 # Node / Frontend
 node_modules/
-frontend/dist/
+# frontend/dist is committed by CI (GitHub Actions) — do not ignore
 frontend/.env
 
 # IDE

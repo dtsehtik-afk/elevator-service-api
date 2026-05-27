@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 from typing import Optional
@@ -45,6 +45,16 @@ class Project(Base):
     )
 
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Installation milestones (manually checked) ────────────────────────────
+    milestone_elevator_arrived:     Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    milestone_installation_started: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    milestone_phase_a:              Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    milestone_phase_b:              Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    milestone_phase_c:              Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    milestone_initial_inspection:   Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    milestone_consultant_approved:  Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -56,6 +56,14 @@ class ProjectBase(BaseModel):
     consultant_id: Optional[uuid.UUID] = None
     responsible_technician_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
+    # Installation milestones (manually checked)
+    milestone_elevator_arrived: bool = False
+    milestone_installation_started: bool = False
+    milestone_phase_a: bool = False
+    milestone_phase_b: bool = False
+    milestone_phase_c: bool = False
+    milestone_initial_inspection: bool = False
+    milestone_consultant_approved: bool = False
 
 
 class ProjectCreate(ProjectBase):
@@ -80,6 +88,14 @@ class ProjectUpdate(BaseModel):
     consultant_id: Optional[uuid.UUID] = None
     responsible_technician_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
+    # Milestones (individually updatable)
+    milestone_elevator_arrived: Optional[bool] = None
+    milestone_installation_started: Optional[bool] = None
+    milestone_phase_a: Optional[bool] = None
+    milestone_phase_b: Optional[bool] = None
+    milestone_phase_c: Optional[bool] = None
+    milestone_initial_inspection: Optional[bool] = None
+    milestone_consultant_approved: Optional[bool] = None
 
 
 class ProjectResponse(ProjectBase):
@@ -93,6 +109,7 @@ class ProjectResponse(ProjectBase):
     consultant_phone: Optional[str] = None
     consultant_email: Optional[str] = None
     consultant_contacts: list = []
+    has_service_contract: bool = False
     model_config = {"from_attributes": True}
 
 

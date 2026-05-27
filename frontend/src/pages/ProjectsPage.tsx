@@ -2,7 +2,8 @@ import { useState } from 'react'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Modal, TextInput,
   Select, Textarea, Table, Tabs, Progress, ActionIcon, Tooltip,
-  ScrollArea, Box, Loader, Center, NumberInput, Divider,
+  ScrollArea, Box, Loader, Center, NumberInput, Divider, Checkbox,
+  Alert, RingProgress, ThemeIcon,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -263,6 +264,125 @@ function ProjectForm({ form, setForm, technicians, consultantsList, onSubmit, lo
   )
 }
 
+// ── Milestones panel ─────────────────────────────────────────────────────────
+
+const MILESTONES: { field: string; label: string; icon: string; required: boolean }[] = [
+  { field: 'milestone_elevator_arrived',     label: 'הגעת מעלית לאתר',         icon: '🚚', required: false },
+  { field: 'milestone_installation_started', label: 'תחילת התקנה',              icon: '🔧', required: false },
+  { field: 'milestone_phase_a',              label: 'פאזה א — אישור',           icon: '✅', required: true  },
+  { field: 'milestone_phase_b',              label: 'פאזה ב — אישור',           icon: '✅', required: true  },
+  { field: 'milestone_phase_c',              label: 'פאזה ג — אישור',           icon: '✅', required: true  },
+  { field: 'milestone_initial_inspection',   label: 'תסקיר ראשוני (יועץ/מכון)', icon: '📋', required: true  },
+  { field: 'milestone_consultant_approved',  label: 'אישור יועץ סופי',          icon: '🏛️', required: true  },
+]
+
+function MilestonesPanel({ project }: { project: ProjectDetail }) {
+  const qc = useQueryClient()
+
+  const milestoneMut = useMutation({
+    mutationFn: ({ field, value }: { field: string; value: boolean }) =>
+      projectsApi.updateMilestone(project.id, field, value),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', project.id] })
+      qc.invalidateQueries({ queryKey: ['projects'] })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בעדכון עמדת ציון', color: 'red' }),
+  })
+
+  const requiredDone = MILESTONES.filter(m => m.required && (project as any)[m.field]).length
+  const requiredTotal = MILESTONES.filter(m => m.required).length
+  const allRequiredDone = requiredDone === requiredTotal
+  const hasContract = project.has_service_contract
+  const canComplete = allRequiredDone && hasContract
+
+  return (
+    <Stack gap="md">
+      {/* Progress ring */}
+      <Paper withBorder p="md" radius="md">
+        <Group>
+          <RingProgress
+            size={80}
+            thickness={8}
+            sections={[{ value: (requiredDone / requiredTotal) * 100, color: allRequiredDone ? 'green' : 'blue' }]}
+            label={<Text ta="center" size="xs" fw={700}>{requiredDone}/{requiredTotal}</Text>}
+          />
+          <Stack gap={4}>
+            <Text fw={600}>עמדות ציון חובה</Text>
+            <Text size="sm" c="dimmed">נדרשות לסגירת הפרויקט</Text>
+            {canComplete
+              ? <Badge color="green" size="sm">✅ הפרויקט מוכן לסגירה</Badge>
+              : <Badge color="orange" size="sm">⏳ עוד לא מוכן לסגירה</Badge>
+            }
+          </Stack>
+        </Group>
+      </Paper>
+
+      {/* Milestone checkboxes */}
+      <Paper withBorder p="md" radius="md">
+        <Stack gap="xs">
+          {MILESTONES.map(m => {
+            const checked = !!(project as any)[m.field]
+            return (
+              <Group key={m.field} justify="space-between" p="xs"
+                style={{ borderRadius: 8, background: checked ? 'var(--mantine-color-green-0)' : undefined }}>
+                <Group gap="sm">
+                  <Text size="lg">{m.icon}</Text>
+                  <Stack gap={0}>
+                    <Text size="sm" fw={checked ? 600 : 400}
+                      style={{ textDecoration: checked ? 'none' : undefined }}>
+                      {m.label}
+                    </Text>
+                    {m.required && <Text size="xs" c="dimmed">חובה לסגירה</Text>}
+                  </Stack>
+                </Group>
+                <Checkbox
+                  checked={checked}
+                  onChange={e => milestoneMut.mutate({ field: m.field, value: e.currentTarget.checked })}
+                  disabled={milestoneMut.isPending}
+                  color="green"
+                  size="md"
+                />
+              </Group>
+            )
+          })}
+        </Stack>
+      </Paper>
+
+      {/* Service contract status */}
+      <Paper withBorder p="md" radius="md"
+        style={{ borderColor: hasContract ? 'var(--mantine-color-green-4)' : 'var(--mantine-color-orange-4)' }}>
+        <Group>
+          <ThemeIcon color={hasContract ? 'green' : 'orange'} variant="light" size="xl" radius="md">
+            {hasContract ? '📄' : '⚠️'}
+          </ThemeIcon>
+          <Stack gap={2}>
+            <Text fw={600}>חוזה שירות</Text>
+            {hasContract
+              ? <Text size="sm" c="green">חוזה שירות פעיל קיים במערכת</Text>
+              : <>
+                  <Text size="sm" c="orange">לא קיים חוזה שירות פעיל</Text>
+                  <Text size="xs" c="dimmed">יש לקשר חוזה שירות לפרויקט לפני הסגירה</Text>
+                </>
+            }
+          </Stack>
+        </Group>
+      </Paper>
+
+      {/* Completion blockers */}
+      {!canComplete && (
+        <Alert color="orange" title="מה חסר לסגירה?">
+          <Stack gap={4}>
+            {MILESTONES.filter(m => m.required && !(project as any)[m.field]).map(m => (
+              <Text key={m.field} size="sm">• {m.label}</Text>
+            ))}
+            {!hasContract && <Text size="sm">• חוזה שירות פעיל</Text>}
+          </Stack>
+        </Alert>
+      )}
+    </Stack>
+  )
+}
+
 // ── Project detail panel ─────────────────────────────────────────────────────
 
 function ProjectPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
@@ -335,12 +455,24 @@ function ProjectPanel({ projectId, onClose }: { projectId: string; onClose: () =
         </Text>
       )}
 
-      <Tabs defaultValue="gantt">
+      <Tabs defaultValue="milestones">
         <Tabs.List>
+          <Tabs.Tab value="milestones">
+            🏁 עמדות ציון{' '}
+            {(() => {
+              const done = MILESTONES.filter(m => m.required && (project as any)[m.field]).length
+              const total = MILESTONES.filter(m => m.required).length
+              return <Badge size="xs" color={done === total ? 'green' : 'orange'} ml={4}>{done}/{total}</Badge>
+            })()}
+          </Tabs.Tab>
           <Tabs.Tab value="gantt">גאנט</Tabs.Tab>
           <Tabs.Tab value="tasks">משימות ({project.tasks.length})</Tabs.Tab>
           <Tabs.Tab value="documents">📎 מסמכים</Tabs.Tab>
         </Tabs.List>
+
+        <Tabs.Panel value="milestones" pt="md">
+          <MilestonesPanel project={project} />
+        </Tabs.Panel>
 
         <Tabs.Panel value="gantt" pt="md">
           <Paper withBorder p="md" radius="md">
@@ -497,7 +629,19 @@ export default function ProjectsPage() {
       notifications.show({ message: 'פרויקט עודכן', color: 'green' })
       setEditProjectId(null)
     },
-    onError: () => notifications.show({ message: 'שגיאה', color: 'red' }),
+    onError: (err: any) => {
+      const detail = err?.response?.data?.detail
+      if (detail?.blockers) {
+        notifications.show({
+          title: detail.message || 'לא ניתן לסגור פרויקט',
+          message: detail.blockers.join(' • '),
+          color: 'orange',
+          autoClose: 8000,
+        })
+      } else {
+        notifications.show({ message: 'שגיאה בשמירה', color: 'red' })
+      }
+    },
   })
 
   const deleteMut = useMutation({
@@ -551,6 +695,7 @@ export default function ProjectsPage() {
                   <Table.Th>סטטוס</Table.Th>
                   <Table.Th>התחלה</Table.Th>
                   <Table.Th>סיום</Table.Th>
+                  <Table.Th>ציונים</Table.Th>
                   <Table.Th>משימות</Table.Th>
                   <Table.Th></Table.Th>
                 </Table.Tr>
@@ -563,6 +708,19 @@ export default function ProjectsPage() {
                     <Table.Td><Badge color={STATUS_COLORS[p.status]} size="sm">{STATUS_LABELS[p.status]}</Badge></Table.Td>
                     <Table.Td><Text size="xs">{p.start_date ? new Date(p.start_date).toLocaleDateString('he-IL') : '—'}</Text></Table.Td>
                     <Table.Td><Text size="xs">{p.end_date ? new Date(p.end_date).toLocaleDateString('he-IL') : '—'}</Text></Table.Td>
+                    <Table.Td>
+                      {(() => {
+                        const done = MILESTONES.filter(m => m.required && (p as any)[m.field]).length
+                        const total = MILESTONES.filter(m => m.required).length
+                        return (
+                          <Tooltip label={`${done}/${total} עמדות ציון חובה`} withArrow>
+                            <Badge size="sm" color={done === total ? 'green' : done > 0 ? 'blue' : 'gray'} variant="light">
+                              {done}/{total}
+                            </Badge>
+                          </Tooltip>
+                        )
+                      })()}
+                    </Table.Td>
                     <Table.Td><Badge variant="light" size="sm">{p.task_count}</Badge></Table.Td>
                     <Table.Td onClick={e => e.stopPropagation()}>
                       <Group gap={4}>
