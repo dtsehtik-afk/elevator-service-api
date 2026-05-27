@@ -23,6 +23,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
+# Milestones that must all be True before a project can be marked COMPLETED.
+_COMPLETION_BLOCKERS = [
+    ("milestone_phase_a",            "פאזה א טרם הושלמה"),
+    ("milestone_phase_b",            "פאזה ב טרם הושלמה"),
+    ("milestone_phase_c",            "פאזה ג טרם הושלמה"),
+    ("milestone_initial_inspection", "תסקיר ראשוני טרם בוצע"),
+    ("milestone_consultant_approved","היועץ טרם אישר את הפרויקט"),
+]
+
+
+def _has_active_service_contract(db: Session, project_id) -> bool:
+    return bool(
+        db.query(Contract).filter(
+            Contract.project_id == project_id,
+            Contract.status == "ACTIVE",
+        ).first()
+    )
+
+
+def _check_completion_allowed(db: Session, p: Project) -> list[str]:
+    """Return human-readable blockers preventing COMPLETED status."""
+    blockers = [label for field, label in _COMPLETION_BLOCKERS if not getattr(p, field, False)]
+    if not _has_active_service_contract(db, p.id):
+        blockers.append("חוזה שירות פעיל לא קיים")
+    return blockers
+
 
 def _activate_project_elevators(db: Session, project: Project) -> None:
     """When a project is marked COMPLETED, activate all elevators linked via its contracts."""
@@ -44,7 +70,7 @@ def _activate_project_elevators(db: Session, project: Project) -> None:
         logger.info("Project %s completed → %d elevators activated", project.id, activated)
 
 
-def _enrich(p: Project) -> ProjectResponse:
+def _enrich(p: Project, db: Session = None) -> ProjectResponse:
     r = ProjectResponse.model_validate(p)
     r.task_count = len(p.tasks)
     r.customer_name = p.customer.name if p.customer else None
@@ -54,6 +80,8 @@ def _enrich(p: Project) -> ProjectResponse:
         r.consultant_phone = p.consultant.phone
         r.consultant_email = p.consultant.email
         r.consultant_contacts = p.consultant.consultant_contacts or []
+    if db:
+        r.has_service_contract = _has_active_service_contract(db, p.id)
     return r
 
 
@@ -67,7 +95,7 @@ def list_projects(
     if status:
         q = q.filter(Project.status == status)
     projects = q.order_by(Project.created_at.desc()).all()
-    return [_enrich(p) for p in projects]
+    return [_enrich(p, db) for p in projects]
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
@@ -80,7 +108,7 @@ def create_project(
     db.add(p)
     db.commit()
     db.refresh(p)
-    return _enrich(p)
+    return _enrich(p, db)
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
@@ -95,6 +123,14 @@ def get_project(
     r = ProjectDetail.model_validate(p)
     r.task_count = len(p.tasks)
     r.tasks = p.tasks
+    r.customer_name = p.customer.name if p.customer else None
+    r.responsible_technician_name = p.responsible_technician.name if p.responsible_technician else None
+    if p.consultant:
+        r.consultant_name = p.consultant.name
+        r.consultant_phone = p.consultant.phone
+        r.consultant_email = p.consultant.email
+        r.consultant_contacts = p.consultant.consultant_contacts or []
+    r.has_service_contract = _has_active_service_contract(db, p.id)
     return r
 
 
@@ -109,13 +145,28 @@ def update_project(
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
     prev_status = p.status
-    for k, v in data.model_dump(exclude_none=True).items():
-        setattr(p, k, v)
+
+    # Block COMPLETED if completion requirements not met
+    if data.status == "COMPLETED" and prev_status != "COMPLETED":
+        # Apply milestone updates first so we check the new values
+        payload = data.model_dump(exclude_none=True)
+        for k, v in payload.items():
+            setattr(p, k, v)
+        blockers = _check_completion_allowed(db, p)
+        if blockers:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "לא ניתן לסמן פרויקט כהושלם", "blockers": blockers},
+            )
+    else:
+        for k, v in data.model_dump(exclude_none=True).items():
+            setattr(p, k, v)
+
     db.commit()
     db.refresh(p)
     if prev_status != "COMPLETED" and p.status == "COMPLETED":
         _activate_project_elevators(db, p)
-    return _enrich(p)
+    return _enrich(p, db)
 
 
 @router.delete("/{project_id}", status_code=204)
