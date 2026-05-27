@@ -278,6 +278,10 @@ def assign_with_confirmation(
         logger.info("Call %s already assigned (status=%s), skipping", service_call.id, service_call.status)
         return None
 
+    # Resolve caller info early — used in both responsible-tech and broadcast paths
+    caller_name  = service_call.caller_name or _extract_caller(service_call.reported_by)
+    caller_phone = service_call.contact_phone_sms or _extract_phone(service_call.reported_by)
+
     # ── Responsible technician priority ──────────────────────────────────────
     # If the elevator has a designated responsible technician, assign to them
     # first (single recipient, no broadcast). They can reassign via the app.
@@ -375,9 +379,6 @@ def assign_with_confirmation(
     if not candidates:
         logger.warning("No available technicians for call %s", service_call.id)
         return None
-
-    caller_name  = service_call.caller_name or _extract_caller(service_call.reported_by)
-    caller_phone = service_call.contact_phone_sms or _extract_phone(service_call.reported_by)
 
     if not needs_confirmation:
         # Email-originated: auto-assign top candidate directly (no broadcast)
