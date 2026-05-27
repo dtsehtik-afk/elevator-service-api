@@ -562,7 +562,9 @@ def _get_technician_location(db: Session, technician_name: str | None = None, ne
             continue
 
         # A location is "live" only if last_location_at is within the last 60 minutes
-        has_coords = bool(t.current_latitude and t.current_longitude)
+        from app.services.maps_service import is_israel_coords
+        has_coords = bool(t.current_latitude and t.current_longitude
+                          and is_israel_coords(t.current_latitude, t.current_longitude))
         if has_coords and t.last_location_at:
             loc_age = now - t.last_location_at.replace(tzinfo=timezone.utc) if t.last_location_at.tzinfo is None else now - t.last_location_at
             age_minutes = int(loc_age.total_seconds() / 60)

@@ -521,6 +521,17 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS location_requested_at TIMESTAMPTZ",
             ]:
                 _conn.execute(_text(_col_sql))
+        # Clear any GPS coordinates stored outside Israel's bounding box
+        # (Jordan ghost fixes from Android FusedLocationProvider cache)
+        _conn.execute(_text("""
+            UPDATE technicians
+            SET current_latitude = NULL, current_longitude = NULL, last_location_at = NULL
+            WHERE current_longitude IS NOT NULL
+              AND NOT (
+                current_latitude  BETWEEN 29.0 AND 33.5
+                AND current_longitude BETWEEN 34.0 AND 35.95
+              )
+        """))
         _conn.commit()
     # Backfill: ensure every elevator has a customer_id
     try:

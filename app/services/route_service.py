@@ -21,7 +21,7 @@ from app.models.assignment import Assignment
 from app.models.elevator import Elevator
 from app.models.service_call import ServiceCall
 from app.models.technician import Technician
-from app.services.maps_service import ensure_elevator_coords
+from app.services.maps_service import ensure_elevator_coords, is_israel_coords
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +79,8 @@ def build_route(
     """
     tech_lat = technician.current_latitude
     tech_lng = technician.current_longitude
-    if not tech_lat or not tech_lng:
-        logger.warning("Technician %s has no GPS — cannot build route", technician.name)
+    if not tech_lat or not tech_lng or not is_israel_coords(tech_lat, tech_lng):
+        logger.warning("Technician %s has no valid Israel GPS — cannot build route", technician.name)
         return [], []
 
     # ── Collect candidate calls ───────────────────────────────────────────────

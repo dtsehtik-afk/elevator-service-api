@@ -957,7 +957,7 @@ def update_location(
     # Geofence: reject coordinates clearly outside Israel (lat 29.0–33.5, lon 34.0–35.9)
     # Longitude cap 35.9 catches Jordanian territory at latitude ~32°N (Jordan starts ~35.5°E there)
     ISRAEL_LAT_MIN, ISRAEL_LAT_MAX = 29.0, 33.5
-    ISRAEL_LON_MIN, ISRAEL_LON_MAX = 34.0, 35.9
+    ISRAEL_LON_MIN, ISRAEL_LON_MAX = 34.0, 35.95  # 35.95 covers Golan Heights
     if not (ISRAEL_LAT_MIN <= payload.latitude <= ISRAEL_LAT_MAX and
             ISRAEL_LON_MIN <= payload.longitude <= ISRAEL_LON_MAX):
         logger.warning("📍 GPS outside Israel rejected for %s: (%.4f, %.4f) accuracy=%sm",
