@@ -17,7 +17,8 @@ services:
       retries: 5
 
   app:
-    build: .
+    image: ghcr.io/dtsehtik-afk/elevator-service-api:latest
+    build: .   # fallback for local dev: docker compose up --build
     restart: always
     # Port exposed only internally — nginx handles public traffic
     expose:
