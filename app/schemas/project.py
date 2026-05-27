@@ -41,9 +41,20 @@ class ProjectTaskResponse(ProjectTaskBase):
 class ProjectBase(BaseModel):
     name: str
     site: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
     status: str = "PLANNING"
+    project_type: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    elevator_count: Optional[int] = None
+    manufacturer: Optional[str] = None
+    contract_value: Optional[float] = None
+    customer_id: Optional[uuid.UUID] = None
+    contact_person: Optional[str] = None
+    contact_phone: Optional[str] = None
+    management_company_id: Optional[uuid.UUID] = None
+    responsible_technician_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
 
 
@@ -54,9 +65,20 @@ class ProjectCreate(ProjectBase):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     site: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
     status: Optional[str] = None
+    project_type: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    elevator_count: Optional[int] = None
+    manufacturer: Optional[str] = None
+    contract_value: Optional[float] = None
+    customer_id: Optional[uuid.UUID] = None
+    contact_person: Optional[str] = None
+    contact_phone: Optional[str] = None
+    management_company_id: Optional[uuid.UUID] = None
+    responsible_technician_id: Optional[uuid.UUID] = None
     notes: Optional[str] = None
 
 
@@ -65,6 +87,9 @@ class ProjectResponse(ProjectBase):
     created_at: datetime
     updated_at: datetime
     task_count: int = 0
+    customer_name: Optional[str] = None
+    responsible_technician_name: Optional[str] = None
+    management_company_name: Optional[str] = None
     model_config = {"from_attributes": True}
 
 

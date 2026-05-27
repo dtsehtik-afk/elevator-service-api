@@ -2,13 +2,15 @@ import { useState } from 'react'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Modal, TextInput,
   Select, Textarea, Table, Tabs, Progress, ActionIcon, Tooltip,
-  ScrollArea, Box, Loader, Center,
+  ScrollArea, Box, Loader, Center, NumberInput, Divider,
 } from '@mantine/core'
 import { DateInput } from '@mantine/dates'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { projectsApi, Project, ProjectTask, ProjectDetail } from '../api/projects'
 import { DocumentUploadPanel } from '../components/DocumentUploadPanel'
+import { CustomerSearchSelect } from '../components/CustomerSearchSelect'
+import client from '../api/client'
 
 const STATUS_COLORS: Record<string, string> = {
   PLANNING: 'gray', ACTIVE: 'blue', ON_HOLD: 'orange', COMPLETED: 'green', CANCELLED: 'red',
@@ -163,6 +165,71 @@ function GanttChart({ tasks }: { tasks: ProjectTask[] }) {
         </Stack>
       </Box>
     </Box>
+  )
+}
+
+// ── Shared project form ───────────────────────────────────────────────────────
+
+const PROJECT_TYPE_LABELS: Record<string, string> = {
+  NEW_INSTALLATION: 'התקנה חדשה',
+  RENOVATION: 'שיפוץ',
+  REPLACEMENT: 'החלפה',
+  MODERNIZATION: 'מודרניזציה',
+}
+
+function ProjectForm({ form, setForm, technicians, mgmtCompanies, onSubmit, loading, submitLabel }: {
+  form: any; setForm: (fn: (f: any) => any) => void
+  technicians: any[]; mgmtCompanies: any[]
+  onSubmit: () => void; loading: boolean; submitLabel: string
+}) {
+  const f = (key: string) => (val: any) => setForm((prev: any) => ({ ...prev, [key]: val === '' ? null : val }))
+  return (
+    <Stack gap="sm">
+      <TextInput label="שם פרויקט" required value={form.name || ''} onChange={e => setForm((p: any) => ({ ...p, name: e.target.value }))} />
+      <Group grow>
+        <Select label="סטטוס" value={form.status} onChange={f('status')}
+          data={Object.entries(STATUS_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
+        <Select label="סוג פרויקט" value={form.project_type || null} onChange={f('project_type')} clearable
+          data={Object.entries(PROJECT_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
+      </Group>
+
+      <Divider label="לקוח ואיש קשר" labelPosition="right" />
+      <CustomerSearchSelect
+        value={form.customer_id || null}
+        onChange={v => setForm((p: any) => ({ ...p, customer_id: v }))}
+        onSelect={c => { if (c) setForm((p: any) => ({ ...p, contact_person: p.contact_person || c.contact_name || '', contact_phone: p.contact_phone || c.phone || '' })) }}
+      />
+      <Group grow>
+        <TextInput label="איש קשר" value={form.contact_person || ''} onChange={e => setForm((p: any) => ({ ...p, contact_person: e.target.value }))} />
+        <TextInput label="טלפון איש קשר" value={form.contact_phone || ''} onChange={e => setForm((p: any) => ({ ...p, contact_phone: e.target.value }))} />
+      </Group>
+      <Select label="חברת ניהול" value={form.management_company_id || null} onChange={f('management_company_id')} clearable searchable
+        data={mgmtCompanies.map((m: any) => ({ value: m.id, label: m.name }))} />
+
+      <Divider label="מיקום ופרטי אתר" labelPosition="right" />
+      <Group grow>
+        <TextInput label="כתובת" value={form.address || ''} onChange={e => setForm((p: any) => ({ ...p, address: e.target.value }))} />
+        <TextInput label="עיר" value={form.city || ''} onChange={e => setForm((p: any) => ({ ...p, city: e.target.value }))} />
+      </Group>
+      <TextInput label="אתר / שם אתר" value={form.site || ''} onChange={e => setForm((p: any) => ({ ...p, site: e.target.value }))} placeholder="שם הפרויקט / שם האתר" />
+
+      <Divider label="פרטי פרויקט" labelPosition="right" />
+      <Group grow>
+        <DateInput label="תאריך התחלה" value={form.start_date} onChange={d => setForm((p: any) => ({ ...p, start_date: d }))} clearable locale="he" />
+        <DateInput label="תאריך סיום מתוכנן" value={form.end_date} onChange={d => setForm((p: any) => ({ ...p, end_date: d }))} clearable locale="he" />
+      </Group>
+      <Group grow>
+        <NumberInput label="מספר מעליות" value={form.elevator_count ?? ''} onChange={v => setForm((p: any) => ({ ...p, elevator_count: v || null }))} min={1} max={100} />
+        <NumberInput label="שווי חוזה (₪)" value={form.contract_value ?? ''} onChange={v => setForm((p: any) => ({ ...p, contract_value: v || null }))} min={0} thousandSeparator="," />
+      </Group>
+      <Group grow>
+        <TextInput label="יצרן" value={form.manufacturer || ''} onChange={e => setForm((p: any) => ({ ...p, manufacturer: e.target.value }))} placeholder="שם היצרן" />
+        <Select label="טכנאי אחראי" value={form.responsible_technician_id || null} onChange={f('responsible_technician_id')} clearable searchable
+          data={technicians.map((t: any) => ({ value: t.id, label: t.name }))} />
+      </Group>
+      <Textarea label="הערות" value={form.notes || ''} onChange={e => setForm((p: any) => ({ ...p, notes: e.target.value || null }))} autosize minRows={2} />
+      <Button loading={loading} onClick={onSubmit}>{submitLabel}</Button>
+    </Stack>
   )
 }
 
@@ -355,9 +422,19 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [form, setForm] = useState<any>({ name: '', site: '', status: 'PLANNING', start_date: null, end_date: null, notes: '' })
+  const emptyForm = { name: '', site: '', address: '', city: '', status: 'PLANNING', project_type: null, start_date: null, end_date: null, elevator_count: null, manufacturer: '', contract_value: null, customer_id: null, contact_person: '', contact_phone: '', management_company_id: null, responsible_technician_id: null, notes: '' }
+  const [form, setForm] = useState<any>(emptyForm)
   const [editProjectId, setEditProjectId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<any>({})
+
+  const { data: technicians = [] } = useQuery<any[]>({
+    queryKey: ['technicians-list'],
+    queryFn: () => client.get('/technicians').then(r => r.data),
+  })
+  const { data: mgmtCompanies = [] } = useQuery<any[]>({
+    queryKey: ['mgmt-companies-list'],
+    queryFn: () => client.get('/management-companies').then(r => r.data),
+  })
 
   const { data: projects = [], isLoading } = useQuery<Project[]>({
     queryKey: ['projects', statusFilter],
@@ -487,43 +564,23 @@ export default function ProjectsPage() {
       )}
 
       {/* Create project modal */}
-      <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="פרויקט חדש" dir="rtl">
-        <Stack gap="sm">
-          <TextInput label="שם פרויקט" required value={form.name} onChange={e => setForm((f: any) => ({ ...f, name: e.target.value }))} />
-          <TextInput label="אתר / כתובת" value={form.site || ''} onChange={e => setForm((f: any) => ({ ...f, site: e.target.value || null }))} />
-          <Select
-            label="סטטוס"
-            value={form.status}
-            onChange={v => setForm((f: any) => ({ ...f, status: v }))}
-            data={Object.entries(STATUS_LABELS).map(([v, l]) => ({ value: v, label: l }))}
-          />
-          <Group grow>
-            <DateInput label="תאריך התחלה" value={form.start_date} onChange={d => setForm((f: any) => ({ ...f, start_date: d }))} clearable locale="he" />
-            <DateInput label="תאריך סיום" value={form.end_date} onChange={d => setForm((f: any) => ({ ...f, end_date: d }))} clearable locale="he" />
-          </Group>
-          <Textarea label="הערות" value={form.notes || ''} onChange={e => setForm((f: any) => ({ ...f, notes: e.target.value || null }))} />
-          <Button loading={createMut.isPending} onClick={() => createMut.mutate(form)}>צור פרויקט</Button>
-        </Stack>
+      <Modal opened={createOpen} onClose={() => { setCreateOpen(false); setForm(emptyForm) }} title="פרויקט חדש" dir="rtl" size="lg">
+        <ProjectForm
+          form={form} setForm={setForm}
+          technicians={technicians} mgmtCompanies={mgmtCompanies}
+          onSubmit={() => createMut.mutate(form)}
+          loading={createMut.isPending} submitLabel="צור פרויקט"
+        />
       </Modal>
 
       {/* Edit project modal */}
-      <Modal opened={!!editProjectId} onClose={() => setEditProjectId(null)} title="עריכת פרויקט" dir="rtl">
-        <Stack gap="sm">
-          <TextInput label="שם פרויקט" required value={editForm.name || ''} onChange={e => setEditForm((f: any) => ({ ...f, name: e.target.value }))} />
-          <TextInput label="אתר / כתובת" value={editForm.site || ''} onChange={e => setEditForm((f: any) => ({ ...f, site: e.target.value || null }))} />
-          <Select
-            label="סטטוס"
-            value={editForm.status}
-            onChange={v => setEditForm((f: any) => ({ ...f, status: v }))}
-            data={Object.entries(STATUS_LABELS).map(([v, l]) => ({ value: v, label: l }))}
-          />
-          <Group grow>
-            <DateInput label="תאריך התחלה" value={editForm.start_date} onChange={d => setEditForm((f: any) => ({ ...f, start_date: d }))} clearable locale="he" />
-            <DateInput label="תאריך סיום" value={editForm.end_date} onChange={d => setEditForm((f: any) => ({ ...f, end_date: d }))} clearable locale="he" />
-          </Group>
-          <Textarea label="הערות" value={editForm.notes || ''} onChange={e => setEditForm((f: any) => ({ ...f, notes: e.target.value || null }))} />
-          <Button loading={updateMut.isPending} onClick={() => updateMut.mutate({ id: editProjectId!, data: editForm })}>שמור</Button>
-        </Stack>
+      <Modal opened={!!editProjectId} onClose={() => setEditProjectId(null)} title="עריכת פרויקט" dir="rtl" size="lg">
+        <ProjectForm
+          form={editForm} setForm={setEditForm}
+          technicians={technicians} mgmtCompanies={mgmtCompanies}
+          onSubmit={() => updateMut.mutate({ id: editProjectId!, data: editForm })}
+          loading={updateMut.isPending} submitLabel="שמור"
+        />
       </Modal>
     </Stack>
   )

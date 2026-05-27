@@ -4,9 +4,23 @@ export interface Project {
   id: string
   name: string
   site: string | null
+  address: string | null
+  city: string | null
   status: 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'CANCELLED'
+  project_type: string | null
   start_date: string | null
   end_date: string | null
+  elevator_count: number | null
+  manufacturer: string | null
+  contract_value: number | null
+  customer_id: string | null
+  customer_name: string | null
+  contact_person: string | null
+  contact_phone: string | null
+  management_company_id: string | null
+  management_company_name: string | null
+  responsible_technician_id: string | null
+  responsible_technician_name: string | null
   notes: string | null
   task_count: number
   created_at: string

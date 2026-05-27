@@ -47,6 +47,9 @@ def _activate_project_elevators(db: Session, project: Project) -> None:
 def _enrich(p: Project) -> ProjectResponse:
     r = ProjectResponse.model_validate(p)
     r.task_count = len(p.tasks)
+    r.customer_name = p.customer.name if p.customer else None
+    r.responsible_technician_name = p.responsible_technician.name if p.responsible_technician else None
+    r.management_company_name = p.management_company.name if p.management_company else None
     return r
 
 
