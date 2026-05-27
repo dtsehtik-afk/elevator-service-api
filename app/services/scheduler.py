@@ -250,53 +250,61 @@ def _generate_personal_motivation(name: str, api_key: str) -> str:
         return ""
 
 def _send_morning_location_requests():
-    """Morning job (08:00): send each active technician a WhatsApp with location request + motivational quote."""
+    """07:15 — send each active technician a good-morning WhatsApp with their open call count."""
     import random
     from app.database import SessionLocal
     from app.models.technician import Technician
+    from app.models.service_call import ServiceCall
+    from app.models.assignment import Assignment
     from app.services.whatsapp_service import _send_message
 
     db = SessionLocal()
     try:
         technicians = (
             db.query(Technician)
-            .filter(Technician.is_active == True, Technician.role == "TECHNICIAN")  # noqa: E712
+            .filter(Technician.is_active == True, Technician.is_available == True)  # noqa: E712
             .all()
         )
+        from app.config import get_settings
+        base_url = get_settings().app_base_url
+        portal_link = f"{base_url}/tech"
+        quote = random.choice(_MORNING_QUOTES)
+
         sent = 0
         for tech in technicians:
             phone = tech.whatsapp_number or tech.phone
             if not phone:
                 continue
 
-            # Reset daily GPS so first location triggers route build
-            tech.current_latitude  = None
-            tech.current_longitude = None
+            # Count open calls assigned to this technician
+            open_count = (
+                db.query(Assignment)
+                .join(ServiceCall, Assignment.service_call_id == ServiceCall.id)
+                .filter(
+                    Assignment.technician_id == tech.id,
+                    Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]),
+                    ServiceCall.status.notin_(["CLOSED", "RESOLVED", "CANCELLED"]),
+                )
+                .count()
+            )
 
-            from app.config import get_settings
-            base_url = get_settings().app_base_url
-            portal_link = f"{base_url}/tech"
-            quote = random.choice(_MORNING_QUOTES)
-            gemini_key = getattr(get_settings(), "gemini_api_key", "")
-            personal = _generate_personal_motivation(tech.name, gemini_key) if gemini_key else ""
+            call_line = (
+                f"📋 יש לך *{open_count} קריאות פתוחות* היום.\n" if open_count > 0
+                else "📋 אין קריאות פתוחות כרגע — תהיה זמין! 👍\n"
+            )
 
             msg = (
                 f"בוקר טוב {tech.name} 👋\n\n"
-                f"{quote}\n"
-                + (f"{personal}\n\n" if personal else "\n")
-                +
+                f"{quote}\n\n"
                 f"────────────────────\n"
+                f"{call_line}"
+                f"🔗 {portal_link}\n"
                 f"────────────────────\n"
-                f"📍 *לשיתוף מיקום חי* — פתח את הקישור ואפשר גישה למיקום:\n\n"
-                f"{base_url}/webhooks/track/{tech.id}\n\n"
-                f"השאר את הדף פתוח — המיקום יתעדכן אוטומטית כל 5 דקות.\n\n"
-                f"🔗 *פורטל הטכנאי שלך*:\n\n"
-                f"{portal_link}\n\n"
-                f"תודה ובהצלחה! 🙏"
+                f"בהצלחה היום! 🙏"
             )
             if _send_message(phone, msg):
                 sent += 1
-        db.commit()
+
         logger.info("Morning message sent to %d/%d technicians", sent, len(technicians))
     except Exception as exc:
         logger.error("Morning location request job failed: %s", exc)
@@ -1951,7 +1959,7 @@ def _check_inspection_deficiency_escalation():
 
 
 def _send_morning_maintenance_alerts():
-    """07:35 — send WhatsApp for urgent maintenance calls created overnight."""
+    """07:35 — send daily WhatsApp to managers for all open HIGH/CRITICAL maintenance calls."""
     from app.database import SessionLocal
     from app.models.service_call import ServiceCall
     from app.models.elevator import Elevator
@@ -1959,27 +1967,37 @@ def _send_morning_maintenance_alerts():
 
     db = SessionLocal()
     try:
+        # All open HIGH/CRITICAL maintenance calls — sent daily regardless of prior notifications
         pending = db.query(ServiceCall).filter(
             ServiceCall.fault_type == "MAINTENANCE",
-            ServiceCall.status == "OPEN",
+            ServiceCall.status.in_(["OPEN", "ASSIGNED"]),
             ServiceCall.priority.in_(["CRITICAL", "HIGH"]),
-            ServiceCall.description.contains("[maint_pending_notify]"),
         ).all()
 
         if pending:
+            from datetime import date
+            today = date.today()
             lines = []
             for sc in pending:
                 elev = db.get(Elevator, sc.elevator_id)
                 addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
-                days_str = sc.description.split("[maint_pending_notify]")[0].replace("טיפול מונע ", "").strip()
-                date_str = elev.next_service_date.strftime("%d/%m/%Y") if elev and elev.next_service_date else ""
-                lines.append(f"• {addr} — {days_str}" + (f" (תאריך: {date_str})" if date_str else ""))
-                sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
+                num_str = f"S{sc.call_number:05d} " if sc.call_number else ""
+                if elev and elev.next_service_date:
+                    days_late = (today - elev.next_service_date).days
+                    date_info = f"— באיחור {days_late} ימים" if days_late > 0 else f"— מתוכנן {elev.next_service_date.strftime('%d/%m')}"
+                else:
+                    date_info = ""
+                lines.append(f"• {num_str}{addr} {date_info}")
+                # Clear one-time marker (no longer needed — we send daily)
+                if sc.description and "[maint_pending_notify]" in sc.description:
+                    sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
 
             batched = f"🔴 *טיפול מונע דחוף — {len(lines)} מעליות*\n════════════════════\n" + "\n".join(lines)
             notify_dispatcher(batched)
             db.commit()
             logger.info("Morning maintenance alerts sent for %d calls", len(pending))
+        else:
+            logger.info("Morning maintenance alerts: no urgent open calls today")
     except Exception as exc:
         logger.error("Morning maintenance alert job failed: %s", exc)
     finally:
@@ -2160,8 +2178,7 @@ def start_scheduler():
     _scheduler.add_job(_run_auto_invoicing,               "cron", hour=6,  minute=0)
     _scheduler.add_job(_run_nightly_maintenance,         "cron", hour=0,  minute=5,  day_of_week="sun,mon,tue,wed,thu,fri")
     _scheduler.add_job(_send_morning_maintenance_alerts, "cron", hour=7,  minute=35, day_of_week="sun,mon,tue,wed,thu,fri")
-    # Morning location requests disabled — technicians use the dedicated mobile app
-    # _scheduler.add_job(_send_morning_location_requests, "cron", hour=7, minute=15, day_of_week="sun,mon,tue,wed,thu,fri")
+    _scheduler.add_job(_send_morning_location_requests,  "cron", hour=7,  minute=15, day_of_week="sun,mon,tue,wed,thu,fri")
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
