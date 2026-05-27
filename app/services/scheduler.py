@@ -1329,6 +1329,8 @@ def _try_intercept_call_confirmation(db, phone: str, question: str, asker_name: 
     if first_word not in _CONFIRM_KEYWORDS:
         return False
 
+    logger.info("🔍 Intercept: keyword '%s' detected — checking last bot message for phone %s", first_word, phone[-4:])
+
     # Last bot message must contain [elevator_id: UUID]
     last_bot = (
         db.query(WhatsAppMessage)
@@ -1337,10 +1339,13 @@ def _try_intercept_call_confirmation(db, phone: str, question: str, asker_name: 
         .first()
     )
     if not last_bot or not last_bot.text:
+        logger.info("🔍 Intercept: no saved bot message found for phone %s", phone[-4:])
         return False
 
+    logger.info("🔍 Intercept: last bot msg snippet: %r", last_bot.text[:120])
     match = re.search(r'\[elevator_id:\s*([0-9a-f\-]{36})\]', last_bot.text, re.IGNORECASE)
     if not match:
+        logger.info("🔍 Intercept: no [elevator_id:...] in last bot message — not intercepting")
         return False
 
     elevator_id_str = match.group(1)
@@ -1461,7 +1466,19 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
             ))
             db.commit()
         except Exception as save_exc:
-            logger.warning("Could not save bot reply to history: %s", save_exc)
+            db.rollback()
+            logger.warning("Bot reply save with extras failed (%s) — retrying without new columns", save_exc)
+            try:
+                from app.models.whatsapp_message import WhatsAppMessage
+                db.add(WhatsAppMessage(
+                    phone=phone,
+                    direction="out",
+                    msg_type="text",
+                    text=answer,
+                ))
+                db.commit()
+            except Exception as save_exc2:
+                logger.warning("Could not save bot reply to history: %s", save_exc2)
 
     except Exception as exc:
         logger.error("Chat agent error: %s", exc)
