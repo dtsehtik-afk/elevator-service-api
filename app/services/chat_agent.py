@@ -818,16 +818,25 @@ def _get_technician_route(db: Session, tech_id: str = None, technician_name: str
     if not tech:
         return {"error": f"הטכנאי לא נמצא"}
 
+    # CONFIRMED + AUTO_ASSIGNED only — same scope as build_route; PENDING_CONFIRMATION
+    # are unanswered requests that haven't been accepted yet and must not inflate the list.
     assignments = (
         db.query(Assignment)
         .filter(Assignment.technician_id == tech.id,
-                Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]))
+                Assignment.status.in_(["CONFIRMED", "AUTO_ASSIGNED"]))
         .all()
     )
 
-    active = []       # CONFIRMED/AUTO_ASSIGNED, non-maintenance — what UI shows as "active"
-    maintenance = []  # all maintenance calls
-    pending = []      # PENDING_CONFIRMATION awaiting technician reply
+    # Count pending confirmations separately (don't list them)
+    pending_count = (
+        db.query(Assignment)
+        .filter(Assignment.technician_id == tech.id,
+                Assignment.status == "PENDING_CONFIRMATION")
+        .count()
+    )
+
+    active = []       # CONFIRMED/AUTO_ASSIGNED, non-maintenance
+    maintenance = []  # maintenance calls (shown separately in UI)
 
     for a in assignments:
         call = db.query(ServiceCall).filter(
@@ -847,8 +856,6 @@ def _get_technician_route(db: Session, tech_id: str = None, technician_name: str
         }
         if call.fault_type == "MAINTENANCE":
             maintenance.append(entry)
-        elif a.status == "PENDING_CONFIRMATION":
-            pending.append(entry)
         else:
             active.append(entry)
 
@@ -861,10 +868,10 @@ def _get_technician_route(db: Session, tech_id: str = None, technician_name: str
         "טכנאי": tech.name,
         "קריאות_פעילות": active,
         "סה_כ_פעילות": len(active),
-        "ממתינות_לאישור_שלך": len(pending),
+        "ממתינות_לאישורך": pending_count,
         "תחזוקה_פתוחה": len(maintenance),
         "לינק_לניהול": portal_url,
-        "_הנחיה": "הצג רק את 'קריאות_פעילות'. ציין בנפרד את מספר הממתינות לאישור ותחזוקה אם יש.",
+        "_הנחיה": "הצג רק את 'קריאות_פעילות'. אם יש ממתינות לאישורך — ציין את המספר וציין 'שלח 1 לאישור בהודעה הרלוונטית'.",
     }
 
 
@@ -1335,44 +1342,26 @@ def _get_my_route_by_phone(db: Session, phone: str) -> dict:
     if not tech:
         return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
 
-    from app.services.route_service import build_route, format_route_message, RouteStop
-    from app.services.maps_service import ensure_elevator_coords
-    from app.models.assignment import Assignment
+    from app.services.route_service import build_route, format_route_message
+    from app.services.maps_service import is_israel_coords
+
+    # Require valid Israel GPS — route cannot be optimized without location
+    has_valid_gps = bool(
+        tech.current_latitude and tech.current_longitude
+        and is_israel_coords(tech.current_latitude, tech.current_longitude)
+    )
+    if not has_valid_gps:
+        return {
+            "no_gps": True,
+            "_הנחיה": (
+                "כתוב בדיוק את הטקסט הבא ואל תוסיף דבר: "
+                "'כדי לקבל מסלול מסודר, שלח את המיקום שלך 📍\\n"
+                "(לחץ על 📎 ← מיקום ← שלח)\\n"
+                "המסלול מחושב לפי הנקודה שממנה אתה מתחיל.'"
+            ),
+        }
 
     stops, suggestions = build_route(db, tech)
-
-    # Fallback: if no GPS — build priority-ordered route without nearest-neighbor
-    if not stops:
-        assigned_ids = {
-            a.service_call_id
-            for a in db.query(Assignment)
-            .filter(Assignment.technician_id == tech.id,
-                    Assignment.status.in_(["CONFIRMED", "AUTO_ASSIGNED"]))
-            .all()
-        }
-        _PRI_W = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-        pool = []
-        for cid in assigned_ids:
-            call = db.query(ServiceCall).filter(
-                ServiceCall.id == cid,
-                ServiceCall.status.notin_(["CLOSED", "RESOLVED", "CANCELLED"]),
-            ).first()
-            if not call or call.fault_type == "MAINTENANCE":
-                continue
-            elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
-            if not elev:
-                continue
-            lat, lng = ensure_elevator_coords(db, elev)
-            _FAULT_HE = {"STUCK": "מעלית תקועה 🚨", "DOOR": "תקלת דלת", "ELECTRICAL": "חשמלית",
-                         "MECHANICAL": "מכנית", "SOFTWARE": "תוכנה", "OTHER": "כללית"}
-            pool.append(RouteStop(
-                call_id=str(call.id), elevator_id=str(elev.id),
-                address=elev.address, city=elev.city, building=elev.building_name or "",
-                fault_type=_FAULT_HE.get(call.fault_type, call.fault_type),
-                priority=call.priority, lat=lat, lng=lng, travel_minutes=0,
-            ))
-        stops = sorted(pool, key=lambda s: _PRI_W.get(s.priority, 2))
-
     msg = format_route_message(tech.name, stops, suggestions)
     return {
         "תוצאה": "המסלול חושב בהצלחה",
