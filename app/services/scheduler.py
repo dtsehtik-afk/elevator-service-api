@@ -657,6 +657,17 @@ def _poll_whatsapp_replies():
                             logger.info("🎤 Voice from %s: %s", phone, transcribed)
                             _handle_free_text(db, phone, transcribed, s)
 
+                    elif msg_kind == "reactionMessage":
+                        # Green API sometimes sends reactions as incomingMessageReceived
+                        # with typeMessage: "reactionMessage" instead of messageReactionReceived
+                        reaction_data = msg_data.get("reactionMessage", {})
+                        _handle_reaction(
+                            db,
+                            phone=phone,
+                            reacted_msg_id=reaction_data.get("messageId", ""),
+                            reaction=reaction_data.get("reaction", ""),
+                        )
+
                     elif msg_kind in ("textMessage", "extendedTextMessage"):
                         # textMessage = plain text; extendedTextMessage = reply/quote
                         is_reply = msg_kind == "extendedTextMessage"
@@ -1296,6 +1307,98 @@ def _handle_chat_question_simple(db, phone: str, question: str, settings) -> Non
     )
 
 
+_CONFIRM_KEYWORDS = {"כן", "אישור", "בסדר", "אוקיי", "ok", "yep", "1", "yes"}
+
+
+def _try_intercept_call_confirmation(db, phone: str, question: str, asker_name: str) -> bool:
+    """
+    Detect when user is confirming a call-creation that the bot proposed.
+
+    Pattern: last bot message contains [elevator_id: <UUID>] and current
+    message starts with a confirmation keyword (optionally followed by description).
+
+    When matched: creates the call directly (never goes through Gemini),
+    sends confirmation. Returns True if intercepted.
+    """
+    import re
+    import json as _json
+    from app.models.whatsapp_message import WhatsAppMessage
+
+    # Must start with a confirmation keyword
+    first_word = question.strip().split()[0].lower().strip(".,!?\"'")
+    if first_word not in _CONFIRM_KEYWORDS:
+        return False
+
+    # Last bot message must contain [elevator_id: UUID]
+    last_bot = (
+        db.query(WhatsAppMessage)
+        .filter(WhatsAppMessage.phone == phone, WhatsAppMessage.direction == "out")
+        .order_by(WhatsAppMessage.timestamp.desc())
+        .first()
+    )
+    if not last_bot or not last_bot.text:
+        return False
+
+    match = re.search(r'\[elevator_id:\s*([0-9a-f\-]{36})\]', last_bot.text, re.IGNORECASE)
+    if not match:
+        return False
+
+    elevator_id_str = match.group(1)
+
+    # Extract description from rest of user message (after "כן,")
+    desc_raw = re.sub(
+        r'^(' + '|'.join(_CONFIRM_KEYWORDS) + r')[,\s]+', '',
+        question.strip(), flags=re.IGNORECASE
+    ).strip("'\"").strip()
+    description = desc_raw if len(desc_raw) >= 5 else "קריאת שירות שנפתחה ע\"י סוכן AI"
+
+    try:
+        import uuid as _uuid
+        from app.services.service_call_service import create_service_call
+        from app.schemas.service_call import ServiceCallCreate
+        from app.models.elevator import Elevator
+
+        eid = _uuid.UUID(elevator_id_str)
+        elev = db.query(Elevator).filter(Elevator.id == eid).first()
+        addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+
+        data = ServiceCallCreate(
+            elevator_id=eid,
+            reported_by=asker_name,
+            description=description,
+            priority="MEDIUM",
+            fault_type="OTHER",
+        )
+        call = create_service_call(db, data, current_user_email=f"ai_agent_{phone}")
+        call_num = f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8]
+
+        reply = (
+            f"✅ קריאת שירות *{call_num}* נפתחה\n"
+            f"📍 {addr}\n"
+            f"📝 {description}"
+        )
+        wa_msg_id = _send_message(phone, f"🤖 *נציג המערכת*\n\n{reply}")
+        try:
+            db.add(WhatsAppMessage(
+                phone=phone, direction="out", msg_type="text", text=reply,
+                wa_message_id=wa_msg_id,
+                tool_calls_json=_json.dumps(
+                    [{"tool": "create_service_call", "params": {"elevator_id": elevator_id_str, "description": description}}],
+                    ensure_ascii=False,
+                ),
+            ))
+            db.commit()
+        except Exception:
+            pass
+
+        logger.info("✅ Intercepted call creation %s for elevator %s", call_num, elevator_id_str)
+        return True
+
+    except Exception as exc:
+        logger.error("Call confirmation intercept failed: %s", exc)
+        return False
+
+
 def _handle_chat_question(db, phone: str, question: str, settings, with_history: bool = False) -> None:
     """Route a free-text WhatsApp question to the Claude chat agent and reply."""
     from app.models.technician import Technician
@@ -1326,6 +1429,14 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
         return
 
     logger.info("💬 Chat question from %s: %s", asker_name, question)
+
+    # ── Server-side confirmation intercept ───────────────────────────────────
+    # When the last bot message asked "האם לפתוח קריאה ... [elevator_id: UUID]?"
+    # and the user now confirms, execute the creation directly — never trust
+    # Gemini to call create_service_call reliably after a confirmation turn.
+    intercepted = _try_intercept_call_confirmation(db, phone, question, asker_name)
+    if intercepted:
+        return
 
     if not settings.gemini_api_key:
         _handle_chat_question_simple(db, phone, question, settings)
