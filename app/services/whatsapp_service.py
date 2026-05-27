@@ -339,11 +339,18 @@ def notify_dispatcher(text: str) -> bool:
             seen.add(key)
             all_phones.append(p)
     if not all_phones:
+        logger.warning("notify_dispatcher: no manager phones found (env=%s, db_count=%d)",
+                       settings.dispatcher_whatsapp, len(db_phones))
         return False
+    logger.info("notify_dispatcher: sending to %d numbers: %s", len(all_phones),
+                [p[:4] + "****" for p in all_phones])
     success = False
     for number in all_phones:
-        if _send_message(number, text):
+        ok = _send_message(number, text)
+        if ok:
             success = True
+        else:
+            logger.warning("notify_dispatcher: FAILED to send to %s", number[:4] + "****" + number[-2:])
     return success
 
 

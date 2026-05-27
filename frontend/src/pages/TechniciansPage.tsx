@@ -11,8 +11,14 @@ import client from '../api/client'
 import { Technician } from '../types'
 import { useAuthStore } from '../stores/authStore'
 
-const ROLE_LABELS: Record<string, string> = { ADMIN: 'מנהל', TECHNICIAN: 'טכנאי', DISPATCHER: 'מוקד' }
-const ROLE_COLORS: Record<string, string> = { ADMIN: 'purple', TECHNICIAN: 'blue', DISPATCHER: 'teal' }
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: 'מנהל', MANAGER: 'מנהל', DISPATCHER: 'מוקד',
+  TECHNICIAN: 'טכנאי', SENIOR_TECHNICIAN: 'טכנאי בכיר', MAINTENANCE_TECHNICIAN: 'טכנאי תחזוקה',
+}
+const ROLE_COLORS: Record<string, string> = {
+  ADMIN: 'purple', MANAGER: 'purple', DISPATCHER: 'teal',
+  TECHNICIAN: 'blue', SENIOR_TECHNICIAN: 'indigo', MAINTENANCE_TECHNICIAN: 'cyan',
+}
 
 const EMPTY_NEW = {
   name: '', email: '', phone: '', whatsapp_number: '', password: '',
@@ -250,9 +256,12 @@ export default function TechniciansPage() {
           <Group grow>
             <Select label="תפקיד"
               data={[
+                { value: 'MANAGER', label: 'מנהל (מקבל התראות)' },
+                { value: 'DISPATCHER', label: 'מוקד (מקבל התראות)' },
                 { value: 'TECHNICIAN', label: 'טכנאי' },
-                { value: 'DISPATCHER', label: 'מוקד' },
-                { value: 'ADMIN', label: 'מנהל' },
+                { value: 'SENIOR_TECHNICIAN', label: 'טכנאי בכיר' },
+                { value: 'MAINTENANCE_TECHNICIAN', label: 'טכנאי תחזוקה' },
+                { value: 'ADMIN', label: 'מנהל מערכת' },
               ]}
               value={newForm.role}
               onChange={v => setNewForm(s => ({ ...s, role: v ?? 'TECHNICIAN' }))} />
@@ -292,9 +301,12 @@ export default function TechniciansPage() {
           <Group grow>
             <Select label="תפקיד"
               data={[
+                { value: 'MANAGER', label: 'מנהל (מקבל התראות)' },
+                { value: 'DISPATCHER', label: 'מוקד (מקבל התראות)' },
                 { value: 'TECHNICIAN', label: 'טכנאי' },
-                { value: 'DISPATCHER', label: 'מוקד' },
-                { value: 'ADMIN', label: 'מנהל' },
+                { value: 'SENIOR_TECHNICIAN', label: 'טכנאי בכיר' },
+                { value: 'MAINTENANCE_TECHNICIAN', label: 'טכנאי תחזוקה' },
+                { value: 'ADMIN', label: 'מנהל מערכת' },
               ]}
               value={editForm.role}
               onChange={v => setEditForm(s => ({ ...s, role: v ?? 'TECHNICIAN' }))} />
