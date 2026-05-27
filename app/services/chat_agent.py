@@ -231,6 +231,11 @@ _GEMINI_TOOLS = [{
             "parameters": {"type": "OBJECT", "properties": {}, "required": []},
         },
         {
+            "name": "get_my_location",
+            "description": "מחזיר את המיקום הנוכחי של הטכנאי שמחזיק בשיחה, כולל קישור Google Maps. השתמש כאשר הטכנאי שואל 'איפה אני', 'מה המיקום שלי', 'איפה אני נמצא'. אין צורך בשם — המיקום נשלף לפי הטלפון.",
+            "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+        },
+        {
             "name": "request_call_from_dispatcher",
             "description": "טכנאי מבקש לטפל בקריאה — שולח בקשה לאישור מוקד. השתמש כאשר הטכנאי אומר 'מבקש', 'אשמח לטפל', 'רוצה לטפל'. שונה מ-take_service_call שמשבץ מיד.",
             "parameters": {"type": "OBJECT", "properties": {
@@ -1643,6 +1648,11 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
         return _close_my_active_call(db, phone, tool_input.get("resolution_notes", ""), tool_input.get("quote_needed", False))
     elif tool_name == "get_my_route":
         return _get_my_route_by_phone(db, phone)
+    elif tool_name == "get_my_location":
+        tech = _find_tech_by_phone(db, phone)
+        if not tech:
+            return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
+        return _get_technician_location(db, technician_name=tech.name)
     elif tool_name == "plan_weekly_route":
         return _plan_weekly_route(
             db, phone,
@@ -1789,6 +1799,8 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 אזהרה חמורה לגבי סגירת קריאות: לעולם אל תסגור מספר קריאות במקביל, גם אם נראה לך שהתבקשת. סגור אך ורק קריאה בודדת אחת, לאחר וידוא זהותה (מס' קריאה), ולעולם אל תשתמש בהודעה הקולית כ"הערות סגירה" אלא אם התבקשת מפורשות!
 אישור תקף: כן / לא / 1 / 2 / אישור / ביטול / בסדר / אוקיי / ok / yep.
 כלל ברזל: אם שאלת "האם לבצע X?" ובתגובה הבאה המשתמש כתב רק "כן" או "אישור" או "בסדר" — בצע מיד. אסור לשאול שוב "האם...?". שאלת אישור אחת בלבד לכל פעולה.
+כלל ברזל לפתיחת קריאה: כאשר אתה שואל אישור לפתיחת קריאה, חובה לכלול בהודעת האישור את ה-UUID של המעלית בפורמט: [elevator_id: <UUID>]. לדוגמה: "האם לפתוח קריאה למעלית הכנסת 7, עפולה [elevator_id: abc-123...]?" — כך תוכל לקרוא ל-create_service_call עם ה-ID הנכון אחרי שתקבל אישור.
+כלל ברזל: לעולם אל תאמר "פתחתי", "בוצע", "נרשמה" וכדומה ללא קריאה בפועל לכלי המתאים. אם ביצעת פעולה — הצג את מספר הקריאה שהתקבל מהכלי (S00XXX). אם לא קיבלת מספר — הפעולה לא בוצעה.
 
 ══ כלל הרשאות ══
 פרטי ההרשאות של המשתמש יסופקו בהקשר. הצג רק מידע שהתפקיד שלו מורשה לראות.
@@ -1803,7 +1815,9 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 • "לקחתי / הולך / אני על זה / אני מגיע" + כתובת → take_service_call(address_hint=...)  [בצע מיד]
 • "סיימתי / בוצע / טיפלתי / גמרתי" + הערות → close_my_active_call(resolution_notes=..., quote_needed=...)  [בצע מיד]
 • "מסלול / שלח מסלול / אפשר מסלול / מפה / על מפה / קישור מפה / סדר יום / מה יש לי" → get_my_route()
+• "מה המיקום שלי / איפה אני / מה מיקומי" → get_my_location()  [לא get_technician_location]
 כלל ברזל: כל הודעה שמכילה את המילה 'מסלול' או 'מפה' → get_my_route בלבד. לעולם אל תשתמש ב-get_my_calls לבקשת מסלול.
+כלל ברזל: שאלת מיקום עצמי ("שלי", "אני") → get_my_location. שאלת מיקום טכנאי אחר → get_technician_location(name=...).
 • "מבקש לטפל / אשמח לטפל / רוצה לטפל" → request_call_from_dispatcher(address_hint=...)
 • "התחלתי / אני שם / מתחיל לטפל" → mark_call_in_progress()
 
