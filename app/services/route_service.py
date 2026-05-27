@@ -86,19 +86,20 @@ def build_route(
     # ── Collect candidate calls ───────────────────────────────────────────────
     candidates: list[dict] = []
 
-    # Only calls CONFIRMED to this technician appear in the route
+    # Only CONFIRMED calls, excluding MAINTENANCE (separate tab in UI)
     assigned_call_ids = {
         a.service_call_id
         for a in db.query(Assignment)
         .filter(
             Assignment.technician_id == technician.id,
-            Assignment.status == "CONFIRMED",  # ← Only confirmed, not pending
+            Assignment.status.in_(["CONFIRMED", "AUTO_ASSIGNED"]),
         )
         .all()
     }
     for call_id in assigned_call_ids:
         call = db.query(ServiceCall).filter(ServiceCall.id == call_id).first()
-        if call and call.status not in ("CLOSED", "RESOLVED", "MONITORING"):
+        if call and call.status not in ("CLOSED", "RESOLVED", "MONITORING", "CANCELLED") \
+                and call.fault_type != "MAINTENANCE":
             candidates.append({"call": call, "assigned": True})
 
     # 2. Unassigned OPEN calls nearby (as suggestions)

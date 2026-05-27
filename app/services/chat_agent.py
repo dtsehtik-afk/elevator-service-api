@@ -1345,16 +1345,17 @@ def _get_my_route_by_phone(db: Session, phone: str) -> dict:
             a.service_call_id
             for a in db.query(Assignment)
             .filter(Assignment.technician_id == tech.id,
-                    Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]))
+                    Assignment.status.in_(["CONFIRMED", "AUTO_ASSIGNED"]))
             .all()
         }
         _PRI_W = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
         pool = []
         for cid in assigned_ids:
             call = db.query(ServiceCall).filter(
-                ServiceCall.id == cid, ServiceCall.status.notin_(["CLOSED", "RESOLVED"])
+                ServiceCall.id == cid,
+                ServiceCall.status.notin_(["CLOSED", "RESOLVED", "CANCELLED"]),
             ).first()
-            if not call:
+            if not call or call.fault_type == "MAINTENANCE":
                 continue
             elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
             if not elev:
