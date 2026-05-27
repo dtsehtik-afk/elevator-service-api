@@ -55,6 +55,17 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
+      - name: Set versionCode from run number
+        run: |
+          GRADLE="frontend/android/app/build.gradle"
+          # Replace versionCode so each CI build gets a unique, ever-increasing value.
+          # Android rejects same-or-lower versionCode installs — without this users must
+          # uninstall before installing a new build.
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" "$GRADLE"
+          sed -i "s/versionName \"[^\"]*\"/versionName \"1.${{ github.run_number }}\"/" "$GRADLE"
+          echo "=== versionCode/Name after patch ==="
+          grep -E "versionCode|versionName" "$GRADLE"
+
       - name: Patch Gradle files for Kotlin compatibility
         run: |
           # Root cause: cap sync generates app/capacitor.build.gradle with hardcoded VERSION_21.
