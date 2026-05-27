@@ -807,7 +807,7 @@ def _transfer_to_monitoring(db: Session, call_id: str, notes: str = "") -> dict:
 
 
 def _get_technician_route(db: Session, tech_id: str = None, technician_name: str = None) -> dict:
-    """Return open assigned calls for a technician, ordered as a work route."""
+    """Return open assigned calls for a technician — mirrors what the technician app UI shows."""
     from app.models.assignment import Assignment
     if tech_id:
         tech = db.query(Technician).filter(Technician.id == tech_id).first()
@@ -815,35 +815,55 @@ def _get_technician_route(db: Session, tech_id: str = None, technician_name: str
         tech = db.query(Technician).filter(Technician.name.ilike(f"%{technician_name}%")).first()
     if not tech:
         return {"error": f"הטכנאי לא נמצא"}
+
     assignments = (
         db.query(Assignment)
         .filter(Assignment.technician_id == tech.id,
                 Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]))
         .all()
     )
-    route = []
+
+    active = []       # CONFIRMED/AUTO_ASSIGNED, non-maintenance — what UI shows as "active"
+    maintenance = []  # all maintenance calls
+    pending = []      # PENDING_CONFIRMATION awaiting technician reply
+
     for a in assignments:
         call = db.query(ServiceCall).filter(
             ServiceCall.id == a.service_call_id,
-            ServiceCall.status.notin_(["CLOSED", "RESOLVED"])
+            ServiceCall.status.notin_(["CLOSED", "RESOLVED", "CANCELLED"])
         ).first()
         if not call:
             continue
         elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
-        route.append({
-            "מספר_קריאה": call.call_number or str(call.id)[:8],
+        entry = {
+            "מספר_קריאה": f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8],
             "כתובת": f"{elev.address}, {elev.city}" if elev else "לא ידוע",
-            "בניין": elev.building_name or "" if elev else "",
             "עדיפות": call.priority,
-            "סטטוס": call.status,
-            "תיאור": call.description[:80] if call.description else "",
+            "סטטוס_קריאה": call.status,
+            "תיאור": (call.description or "")[:80],
             "תאריך_פתיחה": call.created_at.strftime("%d/%m %H:%M") if call.created_at else "",
-        })
-    route.sort(key=lambda x: ("CRITICAL" not in x["עדיפות"], "HIGH" not in x["עדיפות"]))
+        }
+        if call.fault_type == "MAINTENANCE":
+            maintenance.append(entry)
+        elif a.status == "PENDING_CONFIRMATION":
+            pending.append(entry)
+        else:
+            active.append(entry)
+
+    active.sort(key=lambda x: ("CRITICAL" not in x["עדיפות"], "HIGH" not in x["עדיפות"]))
+
     from app.config import get_settings
     base_url = getattr(get_settings(), "app_base_url", "").rstrip("/")
     portal_url = f"{base_url}/tech" if base_url else ""
-    return {"טכנאי": tech.name, "קריאות": route, "סה_כ": len(route), "לינק_למפה_ולניהול": portal_url}
+    return {
+        "טכנאי": tech.name,
+        "קריאות_פעילות": active,
+        "סה_כ_פעילות": len(active),
+        "ממתינות_לאישור_שלך": len(pending),
+        "תחזוקה_פתוחה": len(maintenance),
+        "לינק_לניהול": portal_url,
+        "_הנחיה": "הצג רק את 'קריאות_פעילות'. ציין בנפרד את מספר הממתינות לאישור ותחזוקה אם יש.",
+    }
 
 
 def _get_my_calls(db: Session, phone: str) -> dict:
