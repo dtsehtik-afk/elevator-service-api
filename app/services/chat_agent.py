@@ -219,10 +219,11 @@ _GEMINI_TOOLS = [{
         },
         {
             "name": "close_my_active_call",
-            "description": "סוגר את הקריאה הפעילה של הטכנאי הנוכחי. השתמש כאשר הטכנאי אומר 'סיימתי', 'בוצע', 'טיפלתי', 'סגרתי', 'גמרתי'. חלץ הערות פתרון מהטקסט אם יש. בצע מיד.",
+            "description": "סוגר קריאת שירות פעילה. ללא address_hint — סוגר את הקריאה הפעילה של הטכנאי הנוכחי. עם address_hint — מחפש קריאה פעילה בכתובת/בניין שצוין ללא קשר לאיזה טכנאי. השתמש כאשר: 'סיימתי', 'בוצע', 'טיפלתי', 'סגרתי', 'גמרתי', 'חולץ', 'תסגור את הקריאה ב...'. חלץ הערות פתרון מהטקסט. בצע מיד.",
             "parameters": {"type": "OBJECT", "properties": {
                 "resolution_notes": {"type": "STRING", "description": "תיאור מה בוצע / הערות סגירה מהטקסט"},
                 "quote_needed": {"type": "BOOLEAN", "description": "True אם הטכנאי ציין שנדרשת הצעת מחיר"},
+                "address_hint": {"type": "STRING", "description": "כתובת/בניין/עיר לחיפוש קריאה פעילה — לשימוש כאשר הקריאה אינה של המדווח עצמו אלא בכתובת ספציפית"},
             }, "required": []},
         },
         {
@@ -1286,30 +1287,57 @@ def _take_service_call(db: Session, phone: str, address_hint: str = "", call_id:
     }
 
 
-def _close_my_active_call(db: Session, phone: str, resolution_notes: str = "", quote_needed: bool = False) -> dict:
-    """Close the active call for the technician identified by phone."""
+def _close_my_active_call(db: Session, phone: str, resolution_notes: str = "", quote_needed: bool = False, address_hint: str = "") -> dict:
+    """Close the active call for the technician identified by phone.
+    If address_hint given, search for any active call at that address (for managers)."""
     tech = _find_tech_by_phone(db, phone)
     if not tech:
         return {"error": "הטכנאי לא זוהה במערכת"}
 
     from app.models.assignment import Assignment
+    from sqlalchemy import or_
 
-    assignment = (
-        db.query(Assignment)
-        .filter(
-            Assignment.technician_id == tech.id,
-            Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]),
+    call = None
+
+    if address_hint:
+        # Search for any active call at the given address/building
+        terms = [t.strip() for t in address_hint.split() if len(t.strip()) >= 2]
+        q = db.query(ServiceCall).filter(ServiceCall.status.notin_(["CLOSED", "RESOLVED"]))
+        if terms:
+            from app.models.elevator import Elevator as _Elev
+            matching_elevator_ids = db.query(_Elev.id).filter(
+                or_(
+                    *[
+                        _Elev.address.ilike(f"%{t}%") |
+                        _Elev.building_name.ilike(f"%{t}%") |
+                        _Elev.city.ilike(f"%{t}%")
+                        for t in terms
+                    ]
+                )
+            ).all()
+            ids = [r[0] for r in matching_elevator_ids]
+            if ids:
+                q = q.filter(ServiceCall.elevator_id.in_(ids))
+                call = q.order_by(ServiceCall.created_at.desc()).first()
+        if not call:
+            return {"error": f"לא נמצאה קריאה פעילה בכתובת/בניין '{address_hint}'"}
+    else:
+        assignment = (
+            db.query(Assignment)
+            .filter(
+                Assignment.technician_id == tech.id,
+                Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION"]),
+            )
+            .order_by(Assignment.assigned_at.desc())
+            .first()
         )
-        .order_by(Assignment.assigned_at.desc())
-        .first()
-    )
-    if not assignment:
-        return {"error": "לא נמצאה קריאה פעילה לסגירה — אולי כבר נסגרה?"}
+        if not assignment:
+            return {"error": "לא נמצאה קריאה פעילה לסגירה — אולי כבר נסגרה?"}
+        call = db.query(ServiceCall).filter(
+            ServiceCall.id == assignment.service_call_id,
+            ServiceCall.status.notin_(["CLOSED", "RESOLVED"]),
+        ).first()
 
-    call = db.query(ServiceCall).filter(
-        ServiceCall.id == assignment.service_call_id,
-        ServiceCall.status.notin_(["CLOSED", "RESOLVED"]),
-    ).first()
     if not call:
         return {"error": "הקריאה לא נמצאה או שכבר סגורה"}
 
@@ -1645,7 +1673,7 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
     elif tool_name == "take_service_call":
         return _take_service_call(db, phone, tool_input.get("address_hint", ""), tool_input.get("call_id", ""))
     elif tool_name == "close_my_active_call":
-        return _close_my_active_call(db, phone, tool_input.get("resolution_notes", ""), tool_input.get("quote_needed", False))
+        return _close_my_active_call(db, phone, tool_input.get("resolution_notes", ""), tool_input.get("quote_needed", False), tool_input.get("address_hint", ""))
     elif tool_name == "get_my_route":
         return _get_my_route_by_phone(db, phone)
     elif tool_name == "get_my_location":
@@ -2046,6 +2074,15 @@ def _answer_gemini(db, s, contents: list, extra_system: str = "", phone: str = "
                 system_text = config["system_prompt"]
     except Exception as exc:
         logger.warning("Could not load system prompt from DB: %s", exc)
+
+    # Always append critical tool-routing rules — DB prompt may be an older version
+    system_text += """
+
+══ כללים קריטיים (עדיפות עליונה, לא ניתן לעקוף) ══
+• "מה המיקום שלי / איפה אני / מה מיקומי / המיקום שלי עכשיו" → חובה לקרוא get_my_location(). אסור לענות "אין לי אפשרות" — יש כלי ייעודי לכך.
+• "מסלול / אפשר מסלול / שלח מסלול / מפה / קישור מפה / סדר יום" → חובה לקרוא get_my_route().
+• "תסגור את הקריאה ב[כתובת]" → קרא close_my_active_call(address_hint="[כתובת]", resolution_notes=...) ולא close_service_call.
+• כל שאלת מיקום עצמי ("שלי", "אני") → get_my_location בלבד. לעולם אל תאמר 'אין לי אפשרות' עבור שאלות אלה."""
 
     if extra_system:
         system_text += f"\n\n{extra_system}"

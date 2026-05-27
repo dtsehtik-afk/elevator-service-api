@@ -1324,37 +1324,49 @@ def _try_intercept_call_confirmation(db, phone: str, question: str, asker_name: 
     import json as _json
     from app.models.whatsapp_message import WhatsAppMessage
 
+    # Strip WhatsApp native-reply prefix "[מגיב להודעה: ...]" if present
+    actual_text = re.sub(r'^\[מגיב להודעה:[^\]]*\]\s*', '', question.strip(), flags=re.DOTALL).strip()
+
     # Must start with a confirmation keyword
-    first_word = question.strip().split()[0].lower().strip(".,!?\"'")
+    first_word = actual_text.split()[0].lower().strip(".,!?\"'") if actual_text else ""
     if first_word not in _CONFIRM_KEYWORDS:
         return False
 
-    logger.info("🔍 Intercept: keyword '%s' detected — checking last bot message for phone %s", first_word, phone[-4:])
+    logger.info("🔍 Intercept: keyword '%s' detected — checking for elevator_id (phone %s)", first_word, phone[-4:])
 
-    # Last bot message must contain [elevator_id: UUID]
-    last_bot = (
-        db.query(WhatsAppMessage)
-        .filter(WhatsAppMessage.phone == phone, WhatsAppMessage.direction == "out")
-        .order_by(WhatsAppMessage.timestamp.desc())
-        .first()
-    )
-    if not last_bot or not last_bot.text:
-        logger.info("🔍 Intercept: no saved bot message found for phone %s", phone[-4:])
-        return False
+    # First: elevator_id might be in the message itself (user pasted bot message + confirmed)
+    elevator_id_str = None
+    inline_match = re.search(r'\[elevator_id:\s*([0-9a-f\-]{36})\]', question, re.IGNORECASE)
+    if inline_match:
+        elevator_id_str = inline_match.group(1)
+        logger.info("🔍 Intercept: elevator_id found inline in user message")
 
-    logger.info("🔍 Intercept: last bot msg snippet: %r", last_bot.text[:120])
-    match = re.search(r'\[elevator_id:\s*([0-9a-f\-]{36})\]', last_bot.text, re.IGNORECASE)
-    if not match:
-        logger.info("🔍 Intercept: no [elevator_id:...] in last bot message — not intercepting")
-        return False
+    if not elevator_id_str:
+        # Fall back: check last saved bot message
+        last_bot = (
+            db.query(WhatsAppMessage)
+            .filter(WhatsAppMessage.phone == phone, WhatsAppMessage.direction == "out")
+            .order_by(WhatsAppMessage.timestamp.desc())
+            .first()
+        )
+        if not last_bot or not last_bot.text:
+            logger.info("🔍 Intercept: no saved bot message found for phone %s", phone[-4:])
+            return False
 
-    elevator_id_str = match.group(1)
+        logger.info("🔍 Intercept: last bot msg snippet: %r", last_bot.text[:120])
+        db_match = re.search(r'\[elevator_id:\s*([0-9a-f\-]{36})\]', last_bot.text, re.IGNORECASE)
+        if not db_match:
+            logger.info("🔍 Intercept: no [elevator_id:...] in last bot message — not intercepting")
+            return False
+        elevator_id_str = db_match.group(1)
 
-    # Extract description from rest of user message (after "כן,")
+    # Extract description from rest of user message (after "כן,") — use actual_text (stripped of quote prefix)
     desc_raw = re.sub(
         r'^(' + '|'.join(_CONFIRM_KEYWORDS) + r')[,\s]+', '',
-        question.strip(), flags=re.IGNORECASE
+        actual_text, flags=re.IGNORECASE
     ).strip("'\"").strip()
+    # Also strip any pasted bot message content (if user pasted whole bot message)
+    desc_raw = re.sub(r'\[elevator_id:[^\]]*\]', '', desc_raw).strip()
     description = desc_raw if len(desc_raw) >= 5 else "קריאת שירות שנפתחה ע\"י סוכן AI"
 
     try:
