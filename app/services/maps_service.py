@@ -52,6 +52,19 @@ _last_nominatim_call = 0.0   # rate-limit: 1 req/sec
 _geocode_cache: dict[str, Optional[tuple[float, float]]] = {}  # avoid repeated calls
 _reverse_cache: dict[str, str] = {}  # (lat3, lon3) → place label
 
+# Israel bounding box — same limits used in the GPS ingest endpoint
+_IL_LAT_MIN, _IL_LAT_MAX = 29.0, 33.5
+_IL_LON_MIN, _IL_LON_MAX = 34.0, 35.95  # 35.95 covers Golan Heights
+
+
+def is_israel_coords(lat: float, lon: float) -> bool:
+    """Return True iff (lat, lon) falls within Israel's bounding box."""
+    return (
+        lat is not None and lon is not None
+        and _IL_LAT_MIN <= lat <= _IL_LAT_MAX
+        and _IL_LON_MIN <= lon <= _IL_LON_MAX
+    )
+
 
 def geocode_address(address: str, city: str) -> Optional[tuple[float, float]]:
     """
