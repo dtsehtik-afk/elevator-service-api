@@ -1872,7 +1872,7 @@ export default function ElevatorDetailPage() {
 
         {/* ── GROUP ── */}
         <Tabs.Panel value="group" pt="md">
-          <Stack gap="md">
+          {!isNew && <Stack gap="md">
             <Group justify="space-between">
               <Text fw={700}>מעליות בקבוצה ({siblings.length + 1})</Text>
               <Button size="xs" onClick={() => setAddToGroupOpen(true)}>+ הוסף מעלית לקבוצה</Button>
@@ -1926,13 +1926,13 @@ export default function ElevatorDetailPage() {
             <Button variant="subtle" color="red" size="xs" onClick={() => assignBuildingMutation.mutate(null)}>
               הסר מעלית זו מהקבוצה
             </Button>
-          </Stack>
+          </Stack>}
         </Tabs.Panel>
 
         {/* ── MANAGEMENT COMPANY ── */}
         {/* ── לקוחות tab ─────────────────────────────────────────────── */}
         <Tabs.Panel value="customers" pt="md">
-          <Stack gap="md">
+          {!isNew && <Stack gap="md">
 
             {/* Primary customer */}
             <Paper withBorder p="md" radius="md">
@@ -2137,11 +2137,11 @@ export default function ElevatorDetailPage() {
               </Group>
             )}
 
-          </Stack>
+          </Stack>}
         </Tabs.Panel>
 
         <Tabs.Panel value="management" pt="md">
-          <Stack gap="md">
+          {!isNew && <Stack gap="md">
             {companyDetail ? (
               <Paper withBorder p="md" radius="md">
                 <Group justify="space-between" mb="sm" align="flex-start">
@@ -2211,7 +2211,7 @@ export default function ElevatorDetailPage() {
             >
               הסר מחברת הניהול
             </Button>
-          </Stack>
+          </Stack>}
         </Tabs.Panel>
       </Tabs>
 
