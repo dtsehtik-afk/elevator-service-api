@@ -309,15 +309,13 @@ def _send_morning_location_requests():
             if open_calls:
                 lines = []
                 _PRIO_EMOJI = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}
-                for call, elev in open_calls[:8]:
+                for call, elev in open_calls:
                     addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
                     num = f"S{call.call_number:05d}" if call.call_number else ""
                     emoji = _PRIO_EMOJI.get(call.priority, "🟡")
                     desc = (call.description or "")[:40].strip()
                     lines.append(f"{emoji} {num} — {addr}\n   {desc}")
                 calls_section = "\n".join(lines)
-                if call_count > 8:
-                    calls_section += f"\n   ...ועוד {call_count - 8} קריאות"
 
             msg = (
                 f"בוקר טוב {tech.name} 👋\n\n"
