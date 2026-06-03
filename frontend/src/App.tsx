@@ -59,7 +59,6 @@ export default function App() {
                   <Route path="/" element={<DashboardPage />} />
                   {/* Field service */}
                   <Route path="/elevators" element={<ElevatorsPage />} />
-                  <Route path="/elevators/new" element={<ElevatorDetailPage />} />
                   <Route path="/elevators/:id" element={<ElevatorDetailPage />} />
                   <Route path="/calendar" element={<CalendarPage />} />
                   <Route path="/calls" element={<CallsPage />} />
