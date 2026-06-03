@@ -1380,54 +1380,56 @@ export default function ElevatorDetailPage() {
                 </Group>
               </Grid.Col>
 
-              {/* Group & management company checkboxes */}
-              <Grid.Col span={12}>
-                <Divider label="שיוכים" labelPosition="right" mt="sm" mb="sm" />
-                <Group gap="xl">
-                  <Checkbox
-                    label="מעלית בקבוצה"
-                    checked={!!elevator.building_id}
-                    onChange={() => {
-                      if (elevator.building_id) {
-                        assignBuildingMutation.mutate(null)
-                      } else {
-                        setAssignBuildingOpen(true)
-                      }
-                    }}
-                  />
-                  <Checkbox
-                    label="תחת חברת ניהול"
-                    checked={!!elevator.management_company_id}
-                    onChange={() => {
-                      if (elevator.management_company_id) {
-                        assignCompanyMutation.mutate(null)
-                      } else {
-                        setAssignCompanyOpen(true)
-                      }
-                    }}
-                  />
-                  <Checkbox
-                    label="תחת יועץ"
-                    checked={!!elevator.consultant_id}
-                    onChange={() => {
-                      if (elevator.consultant_id) {
-                        assignConsultantMutation.mutate(null)
-                      } else {
-                        setAssignConsultantOpen(true)
-                      }
-                    }}
-                  />
-                </Group>
-                {elevator.building_id && (
-                  <Text size="xs" c="dimmed" mt={4}>
-                    {siblings.length > 0 ? `${siblings.length} מעליות נוספות בקבוצה זו` : 'מעלית זו היחידה בקבוצה'}
-                    {elevator.management_company_id && ` · ${elevator.management_company_name ?? 'חברת ניהול'}`}
-                  </Text>
-                )}
-                {elevator.consultant_id && elevator.consultant_name && (
-                  <Text size="xs" c="dimmed" mt={2}>🧑‍💼 יועץ: {elevator.consultant_name}</Text>
-                )}
-              </Grid.Col>
+              {/* Group & management company checkboxes — hidden in create mode */}
+              {!isNew && (
+                <Grid.Col span={12}>
+                  <Divider label="שיוכים" labelPosition="right" mt="sm" mb="sm" />
+                  <Group gap="xl">
+                    <Checkbox
+                      label="מעלית בקבוצה"
+                      checked={!!elevator!.building_id}
+                      onChange={() => {
+                        if (elevator!.building_id) {
+                          assignBuildingMutation.mutate(null)
+                        } else {
+                          setAssignBuildingOpen(true)
+                        }
+                      }}
+                    />
+                    <Checkbox
+                      label="תחת חברת ניהול"
+                      checked={!!elevator!.management_company_id}
+                      onChange={() => {
+                        if (elevator!.management_company_id) {
+                          assignCompanyMutation.mutate(null)
+                        } else {
+                          setAssignCompanyOpen(true)
+                        }
+                      }}
+                    />
+                    <Checkbox
+                      label="תחת יועץ"
+                      checked={!!elevator!.consultant_id}
+                      onChange={() => {
+                        if (elevator!.consultant_id) {
+                          assignConsultantMutation.mutate(null)
+                        } else {
+                          setAssignConsultantOpen(true)
+                        }
+                      }}
+                    />
+                  </Group>
+                  {elevator!.building_id && (
+                    <Text size="xs" c="dimmed" mt={4}>
+                      {siblings.length > 0 ? `${siblings.length} מעליות נוספות בקבוצה זו` : 'מעלית זו היחידה בקבוצה'}
+                      {elevator!.management_company_id && ` · ${elevator!.management_company_name ?? 'חברת ניהול'}`}
+                    </Text>
+                  )}
+                  {elevator!.consultant_id && elevator!.consultant_name && (
+                    <Text size="xs" c="dimmed" mt={2}>🧑‍💼 יועץ: {elevator!.consultant_name}</Text>
+                  )}
+                </Grid.Col>
+              )}
 
               {/* Responsible technician, lead source */}
               <Grid.Col span={12}>
