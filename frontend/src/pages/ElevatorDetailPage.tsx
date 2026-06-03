@@ -1012,7 +1012,7 @@ export default function ElevatorDetailPage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="details">
+      <Tabs defaultValue="details" keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="details">פרטים</Tabs.Tab>
           <Tabs.Tab value="service">שירות</Tabs.Tab>
