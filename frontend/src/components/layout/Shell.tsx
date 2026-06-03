@@ -232,7 +232,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     queryFn: () => client.get('/settings/company-info').then(r => r.data),
     staleTime: 10 * 60 * 1000,
   })
-  const companyName = companyInfo?.company_name ?? 'אקורד מעליות'
+  const companyName = companyInfo?.company_name ?? 'מערכת ניהול'
   const companyIcon = industryIcon(companyInfo?.industry, companyInfo?.company_icon ?? '⚡')
 
   const activeSection = getActiveSection(pathname)

@@ -23,6 +23,15 @@ import client from '../api/client'
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
+function useCompanyName() {
+  const { data } = useQuery<{ company_name: string }>({
+    queryKey: ['company-info'],
+    queryFn: () => client.get('/settings/company-info').then(r => r.data),
+    staleTime: 10 * 60 * 1000,
+  })
+  return data?.company_name ?? 'מערכת ניהול'
+}
+
 const PRIORITY_COLOR: Record<string, string> = {
   CRITICAL: 'red', HIGH: 'orange', MEDIUM: 'yellow', LOW: 'green',
 }
@@ -213,6 +222,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const setAuth = useAuthStore((s) => s.setAuth)
+  const companyName = useCompanyName()
 
   const handleLogin = async () => {
     if (!email || !password) return
@@ -240,7 +250,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     <div style={{ minHeight: '100vh', background: '#1a73e8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <Card shadow="xl" radius="lg" p="xl" style={{ width: '100%', maxWidth: 360 }}>
         <Stack gap="md">
-          <Title order={2} ta="center">🔧 אקורד מעליות</Title>
+          <Title order={2} ta="center">🔧 {companyName}</Title>
           <Text ta="center" c="dimmed" size="sm">כניסה לטכנאים</Text>
           <Divider />
           <input

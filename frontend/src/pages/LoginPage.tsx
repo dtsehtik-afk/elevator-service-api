@@ -16,12 +16,12 @@ export default function LoginPage() {
   const setAuth = useAuthStore((s) => s.setAuth)
 
   const [screen, setScreen] = useState<Screen>('login')
-  const [companyName, setCompanyName] = useState('אקורד מעליות')
+  const [companyName, setCompanyName] = useState('מערכת ניהול')
   const [companyIcon, setCompanyIcon] = useState('⚙️')
 
   useEffect(() => {
     client.get('/settings/company-info').then(r => {
-      setCompanyName(r.data.company_name ?? 'אקורד מעליות')
+      setCompanyName(r.data.company_name ?? 'מערכת ניהול')
       setCompanyIcon(industryIcon(r.data.industry, r.data.company_icon ?? '⚙️'))
     }).catch(() => {})
   }, [])
