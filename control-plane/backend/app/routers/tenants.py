@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -150,7 +150,7 @@ def sync_company_info(
         resp = httpx.post(
             f"{tenant.api_url.rstrip('/')}/settings/company-info/admin-sync",
             content=json.dumps({"company_name": tenant.name}),
-            headers={"X-Api-Key": tenant.api_key, "Content-Type": "application/json"},
+            headers={"Content-Type": "application/json"},
             timeout=5,
         )
         if resp.status_code != 200:
