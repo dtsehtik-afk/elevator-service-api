@@ -1649,9 +1649,9 @@ def _run_tool(db: Session, tool_name: str, tool_input: dict, phone: str = "") ->
     elif tool_name == "get_technician_route":
         return _get_technician_route(db, technician_name=tool_input["technician_name"])
     elif tool_name == "get_my_calls":
-        return _get_my_calls(db, tool_input.get("phone", ""))
+        return _get_my_calls(db, tool_input.get("phone", "") or phone)
     elif tool_name == "get_my_confirmed_calls":
-        return _get_my_confirmed_calls(db, tool_input.get("phone", ""))
+        return _get_my_confirmed_calls(db, tool_input.get("phone", "") or phone)
     elif tool_name == "get_call_by_number":
         return _get_call_by_number(db, tool_input.get("call_number", ""))
     elif tool_name == "list_technicians":
@@ -1952,21 +1952,13 @@ def _get_caller_role(db: Session, phone: str) -> tuple:
     from app.models.technician import Technician
     from app.routers.settings import _DEFAULT_ROLE_PERMISSIONS
 
-    normalized = phone.strip().lstrip("+")
-    tech = None
-    for candidate in [phone, normalized, f"+{normalized}"]:
-        tech = db.query(Technician).filter(
-            (Technician.phone == candidate) | (Technician.whatsapp_number == candidate)
-        ).first()
-        if tech:
-            break
-
+    tech = _find_tech_by_phone(db, phone)
     role = tech.role if tech else "TECHNICIAN"
     perms = _DEFAULT_ROLE_PERMISSIONS.get(role, _DEFAULT_ROLE_PERMISSIONS.get("TECHNICIAN", {}))
     return role, perms, tech.name if tech else None
 
 
-def _build_role_context(role: str, perms: dict, name: str | None) -> str:
+def _build_role_context(role: str, perms: dict, name: str | None, phone: str = "") -> str:
     """Format role and permissions as system prompt context."""
     perm_lines = []
     label_map = {
@@ -1993,6 +1985,8 @@ def _build_role_context(role: str, perms: dict, name: str | None) -> str:
     lines = [f"══ פרטי המשתמש ══", f"תפקיד: {role}"]
     if name:
         lines.insert(1, f"שם: {name}")
+    if phone:
+        lines.insert(2 if name else 1, f"טלפון: {phone}")
     lines.append("הרשאות:")
     lines.extend(perm_lines)
     return "\n".join(lines)
@@ -2034,7 +2028,7 @@ def answer_question(db: Session, question: str, asker_name: str = "טכנאי", 
     if phone:
         try:
             role, perms, tech_name = _get_caller_role(db, phone)
-            role_ctx = _build_role_context(role, perms, tech_name)
+            role_ctx = _build_role_context(role, perms, tech_name, phone)
         except Exception:
             pass
 

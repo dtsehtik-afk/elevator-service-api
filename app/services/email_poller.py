@@ -295,6 +295,12 @@ def _extract_street_name(address: str) -> str:
     return s.lower()
 
 
+def _normalize_he(s: str) -> str:
+    """Strip leading ה (Hebrew definite article) for comparison. 'החורש' == 'חורש'."""
+    s = s.strip()
+    return s[1:] if s.startswith("ה") and len(s) > 1 else s
+
+
 def _phone_lookup(candidates, caller_phone: str):
     """Check if caller_phone matches any phone in caller_phones or known_callers of candidates."""
     if not caller_phone or len(caller_phone) < 9:
@@ -398,7 +404,7 @@ def _find_elevator(db, city: str, address: str, fields: dict) -> "_FindResult":
     ambiguous = None
     for elev in candidates:
         street_db = _extract_street_name(elev.address or "")
-        if not street_email or not street_db or street_email != street_db:
+        if not street_email or not street_db or _normalize_he(street_email) != _normalize_he(street_db):
             continue
         elev_num = _extract_building_number(elev.address or "")
         if building_num and elev_num and building_num == elev_num:

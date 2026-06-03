@@ -250,11 +250,12 @@ def _generate_personal_motivation(name: str, api_key: str) -> str:
         return ""
 
 def _send_morning_location_requests():
-    """07:15 — send each active technician a good-morning WhatsApp with their open call count."""
+    """Morning job (07:15): send each active technician a WhatsApp with open calls list + route + portal link."""
     import random
     from app.database import SessionLocal
     from app.models.technician import Technician
     from app.models.service_call import ServiceCall
+    from app.models.elevator import Elevator
     from app.models.assignment import Assignment
     from app.services.whatsapp_service import _send_message
 
@@ -262,49 +263,80 @@ def _send_morning_location_requests():
     try:
         technicians = (
             db.query(Technician)
-            .filter(Technician.is_active == True, Technician.is_available == True)  # noqa: E712
+            .filter(Technician.is_active == True, Technician.role.in_(["TECHNICIAN", "SENIOR_TECHNICIAN", "MAINTENANCE_TECHNICIAN"]))  # noqa: E712
             .all()
         )
-        from app.config import get_settings
-        base_url = get_settings().app_base_url
-        portal_link = f"{base_url}/tech"
-        quote = random.choice(_MORNING_QUOTES)
-
         sent = 0
         for tech in technicians:
             phone = tech.whatsapp_number or tech.phone
             if not phone:
                 continue
 
-            # Count open calls assigned to this technician
-            open_count = (
-                db.query(Assignment)
-                .join(ServiceCall, Assignment.service_call_id == ServiceCall.id)
+            from app.config import get_settings
+            base_url = get_settings().app_base_url
+            portal_link = f"{base_url}/tech"
+            quote = random.choice(_MORNING_QUOTES)
+
+            # Collect open assigned calls for this technician
+            assigned_call_ids = {
+                a.service_call_id
+                for a in db.query(Assignment)
                 .filter(
                     Assignment.technician_id == tech.id,
                     Assignment.status.in_(["CONFIRMED", "PENDING_CONFIRMATION", "AUTO_ASSIGNED"]),
-                    ServiceCall.status.notin_(["CLOSED", "RESOLVED", "CANCELLED"]),
                 )
-                .count()
-            )
+                .all()
+            }
+            open_calls = []
+            for call_id in assigned_call_ids:
+                call = db.query(ServiceCall).filter(
+                    ServiceCall.id == call_id,
+                    ServiceCall.status.notin_(["CLOSED", "RESOLVED", "MONITORING"]),
+                ).first()
+                if not call:
+                    continue
+                elev = db.query(Elevator).filter(Elevator.id == call.elevator_id).first()
+                open_calls.append((call, elev))
 
-            call_line = (
-                f"📋 יש לך *{open_count} קריאות פתוחות* היום.\n" if open_count > 0
-                else "📋 אין קריאות פתוחות כרגע — תהיה זמין! 👍\n"
-            )
+            # Sort by priority
+            _PRIO = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+            open_calls.sort(key=lambda x: _PRIO.get(x[0].priority, 2))
+
+            call_count = len(open_calls)
+
+            # Build calls list (top 8)
+            calls_section = ""
+            if open_calls:
+                lines = []
+                _PRIO_EMOJI = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}
+                for call, elev in open_calls[:8]:
+                    addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
+                    num = f"S{call.call_number:05d}" if call.call_number else ""
+                    emoji = _PRIO_EMOJI.get(call.priority, "🟡")
+                    desc = (call.description or "")[:40].strip()
+                    lines.append(f"{emoji} {num} — {addr}\n   {desc}")
+                calls_section = "\n".join(lines)
+                if call_count > 8:
+                    calls_section += f"\n   ...ועוד {call_count - 8} קריאות"
 
             msg = (
                 f"בוקר טוב {tech.name} 👋\n\n"
                 f"{quote}\n\n"
                 f"────────────────────\n"
-                f"{call_line}"
+                f"📋 יש לך *{call_count} קריאות פתוחות* היום.\n"
+            )
+            if calls_section:
+                msg += f"\n{calls_section}\n"
+            msg += (
+                f"\n────────────────────\n"
                 f"🔗 {portal_link}\n"
                 f"────────────────────\n"
                 f"בהצלחה היום! 🙏"
             )
+
             if _send_message(phone, msg):
                 sent += 1
-
+        db.commit()
         logger.info("Morning message sent to %d/%d technicians", sent, len(technicians))
     except Exception as exc:
         logger.error("Morning location request job failed: %s", exc)
@@ -594,28 +626,6 @@ def _poll_whatsapp_replies():
             is_incoming = msg_type == "incomingMessageReceived"
             is_outgoing = msg_type == "outgoingMessageReceived"
 
-            # ── Reaction handler ─────────────────────────────────────────────
-            if msg_type == "messageReactionReceived":
-                reaction_data = body.get("messageData", {}).get("reactionMessage", {})
-                reaction_phone = sender.replace("@c.us", "").replace("@s.whatsapp.net", "")
-                try:
-                    from app.database import SessionLocal as _SL
-                    _rdb = _SL()
-                    try:
-                        _handle_reaction(
-                            _rdb,
-                            phone=reaction_phone,
-                            reacted_msg_id=reaction_data.get("messageId", ""),
-                            reaction=reaction_data.get("reaction", ""),
-                        )
-                    finally:
-                        _rdb.close()
-                except Exception as _re:
-                    logger.warning("Reaction handler error: %s", _re)
-                if receipt_id:
-                    httpx.delete(f"{delete_url}/{receipt_id}", timeout=5)
-                continue
-
             # For outgoing messages from the instance, we treat chatId as the "phone"
             # (the technician who the message was sent to — and who presumably replied)
             if is_outgoing:
@@ -656,17 +666,6 @@ def _poll_whatsapp_replies():
                         if transcribed:
                             logger.info("🎤 Voice from %s: %s", phone, transcribed)
                             _handle_free_text(db, phone, transcribed, s)
-
-                    elif msg_kind == "reactionMessage":
-                        # Green API sometimes sends reactions as incomingMessageReceived
-                        # with typeMessage: "reactionMessage" instead of messageReactionReceived
-                        reaction_data = msg_data.get("reactionMessage", {})
-                        _handle_reaction(
-                            db,
-                            phone=phone,
-                            reacted_msg_id=reaction_data.get("messageId", ""),
-                            reaction=reaction_data.get("reaction", ""),
-                        )
 
                     elif msg_kind in ("textMessage", "extendedTextMessage"):
                         # textMessage = plain text; extendedTextMessage = reply/quote
@@ -1307,115 +1306,6 @@ def _handle_chat_question_simple(db, phone: str, question: str, settings) -> Non
     )
 
 
-_CONFIRM_KEYWORDS = {"כן", "אישור", "בסדר", "אוקיי", "ok", "yep", "1", "yes"}
-
-
-def _try_intercept_call_confirmation(db, phone: str, question: str, asker_name: str) -> bool:
-    """
-    Detect when user is confirming a call-creation that the bot proposed.
-
-    Pattern: last bot message contains [elevator_id: <UUID>] and current
-    message starts with a confirmation keyword (optionally followed by description).
-
-    When matched: creates the call directly (never goes through Gemini),
-    sends confirmation. Returns True if intercepted.
-    """
-    import re
-    import json as _json
-    from app.models.whatsapp_message import WhatsAppMessage
-
-    # Strip WhatsApp native-reply prefix "[מגיב להודעה: ...]" if present
-    actual_text = re.sub(r'^\[מגיב להודעה:[^\]]*\]\s*', '', question.strip(), flags=re.DOTALL).strip()
-
-    # Must start with a confirmation keyword
-    first_word = actual_text.split()[0].lower().strip(".,!?\"'") if actual_text else ""
-    if first_word not in _CONFIRM_KEYWORDS:
-        return False
-
-    logger.info("🔍 Intercept: keyword '%s' detected — checking for elevator_id (phone %s)", first_word, phone[-4:])
-
-    # First: elevator_id might be in the message itself (user pasted bot message + confirmed)
-    elevator_id_str = None
-    inline_match = re.search(r'\[elevator_id:\s*([0-9a-f\-]{36})\]', question, re.IGNORECASE)
-    if inline_match:
-        elevator_id_str = inline_match.group(1)
-        logger.info("🔍 Intercept: elevator_id found inline in user message")
-
-    if not elevator_id_str:
-        # Fall back: check last saved bot message
-        last_bot = (
-            db.query(WhatsAppMessage)
-            .filter(WhatsAppMessage.phone == phone, WhatsAppMessage.direction == "out")
-            .order_by(WhatsAppMessage.timestamp.desc())
-            .first()
-        )
-        if not last_bot or not last_bot.text:
-            logger.info("🔍 Intercept: no saved bot message found for phone %s", phone[-4:])
-            return False
-
-        logger.info("🔍 Intercept: last bot msg snippet: %r", last_bot.text[:120])
-        db_match = re.search(r'\[elevator_id:\s*([0-9a-f\-]{36})\]', last_bot.text, re.IGNORECASE)
-        if not db_match:
-            logger.info("🔍 Intercept: no [elevator_id:...] in last bot message — not intercepting")
-            return False
-        elevator_id_str = db_match.group(1)
-
-    # Extract description from rest of user message (after "כן,") — use actual_text (stripped of quote prefix)
-    desc_raw = re.sub(
-        r'^(' + '|'.join(_CONFIRM_KEYWORDS) + r')[,\s]+', '',
-        actual_text, flags=re.IGNORECASE
-    ).strip("'\"").strip()
-    # Also strip any pasted bot message content (if user pasted whole bot message)
-    desc_raw = re.sub(r'\[elevator_id:[^\]]*\]', '', desc_raw).strip()
-    description = desc_raw if len(desc_raw) >= 5 else "קריאת שירות שנפתחה ע\"י סוכן AI"
-
-    try:
-        import uuid as _uuid
-        from app.services.service_call_service import create_service_call
-        from app.schemas.service_call import ServiceCallCreate
-        from app.models.elevator import Elevator
-
-        eid = _uuid.UUID(elevator_id_str)
-        elev = db.query(Elevator).filter(Elevator.id == eid).first()
-        addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
-
-        data = ServiceCallCreate(
-            elevator_id=eid,
-            reported_by=asker_name,
-            description=description,
-            priority="MEDIUM",
-            fault_type="OTHER",
-        )
-        call = create_service_call(db, data, current_user_email=f"ai_agent_{phone}")
-        call_num = f"S{call.call_number:05d}" if call.call_number else str(call.id)[:8]
-
-        reply = (
-            f"✅ קריאת שירות *{call_num}* נפתחה\n"
-            f"📍 {addr}\n"
-            f"📝 {description}"
-        )
-        wa_msg_id = _send_message(phone, f"🤖 *נציג המערכת*\n\n{reply}")
-        try:
-            db.add(WhatsAppMessage(
-                phone=phone, direction="out", msg_type="text", text=reply,
-                wa_message_id=wa_msg_id,
-                tool_calls_json=_json.dumps(
-                    [{"tool": "create_service_call", "params": {"elevator_id": elevator_id_str, "description": description}}],
-                    ensure_ascii=False,
-                ),
-            ))
-            db.commit()
-        except Exception:
-            pass
-
-        logger.info("✅ Intercepted call creation %s for elevator %s", call_num, elevator_id_str)
-        return True
-
-    except Exception as exc:
-        logger.error("Call confirmation intercept failed: %s", exc)
-        return False
-
-
 def _handle_chat_question(db, phone: str, question: str, settings, with_history: bool = False) -> None:
     """Route a free-text WhatsApp question to the Claude chat agent and reply."""
     from app.models.technician import Technician
@@ -1447,110 +1337,50 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
 
     logger.info("💬 Chat question from %s: %s", asker_name, question)
 
-    # ── Server-side confirmation intercept ───────────────────────────────────
-    # When the last bot message asked "האם לפתוח קריאה ... [elevator_id: UUID]?"
-    # and the user now confirms, execute the creation directly — never trust
-    # Gemini to call create_service_call reliably after a confirmation turn.
-    intercepted = _try_intercept_call_confirmation(db, phone, question, asker_name)
-    if intercepted:
-        return
-
     if not settings.gemini_api_key:
         _handle_chat_question_simple(db, phone, question, settings)
         return
 
     try:
-        import json as _json
         from app.services.chat_agent import answer_question
-        answer, tool_calls = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
-        wa_msg_id = _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
+        answer = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
+        _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
 
-        # Save bot reply to conversation history (with message ID and tool calls)
+        # Save bot response to conversation history so it appears in the UI
+        # and so the bot can see its own previous replies in future turns
         try:
             from app.models.whatsapp_message import WhatsAppMessage
-            db.add(WhatsAppMessage(
-                phone=phone,
-                direction="out",
-                msg_type="text",
-                text=answer,
-                wa_message_id=wa_msg_id,
-                tool_calls_json=_json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
-            ))
+            db.add(WhatsAppMessage(phone=phone, direction="out", msg_type="text", text=answer))
             db.commit()
         except Exception as save_exc:
-            db.rollback()
-            logger.warning("Bot reply save with extras failed (%s) — retrying without new columns", save_exc)
+            logger.warning("Could not save bot reply to history: %s", save_exc)
+
+        # Auto-build QA knowledge base from successful conversations
+        # Skip write-action questions (close/assign/transfer) — those are too specific
+        _write_keywords = ["סגור", "שבץ", "העבר", "הצעת מחיר", "לבטל", "בטל"]
+        if len(answer) > 60 and not any(w in question for w in _write_keywords):
             try:
-                from app.models.whatsapp_message import WhatsAppMessage
-                db.add(WhatsAppMessage(
-                    phone=phone,
-                    direction="out",
-                    msg_type="text",
-                    text=answer,
-                ))
-                db.commit()
-            except Exception as save_exc2:
-                logger.warning("Could not save bot reply to history: %s", save_exc2)
+                from app.models.bot_qa import BotQA
+                existing = db.query(BotQA).filter(BotQA.question == question).first()
+                if not existing:
+                    db.add(BotQA(
+                        question=question,
+                        answer=answer,
+                        active=True,
+                        use_count=0,
+                        created_by="auto",
+                    ))
+                    db.commit()
+                else:
+                    existing.answer = answer
+                    existing.updated_at = __import__('datetime').datetime.utcnow()
+                    db.commit()
+            except Exception as qa_exc:
+                logger.warning("Could not auto-save QA pair: %s", qa_exc)
 
     except Exception as exc:
         logger.error("Chat agent error: %s", exc)
         _handle_chat_question_simple(db, phone, question, settings)
-
-
-def _handle_reaction(db, phone: str, reacted_msg_id: str, reaction: str) -> None:
-    """On 👍 reaction to a bot message — save QA entry with tool calls."""
-    if reaction != "👍":
-        return
-    import json as _json
-    from app.models.whatsapp_message import WhatsAppMessage
-    from app.models.bot_qa import BotQA
-    from datetime import datetime
-
-    # Find the bot message that was reacted to
-    bot_msg = (
-        db.query(WhatsAppMessage)
-        .filter(
-            WhatsAppMessage.wa_message_id == reacted_msg_id,
-            WhatsAppMessage.direction == "out",
-        )
-        .first()
-    )
-    if not bot_msg or not bot_msg.tool_calls_json:
-        logger.debug("Reaction 👍 on msg %s — no tool_calls_json found", reacted_msg_id)
-        return
-
-    # Find the user's question that preceded this bot message
-    user_msg = (
-        db.query(WhatsAppMessage)
-        .filter(
-            WhatsAppMessage.phone == phone,
-            WhatsAppMessage.direction == "in",
-            WhatsAppMessage.timestamp < bot_msg.timestamp,
-        )
-        .order_by(WhatsAppMessage.timestamp.desc())
-        .first()
-    )
-    if not user_msg or not user_msg.text:
-        return
-
-    question = user_msg.text.strip()
-
-    existing = db.query(BotQA).filter(BotQA.question == question).first()
-    if existing:
-        existing.tool_calls_json = bot_msg.tool_calls_json
-        existing.updated_at = datetime.utcnow()
-    else:
-        db.add(BotQA(
-            question=question,
-            answer="",
-            tool_calls_json=bot_msg.tool_calls_json,
-            active=True,
-            created_by=f"like_{phone[-4:]}",
-        ))
-    db.commit()
-    logger.info("👍 QA saved for question: %s", question[:60])
-    from app.services.whatsapp_service import _send_message as _snd
-    _snd(phone, "✅ התשובה נשמרה — אשתמש בה לשאלות דומות בעתיד")
 
 
 _REMINDER_AFTER_MINUTES  = 60    # send hourly reminder if call still unconfirmed
@@ -2161,7 +1991,7 @@ def _check_inspection_deficiency_escalation():
 
 
 def _send_morning_maintenance_alerts():
-    """07:35 — send daily WhatsApp to managers for all open HIGH/CRITICAL maintenance calls."""
+    """07:35 — send WhatsApp for urgent maintenance calls created overnight."""
     from app.database import SessionLocal
     from app.models.service_call import ServiceCall
     from app.models.elevator import Elevator
@@ -2169,37 +1999,27 @@ def _send_morning_maintenance_alerts():
 
     db = SessionLocal()
     try:
-        # All open HIGH/CRITICAL maintenance calls — sent daily regardless of prior notifications
         pending = db.query(ServiceCall).filter(
             ServiceCall.fault_type == "MAINTENANCE",
-            ServiceCall.status.in_(["OPEN", "ASSIGNED"]),
+            ServiceCall.status == "OPEN",
             ServiceCall.priority.in_(["CRITICAL", "HIGH"]),
+            ServiceCall.description.contains("[maint_pending_notify]"),
         ).all()
 
         if pending:
-            from datetime import date
-            today = date.today()
             lines = []
             for sc in pending:
                 elev = db.get(Elevator, sc.elevator_id)
                 addr = f"{elev.address}, {elev.city}" if elev else "כתובת לא ידועה"
-                num_str = f"S{sc.call_number:05d} " if sc.call_number else ""
-                if elev and elev.next_service_date:
-                    days_late = (today - elev.next_service_date).days
-                    date_info = f"— באיחור {days_late} ימים" if days_late > 0 else f"— מתוכנן {elev.next_service_date.strftime('%d/%m')}"
-                else:
-                    date_info = ""
-                lines.append(f"• {num_str}{addr} {date_info}")
-                # Clear one-time marker (no longer needed — we send daily)
-                if sc.description and "[maint_pending_notify]" in sc.description:
-                    sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
+                days_str = sc.description.split("[maint_pending_notify]")[0].replace("טיפול מונע ", "").strip()
+                date_str = elev.next_service_date.strftime("%d/%m/%Y") if elev and elev.next_service_date else ""
+                lines.append(f"• {addr} — {days_str}" + (f" (תאריך: {date_str})" if date_str else ""))
+                sc.description = sc.description.replace("[maint_pending_notify]", "[maint_notified]")
 
             batched = f"🔴 *טיפול מונע דחוף — {len(lines)} מעליות*\n════════════════════\n" + "\n".join(lines)
             notify_dispatcher(batched)
             db.commit()
             logger.info("Morning maintenance alerts sent for %d calls", len(pending))
-        else:
-            logger.info("Morning maintenance alerts: no urgent open calls today")
     except Exception as exc:
         logger.error("Morning maintenance alert job failed: %s", exc)
     finally:
@@ -2380,7 +2200,7 @@ def start_scheduler():
     _scheduler.add_job(_run_auto_invoicing,               "cron", hour=6,  minute=0)
     _scheduler.add_job(_run_nightly_maintenance,         "cron", hour=0,  minute=5,  day_of_week="sun,mon,tue,wed,thu,fri")
     _scheduler.add_job(_send_morning_maintenance_alerts, "cron", hour=7,  minute=35, day_of_week="sun,mon,tue,wed,thu,fri")
-    _scheduler.add_job(_send_morning_location_requests,  "cron", hour=7,  minute=15, day_of_week="sun,mon,tue,wed,thu,fri")
+    _scheduler.add_job(_send_morning_location_requests, "cron", hour=7, minute=15, day_of_week="sun,mon,tue,wed,thu,fri")
     # WhatsApp replies now handled via webhook (POST /webhooks/whatsapp)
     # _scheduler.add_job(_poll_whatsapp_replies,               "interval", seconds=15)
     _scheduler.add_job(_poll_email_calls,                    "interval", seconds=60)
