@@ -13,4 +13,19 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      external: [
+        '@capacitor/push-notifications',
+        '@capacitor/core',
+        '@capacitor/geolocation',
+        '@capacitor/background-runner',
+        '@capacitor-community/background-geolocation',
+        '@capacitor/cli',
+        '@capacitor/android',
+        '@capacitor/synapse',
+      ],
+    },
+  },
 })
+
