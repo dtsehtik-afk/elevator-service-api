@@ -15,9 +15,9 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
-    ports:
-      - "8001:8001"
+    build: ./lift-agent-admin-backend
+    expose:
+      - "8001"
     environment:
       DATABASE_URL: postgresql://admin:password@db:5432/lift_agent_admin
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
@@ -26,6 +26,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./lift-agent-admin-frontend/dist:/usr/share/nginx/html:ro
+      - ./lift-agent-admin-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
 
 volumes:
   pg_data:

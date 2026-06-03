@@ -30,6 +30,7 @@ build/
 # Node / Frontend
 node_modules/
 # frontend/dist is committed by CI (GitHub Actions) — do not ignore
+# lift-agent-admin-frontend/dist is committed manually for production serving
 frontend/.env
 
 # IDE
