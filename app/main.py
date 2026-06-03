@@ -525,6 +525,9 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS ix_whatsapp_messages_wa_message_id ON whatsapp_messages(wa_message_id)",
                 # BotQA tool calls storage for like-to-save-QA feature
                 "ALTER TABLE bot_qa ADD COLUMN IF NOT EXISTS tool_calls_json TEXT",
+                # Elevator caller tracking (auto-populated from incoming calls)
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS caller_phones JSONB NOT NULL DEFAULT '[]'::jsonb",
+                "ALTER TABLE elevators ADD COLUMN IF NOT EXISTS known_callers JSONB NOT NULL DEFAULT '[]'::jsonb",
             ]:
                 _conn.execute(_text(_col_sql))
         # Clear any GPS coordinates stored outside Israel's bounding box
