@@ -89,8 +89,7 @@ class Settings(BaseSettings):
         if self.environment == "production":
             if not self.secret_key:
                 raise ValueError("SECRET_KEY must be set in production")
-            if not self.webhook_secret:
-                raise ValueError("WEBHOOK_SECRET must be set in production")
+            # webhook_secret is optional — no longer required for admin sync auth
         return self
 
     @property
