@@ -79,23 +79,30 @@ def _tenant_dict(t: Tenant) -> dict:
     }
 
 
-def _push_company_info(t: Tenant) -> None:
-    """Fire-and-forget: push company name + industry to the tenant app."""
-    if not t.api_url or not t.api_key:
-        return
+def _push_company_info(t: Tenant) -> dict:
+    """Push company name + industry to the tenant app. Returns status dict."""
+    if not t.api_url:
+        return {"ok": False, "error": "api_url לא מוגדר במנוי"}
+    if not t.api_key:
+        return {"ok": False, "error": "api_key לא מוגדר במנוי"}
     import httpx
     try:
         payload = {"company_name": t.name}
         if t.industry:
             payload["industry"] = t.industry
-        httpx.post(
-            f"{t.api_url.rstrip('/')}/settings/company-info/admin-sync",
+        url = f"{t.api_url.rstrip('/')}/settings/company-info/admin-sync"
+        resp = httpx.post(
+            url,
             content=json.dumps(payload),
             headers={"X-Api-Key": t.api_key, "Content-Type": "application/json"},
             timeout=5,
         )
+        if resp.status_code == 200:
+            return {"ok": True}
+        return {"ok": False, "error": f"שרת המנוי החזיר {resp.status_code}: {resp.text[:200]}"}
     except Exception as exc:
         logger.warning("Could not push company info to tenant %s: %s", t.slug, exc)
+        return {"ok": False, "error": str(exc)}
 
 
 @router.get("")
@@ -151,9 +158,9 @@ def sync_company_info(tenant_id: str, db: Session = Depends(get_db), _=Depends(g
     t = db.query(Tenant).filter(Tenant.id == uuid.UUID(tenant_id)).first()
     if not t:
         raise HTTPException(status_code=404, detail="Not found")
-    if not t.api_url or not t.api_key:
-        raise HTTPException(status_code=400, detail="Tenant missing api_url or api_key")
-    _push_company_info(t)
+    result = _push_company_info(t)
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
     return {"ok": True, "tenant": t.name}
 
 

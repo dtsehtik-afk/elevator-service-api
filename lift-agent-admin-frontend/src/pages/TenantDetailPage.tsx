@@ -64,6 +64,9 @@ function StatsTab({ tenantId }: { tenantId: string }) {
           {sync.isSuccess ? '✓ שם סונכרן' : 'סנכרן שם חברה'}
         </Button>
       </Group>
+      {sync.isError && (
+        <Alert color="red">שגיאה בסינכרון: {(sync.error as any)?.response?.data?.detail ?? String(sync.error)}</Alert>
+      )}
       {isLoading && <Loader />}
       {error && <Alert color="red">לא ניתן להתחבר לשרת הדייר</Alert>}
       {data && !data.error && (
