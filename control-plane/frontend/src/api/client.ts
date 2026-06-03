@@ -80,6 +80,7 @@ export const createTenant = (body: Partial<Tenant>) => api.post<Tenant>('/tenant
 export const updateTenant = (id: string, body: Partial<Tenant>) => api.patch<Tenant>(`/tenants/${id}`, body).then((r) => r.data)
 export const deleteTenant = (id: string) => api.delete(`/tenants/${id}`)
 export const rotateKey = (id: string) => api.post<Tenant>(`/tenants/${id}/rotate-key`).then((r) => r.data)
+export const syncCompanyInfo = (id: string) => api.post(`/tenants/${id}/sync-company-info`).then((r) => r.data)
 
 // ── Modules ───────────────────────────────────────────────────────────────────
 

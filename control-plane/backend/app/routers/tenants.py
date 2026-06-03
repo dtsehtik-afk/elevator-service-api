@@ -1,8 +1,10 @@
 """Tenant CRUD — list, create, update, delete tenants."""
 
+import json
 import uuid
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -128,6 +130,34 @@ def delete_tenant(
         raise HTTPException(status_code=404, detail="Tenant not found")
     db.delete(tenant)
     db.commit()
+
+
+@router.post("/{tenant_id}/sync-company-info")
+def sync_company_info(
+    tenant_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_superadmin),
+):
+    """Push tenant name + industry to the tenant's app server."""
+    tenant = db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if not tenant.api_url:
+        raise HTTPException(status_code=400, detail="api_url לא מוגדר עבור מנוי זה")
+    if not tenant.api_key:
+        raise HTTPException(status_code=400, detail="api_key לא מוגדר עבור מנוי זה")
+    try:
+        resp = httpx.post(
+            f"{tenant.api_url.rstrip('/')}/settings/company-info/admin-sync",
+            content=json.dumps({"company_name": tenant.name}),
+            headers={"X-Api-Key": tenant.api_key, "Content-Type": "application/json"},
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"שרת המנוי החזיר {resp.status_code}: {resp.text[:200]}")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=400, detail=f"לא ניתן להתחבר לשרת: {exc}")
+    return {"ok": True}
 
 
 @router.post("/{tenant_id}/rotate-key", response_model=TenantOut)

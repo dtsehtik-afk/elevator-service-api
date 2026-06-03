@@ -14,7 +14,7 @@ import {
   fetchTenant, fetchModules, updateModules, syncModules,
   deployTenant, destroyServer, fetchSnapshots, pollNow, rotateKey,
   createSubscription, cancelSubscription, provisionSSL, updateTenant,
-  fetchConsole, clearConsoleLogs, type ConsoleLog,
+  fetchConsole, clearConsoleLogs, syncCompanyInfo, type ConsoleLog,
 } from '../api/client'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
@@ -135,6 +135,12 @@ function OverviewTab({ tenant, qc }: { tenant: any; qc: any }) {
     },
   })
 
+  const syncMutation = useMutation({
+    mutationFn: () => syncCompanyInfo(tenant.id),
+    onSuccess: () => notifications.show({ message: '✓ שם החברה עודכן בשרת', color: 'green' }),
+    onError: (e: any) => notifications.show({ message: e.response?.data?.detail ?? 'שגיאת סינכרון', color: 'red' }),
+  })
+
   const updateMutation = useMutation({
     mutationFn: (body: Partial<any>) => updateTenant(tenant.id, body),
     onSuccess: () => {
@@ -220,6 +226,16 @@ function OverviewTab({ tenant, qc }: { tenant: any; qc: any }) {
               <Text size="sm">{tenant.notes}</Text>
             </Group>
           )}
+          <Group mt="xs">
+            <Button
+              size="xs" variant="light" color="teal"
+              loading={syncMutation.isPending}
+              onClick={() => syncMutation.mutate()}
+              disabled={!tenant.api_url || !tenant.api_key}
+            >
+              🔄 סנכרן שם חברה לשרת
+            </Button>
+          </Group>
         </Stack>
       </Paper>
     </Stack>
