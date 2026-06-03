@@ -1528,23 +1528,27 @@ export default function ElevatorDetailPage() {
                   } />
                 )}
               </Grid.Col>
-              <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="טיפול אחרון">
-                  <Text fw={500}>{formatDate(elevator.last_service_date) ?? '—'}</Text>
-                </Field>
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="טיפול הבא">
-                  {elevator.next_service_date ? (
-                    <Group gap="xs">
-                      <Text fw={500}>{formatDate(elevator.next_service_date)}</Text>
-                      {serviceUrgency && <Badge color={serviceUrgency} size="xs" variant="light">
-                        {daysToService! < 0 ? `${Math.abs(daysToService!)} ימים חריגה` : `${daysToService} ימים`}
-                      </Badge>}
-                    </Group>
-                  ) : <Text fw={500}>—</Text>}
-                </Field>
-              </Grid.Col>
+              {!isNew && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Field label="טיפול אחרון">
+                    <Text fw={500}>{formatDate(elevator!.last_service_date) ?? '—'}</Text>
+                  </Field>
+                </Grid.Col>
+              )}
+              {!isNew && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Field label="טיפול הבא">
+                    {elevator!.next_service_date ? (
+                      <Group gap="xs">
+                        <Text fw={500}>{formatDate(elevator!.next_service_date)}</Text>
+                        {serviceUrgency && <Badge color={serviceUrgency} size="xs" variant="light">
+                          {daysToService! < 0 ? `${Math.abs(daysToService!)} ימים חריגה` : `${daysToService} ימים`}
+                        </Badge>}
+                      </Group>
+                    ) : <Text fw={500}>—</Text>}
+                  </Field>
+                </Grid.Col>
+              )}
 
               {/* Debt */}
               <Grid.Col span={12}><Divider label="חוב / הקפאה" labelPosition="right" /></Grid.Col>
@@ -1690,9 +1694,11 @@ export default function ElevatorDetailPage() {
                   <Field label="תחילת התקשרות" value={formatDate(elevator.contract_start)} />
                 )}
               </Grid.Col>
-              <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="חידוש הבא" value={formatDate(elevator.contract_renewal)} />
-              </Grid.Col>
+              {!isNew && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Field label="חידוש הבא" value={formatDate(elevator!.contract_renewal)} />
+                </Grid.Col>
+              )}
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
                   <DateInput label="סיום התקשרות" value={parseDate(form.contract_end)} onChange={d => dateSet('contract_end', d)} clearable />
@@ -1733,9 +1739,11 @@ export default function ElevatorDetailPage() {
         <Tabs.Panel value="inspection" pt="md">
           <Paper withBorder p="lg" radius="md">
             <Grid>
-              <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="ביקורת אחרונה" value={formatDate(elevator.last_inspection_date)} />
-              </Grid.Col>
+              {!isNew && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Field label="ביקורת אחרונה" value={formatDate(elevator!.last_inspection_date)} />
+                </Grid.Col>
+              )}
               <Grid.Col span={{ base: 12, sm: 6 }}>
                 {editing ? (
                   <DateInput label="ביקורת הבאה" value={parseDate(form.next_inspection_date)} onChange={d => dateSet('next_inspection_date', d)} clearable />
