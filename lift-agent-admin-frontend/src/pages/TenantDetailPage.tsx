@@ -104,7 +104,7 @@ export default function TenantDetailPage() {
   if (isLoading) return <Loader m="xl" />
   if (!tenant) return <Alert color="red" m="xl">לא נמצא</Alert>
 
-  const val = (k: string) => (k in form ? form[k] : (tenant as Record<string, unknown>)[k]) as string
+  const val = (k: string) => (k in form ? form[k] : (tenant as unknown as Record<string, unknown>)[k]) as string
 
   return (
     <>
