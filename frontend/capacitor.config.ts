@@ -15,7 +15,7 @@ const config: CapacitorConfig = {
       src: 'background-runner.js',
       event: 'backgroundFetch',
       repeat: true,
-      interval: 30,
+      interval: 15,
       autoStart: true,
     },
   },

@@ -283,6 +283,7 @@ function useGPS(techId: string | null) {
   const [lastSentAt, setLastSentAt] = useState<Date | null>(null)
   const bgWatcherRef = useRef<string | null>(null)
   const locationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastSentMsRef = useRef(0)
 
   const stop = () => {
@@ -291,6 +292,7 @@ function useGPS(techId: string | null) {
       bgWatcherRef.current = null
     }
     if (locationPollRef.current) { clearInterval(locationPollRef.current); locationPollRef.current = null }
+    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null }
     setStatus('idle')
   }
 
@@ -338,6 +340,19 @@ function useGPS(techId: string | null) {
       } catch {
         setStatus('error')
       }
+
+      // Heartbeat — send GPS every 60s regardless of movement (covers stationary case)
+      heartbeatRef.current = setInterval(async () => {
+        try {
+          const pos = await Geolocation.getCurrentPosition({
+            enableHighAccuracy: true,
+            maximumAge: 30000,
+            timeout: 10000,
+          })
+          if ((pos.coords.accuracy ?? 9999) > 150) return
+          doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
+        } catch { /* ignore */ }
+      }, 60000)
     })()
 
     return () => stop()
@@ -700,6 +715,16 @@ function TechMain() {
   const techId = me?.id ?? null
 
   const { status: gpsStatus, lastSentAt } = useGPS(techId)
+
+  // ── BackgroundRunner: persist techId so GPS works when app is closed ───────
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    BackgroundRunner.dispatchEvent({
+      label: 'com.akord.elevators.location',
+      event: 'setTechId',
+      data: { techId: techId ?? '' },
+    }).catch(() => {})
+  }, [techId])
 
   // ── FCM: register push token + handle silent location-request pushes ──────
   useEffect(() => {
