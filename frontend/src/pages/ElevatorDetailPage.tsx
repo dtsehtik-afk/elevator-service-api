@@ -1139,13 +1139,15 @@ export default function ElevatorDetailPage() {
                   <Field label="דגם" value={elevator.model} />
                 )}
               </Grid.Col>
-              <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Field label="ציון סיכון">
-                  <Badge color={elevator.risk_score > 70 ? 'red' : elevator.risk_score > 40 ? 'orange' : 'green'} size="lg" variant="light">
-                    {elevator.risk_score.toFixed(1)}
-                  </Badge>
-                </Field>
-              </Grid.Col>
+              {!isNew && (
+                <Grid.Col span={{ base: 12, sm: 6 }}>
+                  <Field label="ציון סיכון">
+                    <Badge color={elevator.risk_score > 70 ? 'red' : elevator.risk_score > 40 ? 'orange' : 'green'} size="lg" variant="light">
+                      {elevator.risk_score.toFixed(1)}
+                    </Badge>
+                  </Field>
+                </Grid.Col>
+              )}
               {editing && (
                 <Grid.Col span={{ base: 12, sm: 6 }}>
                   <Select label="סטטוס"
@@ -1364,16 +1366,16 @@ export default function ElevatorDetailPage() {
               <Grid.Col span={12}>
                 <Divider label="מיקום גיאוגרפי" labelPosition="right" mt="sm" mb="xs" />
                 <Group gap="sm" align="center">
-                  {elevator.latitude && elevator.longitude ? (
+                  {data.latitude && data.longitude ? (
                     <>
-                      <Text size="sm" c="dimmed">📍 {elevator.latitude.toFixed(5)}, {elevator.longitude.toFixed(5)}</Text>
-                      <Anchor size="xs" href={`https://waze.com/ul?ll=${elevator.latitude},${elevator.longitude}&navigate=yes`} target="_blank">🚘 Waze</Anchor>
+                      <Text size="sm" c="dimmed">📍 {(data.latitude as number).toFixed(5)}, {(data.longitude as number).toFixed(5)}</Text>
+                      <Anchor size="xs" href={`https://waze.com/ul?ll=${data.latitude},${data.longitude}&navigate=yes`} target="_blank">🚘 Waze</Anchor>
                     </>
                   ) : (
                     <Text size="sm" c="dimmed">אין מיקום מוגדר</Text>
                   )}
                   <Button size="xs" variant="light" color="teal" onClick={() => setLocationPickerOpen(true)}>
-                    📍 {elevator.latitude ? 'עדכן מיקום' : 'הוסף מיקום'}
+                    📍 {data.latitude ? 'עדכן מיקום' : 'הוסף מיקום'}
                   </Button>
                 </Group>
               </Grid.Col>
@@ -2207,8 +2209,8 @@ export default function ElevatorDetailPage() {
         opened={locationPickerOpen}
         onClose={() => setLocationPickerOpen(false)}
         onSave={(lat, lng) => locationMutation.mutate({ lat, lng })}
-        initialLat={elevator.latitude}
-        initialLng={elevator.longitude}
+        initialLat={data.latitude}
+        initialLng={data.longitude}
         loading={locationMutation.isPending}
       />
     </Stack>
