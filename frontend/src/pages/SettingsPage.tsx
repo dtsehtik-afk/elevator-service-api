@@ -54,6 +54,41 @@ function flattenNav(items: NavItem[], depth = 0): { path: string; defaultLabel: 
 
 const ALL_NAV_ITEMS = flattenNav(DEFAULT_NAV_ITEMS)
 
+function CompanyInfoTab() {
+  const qc = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ['company-info'],
+    queryFn: () => client.get('/settings/company-info').then(r => r.data),
+  })
+  const [name, setName] = useState('')
+  useEffect(() => { if (data?.company_name) setName(data.company_name) }, [data?.company_name])
+  const save = useMutation({
+    mutationFn: () => client.put('/settings/company-info', { company_name: name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['company-info'] })
+      notifications.show({ message: '✅ שם החברה עודכן', color: 'green' })
+    },
+    onError: () => notifications.show({ message: 'שגיאה בשמירה', color: 'red' }),
+  })
+  return (
+    <Paper withBorder radius="md" p="lg" maw={500}>
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">שם החברה מופיע בראש המסך ובדף ההתחברות.</Text>
+        <TextInput
+          label="שם החברה"
+          value={name}
+          onChange={e => setName(e.target.value)}
+        />
+        <Group>
+          <Button loading={save.isPending} disabled={!name.trim() || name === data?.company_name} onClick={() => save.mutate()}>
+            שמור
+          </Button>
+        </Group>
+      </Stack>
+    </Paper>
+  )
+}
+
 export default function SettingsPage() {
   const qc = useQueryClient()
 
@@ -183,7 +218,13 @@ export default function SettingsPage() {
           <Tabs.Tab value="nav">🗂️ עריכת תפריט</Tabs.Tab>
           <Tabs.Tab value="display">🎨 תצוגה</Tabs.Tab>
           <Tabs.Tab value="security">🔐 אבטחה</Tabs.Tab>
+          <Tabs.Tab value="company">🏢 פרטי חברה</Tabs.Tab>
         </Tabs.List>
+
+        {/* Company info */}
+        <Tabs.Panel value="company">
+          <CompanyInfoTab />
+        </Tabs.Panel>
 
         {/* Working hours */}
         <Tabs.Panel value="hours">
