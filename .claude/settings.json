@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit *)",
+      "Bash(cat capacitor.config.ts)",
+      "Bash(cat capacitor.config.json)"
+    ]
+  }
+}
