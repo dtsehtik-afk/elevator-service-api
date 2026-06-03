@@ -1,0 +1,1 @@
+import{W as r}from"./index-SBgXHrtz.js";class a extends r{checkPermissions(){throw new Error("not available on web")}requestPermissions(){throw new Error("not available on web")}registerBackgroundTask(){throw new Error("not available on web")}dispatchEvent(o){throw new Error("not available on web")}}export{a as BackgroundRunnerWeb};
