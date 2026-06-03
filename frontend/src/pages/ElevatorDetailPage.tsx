@@ -726,15 +726,12 @@ export default function ElevatorDetailPage() {
     },
   })
 
-  if (isNew) {
-    // Creation is now handled via modal in ElevatorsPage — redirect back
-    navigate('/elevators', { replace: true })
-    return null
-  }
   if (isLoading) return <Center h={400}><Loader /></Center>
-  if (!elevator) return <Center h={400}><Text>מעלית לא נמצאה</Text></Center>
+  if (!isNew && !elevator) return <Center h={400}><Text>מעלית לא נמצאה</Text></Center>
 
-  const data: Elevator = editing ? { ...elevator, ...form } as Elevator : elevator
+  const data: Elevator = isNew
+    ? form as Elevator
+    : editing ? { ...elevator!, ...form } as Elevator : elevator!
 
   // Maintenance urgency color
   const daysToService = data.next_service_date
