@@ -5,7 +5,7 @@ import {
   Title, Grid, Paper, TextInput, Select, Switch, Button, Group, Badge,
   Stack, Text, Loader, Alert, Tabs, NumberInput, Textarea, Divider,
 } from '@mantine/core'
-import { getTenant, updateTenant, setModules, getTenantStats, pingTenant, type Module } from '../api/tenants'
+import { getTenant, updateTenant, setModules, getTenantStats, pingTenant, syncCompanyInfo, type Module } from '../api/tenants'
 
 const ALL_MODULES = ['WHATSAPP', 'AI_ASSIGN', 'INSPECTIONS', 'MAINTENANCE', 'MAP', 'IMPORT']
 
@@ -53,12 +53,16 @@ function StatsTab({ tenantId }: { tenantId: string }) {
     retry: false,
   })
   const ping = useMutation({ mutationFn: () => pingTenant(tenantId), onSuccess: () => qc.invalidateQueries({ queryKey: ['tenant', tenantId] }) })
+  const sync = useMutation({ mutationFn: () => syncCompanyInfo(tenantId) })
 
   return (
     <Stack mt="md">
       <Group>
         <Button variant="light" onClick={() => refetch()}>רענן סטטיסטיקות</Button>
         <Button variant="outline" loading={ping.isPending} onClick={() => ping.mutate()}>Ping</Button>
+        <Button variant="filled" color="teal" loading={sync.isPending} onClick={() => sync.mutate()}>
+          {sync.isSuccess ? '✓ שם סונכרן' : 'סנכרן שם חברה'}
+        </Button>
       </Group>
       {isLoading && <Loader />}
       {error && <Alert color="red">לא ניתן להתחבר לשרת הדייר</Alert>}

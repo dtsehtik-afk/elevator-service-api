@@ -145,6 +145,18 @@ def update_tenant(tenant_id: str, body: TenantUpdate, db: Session = Depends(get_
     return _tenant_dict(t)
 
 
+@router.post("/{tenant_id}/sync-company-info")
+def sync_company_info(tenant_id: str, db: Session = Depends(get_db), _=Depends(get_current_admin)):
+    """Force-push company name + industry to the tenant app."""
+    t = db.query(Tenant).filter(Tenant.id == uuid.UUID(tenant_id)).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not t.api_url or not t.api_key:
+        raise HTTPException(status_code=400, detail="Tenant missing api_url or api_key")
+    _push_company_info(t)
+    return {"ok": True, "tenant": t.name}
+
+
 @router.delete("/{tenant_id}")
 def delete_tenant(tenant_id: str, db: Session = Depends(get_db), _=Depends(get_current_admin)):
     t = db.query(Tenant).filter(Tenant.id == uuid.UUID(tenant_id)).first()

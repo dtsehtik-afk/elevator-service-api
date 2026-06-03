@@ -312,7 +312,7 @@ def get_company_info(db: Session = Depends(get_db)):
     raw = _get_setting(db, "company_info")
     if raw:
         return json.loads(raw)
-    return {"company_name": "אקורד מעליות", "company_icon": "⚡"}
+    return {"company_name": "מערכת ניהול", "company_icon": "⚡"}
 
 
 @router.put("/company-info", summary="Save company name (admin only)")

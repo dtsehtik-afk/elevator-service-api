@@ -35,3 +35,4 @@ export const setModules = (id: string, modules: Module[]) =>
   api.put(`/tenants/${id}/modules`, modules).then((r) => r.data)
 export const getTenantStats = (id: string) => api.get(`/stats/${id}`).then((r) => r.data)
 export const pingTenant = (id: string) => api.post(`/stats/${id}/ping`).then((r) => r.data)
+export const syncCompanyInfo = (id: string) => api.post(`/tenants/${id}/sync-company-info`).then((r) => r.data)
