@@ -11,7 +11,7 @@ import { DateInput } from '@mantine/dates'
 import { FileInput } from '@mantine/core'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { getElevator, updateElevator, getElevatorCalls } from '../api/elevators'
+import { getElevator, updateElevator, createElevator, getElevatorCalls } from '../api/elevators'
 import client from '../api/client'
 import { Elevator } from '../types'
 import LocationPickerModal from '../components/LocationPickerModal'
@@ -406,11 +406,12 @@ th{background:#f0f0f0;font-weight:bold}h2{font-size:15px;margin-bottom:10px}</st
 
 export default function ElevatorDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const isNew = id === 'new'
   const navigate = useNavigate()
   const qc = useQueryClient()
   const userRole = useAuthStore(s => s.userRole)
   const isAdmin = userRole === 'ADMIN'
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(isNew)
   const [form, setForm] = useState<Partial<Elevator>>({})
   const [sensitiveField, setSensitiveField] = useState<string | null>(null)
   const [addContactOpen, setAddContactOpen] = useState(false)
@@ -449,13 +450,13 @@ export default function ElevatorDetailPage() {
   const { data: elevator, isLoading } = useQuery<Elevator>({
     queryKey: ['elevator', id],
     queryFn: () => getElevator(id!),
-    enabled: !!id,
+    enabled: !!id && !isNew,
   })
 
   const { data: calls = [] } = useQuery({
     queryKey: ['elevator-calls', id],
     queryFn: () => getElevatorCalls(id!),
-    enabled: !!id,
+    enabled: !!id && !isNew,
   })
 
   const { data: maintenanceLogs = [] } = useQuery({
@@ -552,6 +553,19 @@ export default function ElevatorDetailPage() {
   const { data: allElevatorsForSearch = [] } = useQuery<any[]>({
     queryKey: ['elevators'],
     enabled: addToGroupOpen,
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (payload: any) => createElevator(payload),
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ['elevators'] })
+      notifications.show({ message: 'המעלית נוצרה בהצלחה', color: 'green' })
+      navigate(`/elevators/${created.id}`)
+    },
+    onError: (err: any) => notifications.show({
+      message: err?.response?.data?.detail ?? 'שגיאה ביצירת מעלית',
+      color: 'red',
+    }),
   })
 
   const updateMutation = useMutation({
@@ -713,13 +727,15 @@ export default function ElevatorDetailPage() {
   })
 
   if (isLoading) return <Center h={400}><Loader /></Center>
-  if (!elevator) return <Center h={400}><Text>מעלית לא נמצאה</Text></Center>
+  if (!isNew && !elevator) return <Center h={400}><Text>מעלית לא נמצאה</Text></Center>
 
-  const data: Elevator = editing ? { ...elevator, ...form } as Elevator : elevator
+  const data: Elevator = isNew
+    ? form as Elevator
+    : editing ? { ...elevator!, ...form } as Elevator : elevator!
 
   // Maintenance urgency color
-  const daysToService = elevator.next_service_date
-    ? Math.ceil((new Date(elevator.next_service_date).getTime() - Date.now()) / 86400000)
+  const daysToService = data.next_service_date
+    ? Math.ceil((new Date(data.next_service_date).getTime() - Date.now()) / 86400000)
     : null
   const serviceUrgency = daysToService === null ? null
     : daysToService < 0 ? 'red'
@@ -762,7 +778,7 @@ export default function ElevatorDetailPage() {
             disabled={!newContact.name.trim()}
             onClick={() => addContactMutation.mutate({
               ...newContact,
-              building_id: elevator.building_id,
+              building_id: data.building_id,
               phone: newContact.phone || null,
               email: newContact.email || null,
             })}
@@ -928,31 +944,40 @@ export default function ElevatorDetailPage() {
       </Modal>
 
       {/* Related cross-reference panel */}
-      <RelatedPanel entityType="elevator" entityId={elevator.id} />
+      {!isNew && <RelatedPanel entityType="elevator" entityId={data.id} />}
 
       <Group>
         <ActionIcon variant="subtle" onClick={() => navigate('/elevators')}>←</ActionIcon>
         <Title order={2}>
-          מעלית {elevator.internal_number ? `#${elevator.internal_number}` : elevator.id.slice(0, 8)}
+          {isNew ? 'מעלית חדשה' : `מעלית ${data.internal_number ? `#${data.internal_number}` : id!.slice(0, 8)}`}
         </Title>
-        <Badge color={ELEVATOR_STATUS_COLORS[elevator.status]} size="lg">
-          {ELEVATOR_STATUS_LABELS[elevator.status]}
-        </Badge>
-        {elevator.service_type && (
-          <Badge color={elevator.service_type === 'COMPREHENSIVE' ? 'violet' : 'blue'} variant="light">
-            {elevator.service_type === 'COMPREHENSIVE' ? 'מקיף' : 'רגיל'}
+        {!isNew && data.status && (
+          <Badge color={ELEVATOR_STATUS_COLORS[data.status]} size="lg">
+            {ELEVATOR_STATUS_LABELS[data.status]}
           </Badge>
         )}
-        {elevator.has_debt && <Badge color="red" variant="filled">⚠️ חוב פעיל</Badge>}
-        {!editing ? (
-          <Button variant="light" size="xs" onClick={() => { setForm(elevator); setEditing(true) }}>✏️ ערוך</Button>
+        {!isNew && data.service_type && (
+          <Badge color={data.service_type === 'COMPREHENSIVE' ? 'violet' : 'blue'} variant="light">
+            {data.service_type === 'COMPREHENSIVE' ? 'מקיף' : 'רגיל'}
+          </Badge>
+        )}
+        {!isNew && data.has_debt && <Badge color="red" variant="filled">⚠️ חוב פעיל</Badge>}
+        {isNew ? (
+          <Group gap="xs">
+            <Button variant="default" size="xs" onClick={() => navigate('/elevators')}>ביטול</Button>
+            <Button size="xs" loading={createMutation.isPending} onClick={() => createMutation.mutate(form)}>
+              ➕ צור מעלית
+            </Button>
+          </Group>
+        ) : !editing ? (
+          <Button variant="light" size="xs" onClick={() => { setForm(elevator!); setEditing(true) }}>✏️ ערוך</Button>
         ) : (
           <Group gap="xs">
             <Button variant="default" size="xs" onClick={() => setEditing(false)}>ביטול</Button>
             <Button size="xs" loading={updateMutation.isPending} onClick={() => updateMutation.mutate(form)}>שמור</Button>
           </Group>
         )}
-        {isAdmin && (
+        {!isNew && isAdmin && (
           <Button
             size="xs" color="red" variant="subtle"
             loading={deleteMutation.isPending}
@@ -962,25 +987,25 @@ export default function ElevatorDetailPage() {
       </Group>
 
       {/* Alerts */}
-      {!elevator.labor_file_number && (
+      {!isNew && !data.labor_file_number && (
         <Alert color="orange" title="מספר משרד העבודה חסר" icon="⚠️">
           לא הוזן מספר תיק משרד העבודה — שיוך תסקירים אוטומטי לא יעבוד.
         </Alert>
       )}
-      {serviceUrgency === 'red' && (
+      {!isNew && serviceUrgency === 'red' && (
         <Alert color="red" title="דורש טיפול מיידי" icon="🔴">
           תאריך הטיפול {daysToService! < 0 ? `עבר לפני ${Math.abs(daysToService!)} ימים` : 'בעוד פחות מ-2 ימים'}.
         </Alert>
       )}
-      {serviceUrgency === 'orange' && (
+      {!isNew && serviceUrgency === 'orange' && (
         <Alert color="orange" title="טיפול קרוב" icon="🟠">
           טיפול מתוכנן בעוד {daysToService} ימים.
         </Alert>
       )}
 
-      {potentialSiblings.length > 0 && !elevator.building_id && (
+      {!isNew && potentialSiblings.length > 0 && !data.building_id && (
         <Alert color="orange" title="מעליות שאינן בקבוצה" icon="🏢">
-          נמצאו {potentialSiblings.length} מעליות נוספות בכתובת {elevator.address} שאינן משויכות לאותו בניין.{' '}
+          נמצאו {potentialSiblings.length} מעליות נוספות בכתובת {data.address} שאינן משויכות לאותו בניין.{' '}
           <Button size="xs" variant="white" loading={autoGroupMutation.isPending} onClick={() => autoGroupMutation.mutate()}>
             קישור אוטומטי
           </Button>
@@ -995,13 +1020,13 @@ export default function ElevatorDetailPage() {
           <Tabs.Tab value="contacts">אנשי קשר {contacts.length > 0 && `(${contacts.length})`}</Tabs.Tab>
           <Tabs.Tab value="contract">חוזה</Tabs.Tab>
           <Tabs.Tab value="inspection">דוחות בודק</Tabs.Tab>
-          <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>
-          <Tabs.Tab value="log">📋 יומן מעלית</Tabs.Tab>
-          <Tabs.Tab value="documents">📎 מסמכים</Tabs.Tab>
-          {elevator.building_id && (
+          {!isNew && <Tabs.Tab value="calls">קריאות ({(calls as any[]).length})</Tabs.Tab>}
+          {!isNew && <Tabs.Tab value="log">📋 יומן מעלית</Tabs.Tab>}
+          {!isNew && <Tabs.Tab value="documents">📎 מסמכים</Tabs.Tab>}
+          {!isNew && data.building_id && (
             <Tabs.Tab value="group">קבוצה {siblings.length > 0 && `(${siblings.length + 1})`}</Tabs.Tab>
           )}
-          {elevator.management_company_id && (
+          {!isNew && data.management_company_id && (
             <Tabs.Tab value="management">חברת ניהול</Tabs.Tab>
           )}
         </Tabs.List>
