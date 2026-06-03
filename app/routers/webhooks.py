@@ -274,12 +274,15 @@ async def receive_call(
                     city=match.elevator.city if match.elevator else parsed.city or "",
                 )
                 # Notify on-call + managers that a call is pending approval
+                from app.config import get_settings as _gs
+                _base = (_gs().app_base_url or "").rstrip("/")
                 whatsapp_service.notify_dispatcher(
                     f"🌙 *קריאה מחוץ לשעות עבודה — ממתינה לאישור לקוח*\n"
                     f"📍 {match.elevator.address if match.elevator else ''}, "
                     f"{match.elevator.city if match.elevator else ''}\n"
                     f"📞 {parsed.name or ''} {parsed.phone or ''}\n"
                     f"🔧 {service_call.fault_type}"
+                    + (f"\n🔗 {_base}/calls" if _base else "")
                 )
             else:
                 assignment = ai_assignment_agent.assign_with_confirmation(db, service_call)

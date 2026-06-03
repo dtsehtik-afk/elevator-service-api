@@ -332,13 +332,16 @@ def process_inspection_report(
             reason = f"מספר בית בדוח: *{house_number}* — לא תואם לכתובת המוצעת"
         else:
             reason = f"ציון התאמה: {match_score:.0%} — מתחת לסף הוודאות"
+        from app.config import get_settings as _gs
+        _base = (_gs().app_base_url or "").rstrip("/")
         msg = (
             f"🔍 *דוח ביקורת ממתין לאישור*\n"
             f"כתובת בדוח: *{address or 'לא ידוע'}*\n"
             f"מעלית מוצעת: {suggested_addr}\n"
             f"סיבה: {reason}\n"
             f"בודק: {inspector_name or 'לא ידוע'}\n"
-            f"אנא אשר/דחה בדשבורד תחת 'דוחות ביקורת'."
+            f"אנא אשר/דחה בדשבורד תחת 'דוחות ביקורת'.\n"
+            + (f"🔗 {_base}/inspections" if _base else "")
         )
         if not _lfn_mismatch:
             logger.warning("Inspection PENDING_REVIEW: %s → suggested %s (%.0f%%)", address, suggested_addr, (match_score or 0) * 100)
@@ -352,7 +355,15 @@ def process_inspection_report(
 
     # ── UNMATCHED: notify dispatcher ─────────────────────────────────────────
     if match_status == "UNMATCHED":
-        msg = f"⚠️ דוח ביקורת — לא נמצאה מעלית לכתובת: {address or 'לא ידוע'}"
+        from app.config import get_settings as _gs
+        _base = (_gs().app_base_url or "").rstrip("/")
+        msg = (
+            f"⚠️ *דוח ביקורת — לא נמצאה מעלית*\n"
+            f"כתובת: {address or 'לא ידוע'}\n"
+            f"בודק: {inspector_name or 'לא ידוע'}\n"
+            f"יש לבדוק ולשייך ידנית בדוחות ביקורת."
+            + (f"\n🔗 {_base}/inspections" if _base else "")
+        )
         logger.warning(msg)
         db.commit()
         db.refresh(report)

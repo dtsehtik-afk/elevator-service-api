@@ -136,7 +136,8 @@ def _notify_managers_new_request(
             f"כתובת: {elev_addr}\n"
             f"חלק: {part.name} (כמות: {pr.quantity})\n"
             f"סוג שירות: {'מקיף' if svc_type == 'COMPREHENSIVE' else 'רגיל'}\n\n"
-            f"לאישור/דחייה: https://lift-agent.com/calls?callId={call.id}"
+            f"לאישור/דחייה:\n"
+            f"🔗 {os.getenv('APP_BASE_URL', 'https://lift-agent.com').rstrip('/')}/part-requests"
         )
 
         for number in dispatcher_numbers:
