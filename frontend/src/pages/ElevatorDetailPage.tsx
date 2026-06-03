@@ -499,7 +499,7 @@ export default function ElevatorDetailPage() {
   const { data: companiesList = [] } = useQuery({
     queryKey: ['companies-list'],
     queryFn: async () => (await client.get('/management-companies')).data,
-    enabled: assignCompanyOpen,
+    enabled: assignCompanyOpen || isNew,
   })
 
   const { data: techniciansList = [] } = useQuery({
@@ -511,7 +511,7 @@ export default function ElevatorDetailPage() {
   const { data: consultantsList = [] } = useQuery({
     queryKey: ['consultants-list'],
     queryFn: async () => (await client.get('/consultants')).data,
-    enabled: assignConsultantOpen,
+    enabled: assignConsultantOpen || isNew,
   })
 
   const { data: companyDetail } = useQuery({
@@ -1932,14 +1932,14 @@ export default function ElevatorDetailPage() {
         {/* ── MANAGEMENT COMPANY ── */}
         {/* ── לקוחות tab ─────────────────────────────────────────────── */}
         <Tabs.Panel value="customers" pt="md">
-          {!isNew && <Stack gap="md">
+          <Stack gap="md">
 
             {/* Primary customer */}
             <Paper withBorder p="md" radius="md">
               <Group justify="space-between" mb="sm">
                 <Text fw={700}>לקוח ראשי</Text>
-                {customerDetail && (
-                  <Button size="xs" variant="light" onClick={() => navigate(`/customers/${elevator!.customer_id}`)}>
+                {!isNew && customerDetail && (
+                  <Button size="xs" variant="light" onClick={() => navigate(`/customers/${data.customer_id}`)}>
                     לדף הלקוח ←
                   </Button>
                 )}
@@ -1948,12 +1948,12 @@ export default function ElevatorDetailPage() {
                 <Grid.Col span={{ base: 12, sm: 6 }}>
                   <CustomerSearchSelect
                     label="לקוח"
-                    value={(form.customer_id ?? elevator.customer_id ?? null) as string | null}
+                    value={(form.customer_id ?? elevator?.customer_id ?? null) as string | null}
                     onChange={v => set('customer_id', v)}
                     hidePreview
                   />
                 </Grid.Col>
-                {customerDetail && (
+                {!isNew && customerDetail && (
                   <>
                     <Grid.Col span={{ base: 12, sm: 6 }}>
                       <Select
@@ -1970,8 +1970,8 @@ export default function ElevatorDetailPage() {
                         ]}
                         value={customerDetail.payment_terms_type ?? null}
                         onChange={async v => {
-                          await client.patch(`/customers/${elevator!.customer_id}`, { payment_terms_type: v })
-                          qc.invalidateQueries({ queryKey: ['customer-detail', elevator!.customer_id] })
+                          await client.patch(`/customers/${data.customer_id}`, { payment_terms_type: v })
+                          qc.invalidateQueries({ queryKey: ['customer-detail', data.customer_id] })
                         }}
                         clearable
                       />
@@ -1982,8 +1982,8 @@ export default function ElevatorDetailPage() {
                           label="תנאי תשלום מפורטים"
                           defaultValue={customerDetail.payment_terms_notes ?? ''}
                           onBlur={async e => {
-                            await client.patch(`/customers/${elevator!.customer_id}`, { payment_terms_notes: e.target.value })
-                            qc.invalidateQueries({ queryKey: ['customer-detail', elevator!.customer_id] })
+                            await client.patch(`/customers/${data.customer_id}`, { payment_terms_notes: e.target.value })
+                            qc.invalidateQueries({ queryKey: ['customer-detail', data.customer_id] })
                           }}
                         />
                       </Grid.Col>
@@ -1993,8 +1993,8 @@ export default function ElevatorDetailPage() {
                         label="טלפון"
                         defaultValue={customerDetail.phone ?? ''}
                         onBlur={async e => {
-                          await client.patch(`/customers/${elevator!.customer_id}`, { phone: e.target.value })
-                          qc.invalidateQueries({ queryKey: ['customer-detail', elevator!.customer_id] })
+                          await client.patch(`/customers/${data.customer_id}`, { phone: e.target.value })
+                          qc.invalidateQueries({ queryKey: ['customer-detail', data.customer_id] })
                         }}
                       />
                     </Grid.Col>
@@ -2003,8 +2003,8 @@ export default function ElevatorDetailPage() {
                         label="מייל"
                         defaultValue={customerDetail.email ?? ''}
                         onBlur={async e => {
-                          await client.patch(`/customers/${elevator!.customer_id}`, { email: e.target.value })
-                          qc.invalidateQueries({ queryKey: ['customer-detail', elevator!.customer_id] })
+                          await client.patch(`/customers/${data.customer_id}`, { email: e.target.value })
+                          qc.invalidateQueries({ queryKey: ['customer-detail', data.customer_id] })
                         }}
                       />
                     </Grid.Col>
@@ -2018,12 +2018,12 @@ export default function ElevatorDetailPage() {
               </Grid>
             </Paper>
 
-            {/* Secondary customer (לקוח אב נוסף) */}
+            {/* Secondary customer */}
             <Paper withBorder p="md" radius="md">
               <Group justify="space-between" mb="sm">
                 <Text fw={700}>לקוח אב נוסף</Text>
-                {secondaryCustomerDetail && (
-                  <Button size="xs" variant="light" onClick={() => navigate(`/customers/${elevator!.secondary_customer_id}`)}>
+                {!isNew && secondaryCustomerDetail && (
+                  <Button size="xs" variant="light" onClick={() => navigate(`/customers/${data.secondary_customer_id}`)}>
                     לדף הלקוח ←
                   </Button>
                 )}
@@ -2032,12 +2032,12 @@ export default function ElevatorDetailPage() {
                 <Grid.Col span={{ base: 12, sm: 6 }}>
                   <CustomerSearchSelect
                     label="לקוח אב נוסף"
-                    value={(form.secondary_customer_id ?? elevator.secondary_customer_id ?? null) as string | null}
+                    value={(form.secondary_customer_id ?? elevator?.secondary_customer_id ?? null) as string | null}
                     onChange={v => set('secondary_customer_id', v)}
                     hidePreview
                   />
                 </Grid.Col>
-                {secondaryCustomerDetail && (
+                {!isNew && secondaryCustomerDetail && (
                   <>
                     <Grid.Col span={{ base: 12, sm: 6 }}>
                       <Field label="טלפון" value={secondaryCustomerDetail.phone} />
@@ -2050,94 +2050,110 @@ export default function ElevatorDetailPage() {
               </Grid>
             </Paper>
 
-            {/* Notification preferences */}
+            {/* Management company */}
             <Paper withBorder p="md" radius="md">
-              <Text fw={700} mb="sm">העדפות דיוור אוטומטי</Text>
-              <Text size="xs" c="dimmed" mb="md">בחר אילו התראות אוטומטיות כל גורם יקבל</Text>
-              {(() => {
-                const prefs: Record<string, string[]> = elevator.notification_prefs ?? {}
-                const NOTIF_OPTIONS = [
-                  { value: 'maintenance', label: 'תחזוקה' },
-                  { value: 'inspection', label: 'בדיקה תקופתית' },
-                  { value: 'invoice', label: 'חשבוניות' },
-                  { value: 'service_call', label: 'קריאת שירות' },
-                ]
-                const roles = [
-                  { key: 'customer', label: `לקוח ראשי${elevator.customer_name ? ` — ${elevator.customer_name}` : ''}` },
-                  { key: 'secondary', label: `לקוח אב נוסף${elevator.secondary_customer_name ? ` — ${elevator.secondary_customer_name}` : ''}` },
-                  { key: 'management', label: `חברת ניהול${elevator.management_company_name ? ` — ${elevator.management_company_name}` : ''}` },
-                ]
-                return (
-                  <Stack gap="sm">
-                    {roles.map(role => (
-                      <Paper key={role.key} withBorder p="sm" radius="sm" bg="gray.0">
-                        <Text size="sm" fw={600} mb="xs">{role.label}</Text>
-                        <Group gap="md">
-                          {NOTIF_OPTIONS.map(opt => {
-                            const checked = (prefs[role.key] ?? []).includes(opt.value)
-                            return (
-                              <Checkbox
-                                key={opt.value}
-                                label={opt.label}
-                                checked={checked}
-                                onChange={async () => {
-                                  const current = prefs[role.key] ?? []
-                                  const next = checked ? current.filter((v: string) => v !== opt.value) : [...current, opt.value]
-                                  const newPrefs = { ...prefs, [role.key]: next }
-                                  await updateElevator(id!, { notification_prefs: newPrefs })
-                                  qc.invalidateQueries({ queryKey: ['elevator', id] })
-                                }}
-                              />
-                            )
-                          })}
-                        </Group>
-                      </Paper>
-                    ))}
-                  </Stack>
-                )
-              })()}
+              <Text fw={700} mb="sm">חברת ניהול</Text>
+              <Select
+                label="חברת ניהול"
+                placeholder="חפש חברה..."
+                searchable clearable
+                data={(companiesList as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+                value={(form.management_company_id ?? elevator?.management_company_id ?? null) as string | null}
+                onChange={v => set('management_company_id', v)}
+              />
             </Paper>
+
+            {/* Consultant */}
+            <Paper withBorder p="md" radius="md">
+              <Text fw={700} mb="sm">יועץ</Text>
+              <Select
+                label="יועץ"
+                placeholder="חפש יועץ..."
+                searchable clearable
+                data={(consultantsList as any[]).map((c: any) => ({ value: c.id, label: c.name }))}
+                value={(form.consultant_id ?? elevator?.consultant_id ?? null) as string | null}
+                onChange={v => set('consultant_id', v)}
+              />
+            </Paper>
+
+            {/* Notification preferences - only for existing elevators */}
+            {!isNew && (
+              <Paper withBorder p="md" radius="md">
+                <Text fw={700} mb="sm">העדפות דיוור אוטומטי</Text>
+                <Text size="xs" c="dimmed" mb="md">בחר אילו התראות אוטומטיות כל גורם יקבל</Text>
+                {(() => {
+                  const prefs: Record<string, string[]> = elevator!.notification_prefs ?? {}
+                  const NOTIF_OPTIONS = [
+                    { value: 'maintenance', label: 'תחזוקה' },
+                    { value: 'inspection', label: 'בדיקה תקופתית' },
+                    { value: 'invoice', label: 'חשבוניות' },
+                    { value: 'service_call', label: 'קריאת שירות' },
+                  ]
+                  const roles = [
+                    { key: 'customer', label: `לקוח ראשי${elevator!.customer_name ? ` — ${elevator!.customer_name}` : ''}` },
+                    { key: 'secondary', label: `לקוח אב נוסף${elevator!.secondary_customer_name ? ` — ${elevator!.secondary_customer_name}` : ''}` },
+                    { key: 'management', label: `חברת ניהול${elevator!.management_company_name ? ` — ${elevator!.management_company_name}` : ''}` },
+                  ]
+                  return (
+                    <Stack gap="sm">
+                      {roles.map(role => (
+                        <Paper key={role.key} withBorder p="sm" radius="sm" bg="gray.0">
+                          <Text size="sm" fw={600} mb="xs">{role.label}</Text>
+                          <Group gap="md">
+                            {NOTIF_OPTIONS.map(opt => {
+                              const checked = (prefs[role.key] ?? []).includes(opt.value)
+                              return (
+                                <Checkbox
+                                  key={opt.value}
+                                  label={opt.label}
+                                  checked={checked}
+                                  onChange={async () => {
+                                    const current = prefs[role.key] ?? []
+                                    const next = checked ? current.filter((v: string) => v !== opt.value) : [...current, opt.value]
+                                    const newPrefs = { ...prefs, [role.key]: next }
+                                    await updateElevator(id!, { notification_prefs: newPrefs })
+                                    qc.invalidateQueries({ queryKey: ['elevator', id] })
+                                  }}
+                                />
+                              )
+                            })}
+                          </Group>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  )
+                })()}
+              </Paper>
+            )}
 
             {/* Inspector details */}
             <Paper withBorder p="md" radius="md">
               <Text fw={700} mb="sm">בודק תקופתי</Text>
               <Grid>
                 <Grid.Col span={{ base: 12, sm: 6 }}>
-                  <TextInput label="שם הבודק" value={form.inspector_name ?? elevator.inspector_name ?? ''} onChange={e => set('inspector_name', e.target.value || null)} />
+                  <TextInput label="שם הבודק" value={form.inspector_name ?? elevator?.inspector_name ?? ''} onChange={e => set('inspector_name', e.target.value || null)} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6 }}>
-                  <TextInput label="טלפון נייד" value={form.inspector_mobile ?? elevator.inspector_mobile ?? ''} onChange={e => set('inspector_mobile', e.target.value || null)} />
+                  <TextInput label="טלפון נייד" value={form.inspector_mobile ?? elevator?.inspector_mobile ?? ''} onChange={e => set('inspector_mobile', e.target.value || null)} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6 }}>
-                  <TextInput label="טלפון" value={form.inspector_phone ?? elevator.inspector_phone ?? ''} onChange={e => set('inspector_phone', e.target.value || null)} />
+                  <TextInput label="טלפון" value={form.inspector_phone ?? elevator?.inspector_phone ?? ''} onChange={e => set('inspector_phone', e.target.value || null)} />
                 </Grid.Col>
                 <Grid.Col span={{ base: 12, sm: 6 }}>
-                  <TextInput label="מייל" value={form.inspector_email ?? elevator.inspector_email ?? ''} onChange={e => set('inspector_email', e.target.value || null)} />
+                  <TextInput label="מייל" value={form.inspector_email ?? elevator?.inspector_email ?? ''} onChange={e => set('inspector_email', e.target.value || null)} />
                 </Grid.Col>
               </Grid>
             </Paper>
 
-            {/* Consultant */}
-            {elevator.consultant_id && (
-              <Paper withBorder p="md" radius="md">
-                <Group justify="space-between" mb="sm">
-                  <Text fw={700}>יועץ — {elevator.consultant_name}</Text>
-                  <Button size="xs" variant="light" onClick={() => navigate('/consultants')}>
-                    לדף יועצים ←
-                  </Button>
-                </Group>
-              </Paper>
-            )}
-
-            {/* Save changes */}
-            {Object.keys(form).some(k => ['customer_id','secondary_customer_id','inspector_name','inspector_phone','inspector_mobile','inspector_email'].includes(k)) && (
+            {/* Save changes - only for existing elevators */}
+            {!isNew && Object.keys(form).some(k => ['customer_id','secondary_customer_id','management_company_id','consultant_id','inspector_name','inspector_phone','inspector_mobile','inspector_email'].includes(k)) && (
               <Group>
                 <Button loading={updateMutation.isPending} onClick={() => updateMutation.mutate(form)}>שמור שינויים</Button>
                 <Button variant="subtle" onClick={() => setEditing(false)}>בטל</Button>
               </Group>
             )}
 
-          </Stack>}
+          </Stack>
         </Tabs.Panel>
 
         <Tabs.Panel value="management" pt="md">
