@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Title, Table, Badge, Button, Group, TextInput, Select, Modal,
   Stack, Text, ActionIcon, Tooltip, Paper, SimpleGrid, Card, NumberInput, Textarea,
-  Collapse, Divider,
+  Collapse, Divider, Tabs, Grid,
 } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
 import { notifications } from '@mantine/notifications'
@@ -173,61 +173,104 @@ export default function CustomersPage() {
         </Table>
       </Paper>
 
-      <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="לקוח חדש" size="lg" dir="rtl">
-        <Stack>
-          <TextInput label="שם" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-          <Select
-            label="סוג לקוח"
-            value={form.customer_type}
-            onChange={v => setForm(f => ({ ...f, customer_type: v || 'PRIVATE' }))}
-            data={Object.entries(TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }))}
-          />
-          <Select
-            label="לקוח אב (אופציונלי)"
-            placeholder="ללא לקוח אב"
-            clearable
-            searchable
-            value={form.parent_id || null}
-            onChange={v => setForm(f => ({ ...f, parent_id: v || '' }))}
-            data={allCustomers.map(c => ({ value: c.id, label: c.name }))}
-          />
-          <Group grow>
-            <TextInput label="טלפון" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
-            <TextInput label="אימייל" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-          </Group>
-          <Group grow>
-            <TextInput label="כתובת" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
-            <TextInput label="עיר" value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} />
-          </Group>
-          <Group grow>
-            <TextInput label="איש קשר" value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} />
-            <TextInput label="ח.פ / עוסק מורשה" value={form.vat_number} onChange={e => setForm(f => ({ ...f, vat_number: e.target.value }))} />
-          </Group>
-          <NumberInput label="ימי תשלום" value={form.payment_terms} onChange={v => setForm(f => ({ ...f, payment_terms: Number(v) || 30 }))} min={0} />
-          <Textarea label="הערות" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rightSection={<AIRefineButton value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />} rightSectionPointerEvents="all" />
-          <Divider
-            label={<Button variant="subtle" size="xs" onClick={() => setErpOpen(o => !o)}>{erpOpen ? '▲' : '▼'} מידע נוסף (ERP)</Button>}
-            labelPosition="center"
-          />
-          <Collapse in={erpOpen}>
-            <Stack gap="xs">
-              <Group grow>
-                <TextInput label="פקס" value={form.fax} onChange={e => setForm(f => ({ ...f, fax: e.target.value }))} />
-                <TextInput label="אתר אינטרנט" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} />
-              </Group>
-              <Group grow>
+      <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="לקוח חדש" size="xl" dir="rtl">
+        <Tabs defaultValue="general" keepMounted={false}>
+          <Tabs.List mb="md">
+            <Tabs.Tab value="general">פרטים כלליים</Tabs.Tab>
+            <Tabs.Tab value="address">כתובת ואינטרנט</Tabs.Tab>
+            <Tabs.Tab value="notes">הערות</Tabs.Tab>
+          </Tabs.List>
+
+          <Tabs.Panel value="general">
+            <Grid gutter="md">
+              <Grid.Col span={12}>
+                <TextInput label="שם" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <Select
+                  label="סוג לקוח"
+                  value={form.customer_type}
+                  onChange={v => setForm(f => ({ ...f, customer_type: v || 'PRIVATE' }))}
+                  data={Object.entries(TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }))}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <Select
+                  label="לקוח אב"
+                  placeholder="ללא לקוח אב"
+                  clearable searchable
+                  value={form.parent_id || null}
+                  onChange={v => setForm(f => ({ ...f, parent_id: v || '' }))}
+                  data={allCustomers.map(c => ({ value: c.id, label: c.name }))}
+                />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <TextInput label="ח.פ / עוסק מורשה" value={form.vat_number} onChange={e => setForm(f => ({ ...f, vat_number: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <TextInput label="איש קשר" value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <TextInput label="טלפון" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <TextInput label="אימייל" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <NumberInput label="תנאי תשלום (ימים)" value={form.payment_terms} onChange={v => setForm(f => ({ ...f, payment_terms: Number(v) || 30 }))} min={0} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
                 <TextInput label="תחום עיסוק" value={form.industry_type} onChange={e => setForm(f => ({ ...f, industry_type: e.target.value }))} />
+              </Grid.Col>
+            </Grid>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="address">
+            <Grid gutter="md">
+              <Grid.Col span={12}>
+                <TextInput label="כתובת" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <TextInput label="עיר" value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <TextInput label="אתר אינטרנט" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
+                <TextInput label="פקס" value={form.fax} onChange={e => setForm(f => ({ ...f, fax: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
                 <TextInput label="אזור / טריטוריה" value={form.territory} onChange={e => setForm(f => ({ ...f, territory: e.target.value }))} />
-              </Group>
-              <Group grow>
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
                 <TextInput label="קו חלוקה" value={form.delivery_route} onChange={e => setForm(f => ({ ...f, delivery_route: e.target.value }))} />
+              </Grid.Col>
+              <Grid.Col span={{ base: 12, sm: 6 }}>
                 <NumberInput label="מס' עובדים" value={form.employee_count} min={0} onChange={v => setForm(f => ({ ...f, employee_count: Number(v) || 0 }))} />
-              </Group>
+              </Grid.Col>
+            </Grid>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="notes">
+            <Stack gap="md">
+              <Textarea
+                label="הערות"
+                minRows={5}
+                value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                rightSection={<AIRefineButton value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />}
+                rightSectionPointerEvents="all"
+              />
               <NumberInput label="יעד מכירות (₪)" value={form.sales_target} min={0} onChange={v => setForm(f => ({ ...f, sales_target: Number(v) || 0 }))} />
             </Stack>
-          </Collapse>
-          <Button onClick={handleCreate} disabled={!form.name}>צור לקוח</Button>
-        </Stack>
+          </Tabs.Panel>
+        </Tabs>
+
+        <Divider my="md" />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setCreateOpen(false)}>ביטול</Button>
+          <Button onClick={handleCreate} disabled={!form.name}>➕ צור לקוח</Button>
+        </Group>
       </Modal>
     </>
   )
