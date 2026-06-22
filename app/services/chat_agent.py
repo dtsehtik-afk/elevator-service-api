@@ -1894,6 +1894,7 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 
 ══ כלי פעולות לטכנאים ══
 כלים אלה מזהים את הטכנאי אוטומטית לפי מספר הטלפון — אין צורך לבקש פרטים נוספים.
+כלל ברזל: אם בפרטי המשתמש כתוב "גישה לכלי טכנאי: כן" — חייב להשתמש בכלים כמו get_my_route, get_my_calls וכו', גם אם התפקיד הוא ADMIN או MANAGER. תפקיד ADMIN אינו מונע גישה לכלי שטח.
 
 • "לקחתי / הולך / אני על זה / אני מגיע" + כתובת → take_service_call(address_hint=...)  [בצע מיד]
 • "סיימתי / בוצע / טיפלתי / גמרתי / חולץ / לכוד חולץ / שוחרר / יצא / הלכוד יצא" → close_my_active_call(resolution_notes=..., quote_needed=...)  [בצע מיד — אל תבקש אישור]
@@ -2034,6 +2035,9 @@ def _build_role_context(role: str, perms: dict, name: str | None, phone: str = "
         lines.insert(1, f"שם: {name}")
     if phone:
         lines.insert(2 if name else 1, f"טלפון: {phone}")
+    # Anyone identified by phone in the technician table can use technician tools
+    if name:  # name is set only when tech was found by phone
+        lines.append("גישה לכלי טכנאי: כן — get_my_route, get_my_calls, close_my_active_call, take_service_call פעילים")
     lines.append("הרשאות:")
     lines.extend(perm_lines)
     return "\n".join(lines)
