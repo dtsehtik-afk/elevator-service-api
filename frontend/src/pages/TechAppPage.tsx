@@ -174,8 +174,9 @@ async function reassignElevator(techId: string, elevatorId: string) {
   await client.post(`/webhooks/reassign-elevator-json/${techId}`, null, { params: { elevator_id: elevatorId } })
 }
 
-async function sendLocation(techId: string, lat: number, lng: number, accuracy?: number) {
-  await client.post(`/webhooks/location/${techId}`, { latitude: lat, longitude: lng, accuracy })
+async function sendLocation(techId: string, lat: number, lng: number, accuracy?: number): Promise<boolean> {
+  const { data } = await client.post(`/webhooks/location/${techId}`, { latitude: lat, longitude: lng, accuracy })
+  return data?.status === 'ok'
 }
 
 async function fetchMaintenance(techId: string): Promise<MaintenanceItem[]> {
@@ -297,7 +298,7 @@ function _doSend(techId: string, lat: number, lng: number, accuracy?: number, fo
   if (!force && now - _lastSentMs < 5000) return
   _lastSentMs = now
   sendLocation(techId, lat, lng, accuracy)
-    .then(() => _notifyListeners('active', new Date()))
+    .then(accepted => { if (accepted) _notifyListeners('active', new Date()) })
     .catch(() => {})
 }
 
@@ -329,7 +330,7 @@ async function startGPS(techId: string) {
       (position, error) => {
         if (error) { _notifyListeners('error', null); return }
         if (!position) return
-        if ((position.accuracy ?? 9999) > 150) return
+        if ((position.accuracy ?? 9999) > 500) return
         _doSend(techId, position.latitude, position.longitude, position.accuracy ?? undefined)
       }
     )
@@ -342,7 +343,7 @@ async function startGPS(techId: string) {
   _heartbeatId = setInterval(async () => {
     try {
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 })
-      if ((pos.coords.accuracy ?? 9999) > 150) return
+      if ((pos.coords.accuracy ?? 9999) > 500) return
       _doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
     } catch { /* ignore */ }
   }, 60000)
@@ -355,7 +356,7 @@ async function startGPS(techId: string) {
       const data = await res.json()
       if (!data.requested) return
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 })
-      if ((pos.coords.accuracy ?? 9999) > 150) return
+      if ((pos.coords.accuracy ?? 9999) > 500) return
       _doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined, true)
     } catch { /* ignore */ }
   }, 15000)

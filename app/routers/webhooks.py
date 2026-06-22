@@ -994,11 +994,8 @@ def update_location(
             a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
             dist_km = 2 * R * atan2(sqrt(a), sqrt(1 - a))
             speed_kmh = dist_km / (age_seconds / 3600)
-            if speed_kmh > 250:
-                logger.warning("📍 GPS velocity rejected for %s: %.1f km in %.0f s = %.0f km/h (%.4f,%.4f → %.4f,%.4f)",
-                               tech.name, dist_km, age_seconds, speed_kmh,
-                               tech.current_latitude, tech.current_longitude,
-                               payload.latitude, payload.longitude)
+            if speed_kmh > 350:
+                logger.warning("📍 GPS velocity rejected for %s: %.0f km/h", tech.name, speed_kmh)
                 return {"status": "rejected", "reason": "implausible_velocity",
                         "distance_km": round(dist_km, 1), "speed_kmh": round(speed_kmh)}
 
