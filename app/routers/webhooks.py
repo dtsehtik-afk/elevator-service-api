@@ -136,6 +136,7 @@ def _is_duplicate_message(msg_id: str) -> bool:
 class WhatsAppWebhookPayload(BaseModel):
     """Incoming message from Green API webhook."""
     typeWebhook: str = ""
+    instanceId: Optional[str] = None
     senderData: dict = {}
     messageData: dict = {}
 
@@ -384,6 +385,13 @@ def receive_whatsapp(
     Green API pushes every WhatsApp message here.
     Handles: assignment confirmation (natural language or 1/2), location updates, free-text queries.
     """
+    # Verify the payload comes from our Green API instance (prevents spoofing)
+    configured_instance = settings.greenapi_instance_id
+    if configured_instance and payload.instanceId:
+        if str(payload.instanceId) != str(configured_instance):
+            logger.warning("⚠️ WhatsApp webhook rejected: instanceId mismatch (%s vs %s)", payload.instanceId, configured_instance)
+            return {"status": "rejected"}
+
     webhook_type = payload.typeWebhook
 
     # Accept both incoming (regular) and outgoing (self-send: instance phone == technician phone)
@@ -1000,9 +1008,7 @@ def update_location(
     # Clear any pending location request now that fresh GPS has been received
     tech.location_requested_at = None
     db.commit()
-    logger.warning("📍 Live location updated for %s: %.4f, %.4f (accuracy: %sm)",
-                   tech.name, payload.latitude, payload.longitude,
-                   f"{payload.accuracy:.0f}" if payload.accuracy is not None else "?")
+    logger.info("📍 Location updated for %s: %.4f, %.4f", tech.name, payload.latitude, payload.longitude)
     return {"status": "ok", "name": tech.name}
 
 

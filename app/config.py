@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     dispatcher_whatsapp: str = ""  # comma-separated list of manager WhatsApp numbers
 
     # Public base URL for technician portal links (e.g. http://192.168.1.100:8000)
-    app_base_url: str = "http://localhost:8000"
+    app_base_url: str = "https://lift-agent.com"
 
     # Gmail IMAP — shared fallback (used if the specific vars below are not set)
     gmail_user: str = ""

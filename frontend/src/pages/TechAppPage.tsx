@@ -277,114 +277,119 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   )
 }
 
-// ── GPS Hook ───────────────────────────────────────────────────────────────
+// ── GPS Singleton ──────────────────────────────────────────────────────────
+// Module-level state: survives React re-renders and component unmounts.
+// The native BackgroundGeolocation foreground service stays alive even when
+// the app is backgrounded — we must NOT remove it on component cleanup.
+let _gpsTechId: string | null = null
+let _bgWatcherId: string | null = null
+let _heartbeatId: ReturnType<typeof setInterval> | null = null
+let _locationPollId: ReturnType<typeof setInterval> | null = null
+let _lastSentMs = 0
+const _gpsListeners = new Set<(st: 'idle' | 'active' | 'error', ts: Date | null) => void>()
+
+function _notifyListeners(st: 'idle' | 'active' | 'error', ts: Date | null) {
+  _gpsListeners.forEach(fn => fn(st, ts))
+}
+
+function _doSend(techId: string, lat: number, lng: number, accuracy?: number, force = false) {
+  const now = Date.now()
+  if (!force && now - _lastSentMs < 5000) return
+  _lastSentMs = now
+  sendLocation(techId, lat, lng, accuracy)
+    .then(() => _notifyListeners('active', new Date()))
+    .catch(() => {})
+}
+
+async function startGPS(techId: string) {
+  if (_gpsTechId === techId && _bgWatcherId !== null) return // already running for same tech
+
+  // If switching techs, tear down first
+  if (_bgWatcherId !== null) {
+    BackgroundGeolocation.removeWatcher({ id: _bgWatcherId }).catch(() => {})
+    _bgWatcherId = null
+  }
+  if (_heartbeatId !== null) { clearInterval(_heartbeatId); _heartbeatId = null }
+  if (_locationPollId !== null) { clearInterval(_locationPollId); _locationPollId = null }
+
+  _gpsTechId = techId
+
+  try {
+    // Creates a native Android Foreground Service — continues in background, exactly like Waze.
+    // We intentionally never call removeWatcher in the React cleanup so the service persists
+    // even when the user navigates away or backgrounds the app.
+    _bgWatcherId = await BackgroundGeolocation.addWatcher(
+      {
+        backgroundMessage: 'מעקב מיקום פעיל — לחץ לפתיחת האפליקציה',
+        backgroundTitle: 'Lift Agent',
+        requestPermissions: true,
+        stationaryRadius: 30,
+        distanceFilter: 15,
+      },
+      (position, error) => {
+        if (error) { _notifyListeners('error', null); return }
+        if (!position) return
+        if ((position.accuracy ?? 9999) > 150) return
+        _doSend(techId, position.latitude, position.longitude, position.accuracy ?? undefined)
+      }
+    )
+    _notifyListeners('active', null)
+  } catch {
+    _notifyListeners('error', null)
+  }
+
+  // Heartbeat every 60s — covers stationary case (native watcher fires only on movement)
+  _heartbeatId = setInterval(async () => {
+    try {
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 })
+      if ((pos.coords.accuracy ?? 9999) > 150) return
+      _doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
+    } catch { /* ignore */ }
+  }, 60000)
+
+  // Location-request poll — bot triggers via DB flag, we respond within 15s
+  _locationPollId = setInterval(async () => {
+    try {
+      const res = await fetch(`${BASE}/webhooks/location-request/${techId}`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (!data.requested) return
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 })
+      if ((pos.coords.accuracy ?? 9999) > 150) return
+      _doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined, true)
+    } catch { /* ignore */ }
+  }, 15000)
+}
+
+function stopGPS() {
+  if (_bgWatcherId !== null) {
+    BackgroundGeolocation.removeWatcher({ id: _bgWatcherId }).catch(() => {})
+    _bgWatcherId = null
+  }
+  if (_heartbeatId !== null) { clearInterval(_heartbeatId); _heartbeatId = null }
+  if (_locationPollId !== null) { clearInterval(_locationPollId); _locationPollId = null }
+  _gpsTechId = null
+  _notifyListeners('idle', null)
+}
+
+// ── GPS Hook — reads singleton state, does NOT stop on unmount ────────────
 function useGPS(techId: string | null) {
   const [status, setStatus] = useState<'idle' | 'active' | 'error'>('idle')
   const [lastSentAt, setLastSentAt] = useState<Date | null>(null)
-  const bgWatcherRef = useRef<string | null>(null)
-  const locationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const lastSentMsRef = useRef(0)
-
-  const stop = () => {
-    if (bgWatcherRef.current !== null) {
-      BackgroundGeolocation.removeWatcher({ id: bgWatcherRef.current }).catch(() => {})
-      bgWatcherRef.current = null
-    }
-    if (locationPollRef.current) { clearInterval(locationPollRef.current); locationPollRef.current = null }
-    if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null }
-    setStatus('idle')
-  }
-
-  const doSend = (tid: string, lat: number, lng: number, accuracy?: number) => {
-    const now = Date.now()
-    if (now - lastSentMsRef.current < 5000) return
-    lastSentMsRef.current = now
-    sendLocation(tid, lat, lng, accuracy)
-      .then(() => { setLastSentAt(new Date()); setStatus('active') })
-      .catch(() => {})
-  }
-
-  const doSendImmediate = (tid: string, lat: number, lng: number, accuracy?: number) => {
-    lastSentMsRef.current = Date.now()
-    sendLocation(tid, lat, lng, accuracy)
-      .then(() => { setLastSentAt(new Date()); setStatus('active') })
-      .catch(() => {})
-  }
 
   useEffect(() => {
-    if (!techId) { stop(); return }
+    const listener = (st: 'idle' | 'active' | 'error', ts: Date | null) => {
+      setStatus(st)
+      if (ts) setLastSentAt(ts)
+    }
+    _gpsListeners.add(listener)
+    return () => { _gpsListeners.delete(listener) }
+  }, [])
 
-    ;(async () => {
-      try {
-        // BackgroundGeolocation creates a native Foreground Service on Android —
-        // runs continuously even when the app is minimised, exactly like Waze.
-        const watcherId = await BackgroundGeolocation.addWatcher(
-          {
-            backgroundMessage: 'מעקב מיקום פעיל — לחץ לפתיחת האפליקציה',
-            backgroundTitle: 'Lift Agent',
-            requestPermissions: true,
-            stationaryRadius: 30,  // metres of movement to wake up when stationary
-            distanceFilter: 15,    // metres between updates when moving
-          },
-          (position, error) => {
-            if (error) { setStatus('error'); return }
-            if (!position) return
-            // Reject poor-accuracy fixes (network/cached fallback)
-            if ((position.accuracy ?? 9999) > 150) return
-            doSend(techId, position.latitude, position.longitude, position.accuracy ?? undefined)
-          }
-        )
-        bgWatcherRef.current = watcherId
-        setStatus('active')
-      } catch {
-        setStatus('error')
-      }
-
-      // Heartbeat — send GPS every 60s regardless of movement (covers stationary case)
-      heartbeatRef.current = setInterval(async () => {
-        try {
-          const pos = await Geolocation.getCurrentPosition({
-            enableHighAccuracy: true,
-            maximumAge: 30000,
-            timeout: 10000,
-          })
-          if ((pos.coords.accuracy ?? 9999) > 150) return
-          doSend(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
-        } catch { /* ignore */ }
-      }, 60000)
-    })()
-
-    return () => stop()
-  }, [techId])
-
-  // ── Location-request poll: bot triggers this when it needs fresh GPS ──────
-  // Polls /webhooks/location-request/{techId} every 15 s.
-  // When requested=true, immediately fires getCurrentPosition (bypasses throttle).
   useEffect(() => {
     if (!techId) return
-    locationPollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`${BASE}/webhooks/location-request/${techId}`)
-        if (!res.ok) return
-        const data = await res.json()
-        if (!data.requested) return
-        // Bot wants fresh GPS — get it now
-        Geolocation.getCurrentPosition({
-          enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 10000,
-        }).then(pos => {
-          if ((pos.coords.accuracy ?? 9999) > 150) return  // reject stale/poor fix
-          doSendImmediate(techId, pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? undefined)
-        }).catch(() => {})
-      } catch {
-        // network failure — ignore silently
-      }
-    }, 15000)
-    return () => {
-      if (locationPollRef.current) { clearInterval(locationPollRef.current); locationPollRef.current = null }
-    }
+    startGPS(techId)
+    // No cleanup — GPS must survive component unmount
   }, [techId])
 
   return { status, lastSentAt }
@@ -938,7 +943,7 @@ function TechMain() {
                 🏢 מצב מנהל
               </Button>
             )}
-            <Button size="xs" variant="white" color="blue" onClick={clear}>יציאה</Button>
+            <Button size="xs" variant="white" color="blue" onClick={() => { stopGPS(); clear() }}>יציאה</Button>
           </Group>
         </Group>
       </div>
