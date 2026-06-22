@@ -1951,6 +1951,7 @@ export default function ElevatorDetailPage() {
                     value={(form.customer_id ?? elevator?.customer_id ?? null) as string | null}
                     onChange={v => set('customer_id', v)}
                     hidePreview
+                    allowCreate
                   />
                 </Grid.Col>
                 {!isNew && customerDetail && (
@@ -2035,6 +2036,7 @@ export default function ElevatorDetailPage() {
                     value={(form.secondary_customer_id ?? elevator?.secondary_customer_id ?? null) as string | null}
                     onChange={v => set('secondary_customer_id', v)}
                     hidePreview
+                    allowCreate
                   />
                 </Grid.Col>
                 {!isNew && secondaryCustomerDetail && (

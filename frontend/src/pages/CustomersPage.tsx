@@ -6,6 +6,7 @@ import {
   Collapse, Divider, Tabs, Grid,
 } from '@mantine/core'
 import { AIRefineButton } from '../components/AIRefineButton'
+import { CustomerSearchSelect } from '../components/CustomerSearchSelect'
 import { notifications } from '@mantine/notifications'
 import { customersApi } from '../api/customers'
 import type { Customer } from '../types'
@@ -195,13 +196,13 @@ export default function CustomersPage() {
                 />
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
-                <Select
+                <CustomerSearchSelect
                   label="לקוח אב"
                   placeholder="ללא לקוח אב"
-                  clearable searchable
                   value={form.parent_id || null}
                   onChange={v => setForm(f => ({ ...f, parent_id: v || '' }))}
-                  data={allCustomers.map(c => ({ value: c.id, label: c.name }))}
+                  hidePreview
+                  allowCreate
                 />
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 6 }}>
