@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Stack, Title, Group, Badge, Text, Button, Paper, Grid, Card,
-  Modal, TextInput, Select, NumberInput, PasswordInput, Switch, Divider,
+  Modal, TextInput, Select, NumberInput, PasswordInput, Switch, Divider, Loader,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -10,6 +10,95 @@ import { listTechnicians, createTechnician, updateTechnician, setOnCallTechnicia
 import client from '../api/client'
 import { Technician } from '../types'
 import { useAuthStore } from '../stores/authStore'
+
+// ── Base Location Picker ──────────────────────────────────────────────────────
+function BaseLocationPicker({
+  lat, lng, onChange,
+}: { lat: number | null; lng: number | null; onChange: (lat: number, lng: number) => void }) {
+  const [city, setCity] = useState('')
+  const [street, setStreet] = useState('')
+  const [houseNum, setHouseNum] = useState('')
+  const [streets, setStreets] = useState<string[]>([])
+  const [loadingStreets, setLoadingStreets] = useState(false)
+  const [geocoding, setGeocoding] = useState(false)
+  const [gpsLoading, setGpsLoading] = useState(false)
+
+  const fetchStreets = async (c: string) => {
+    if (!c) return
+    setLoadingStreets(true)
+    try {
+      const { data } = await client.get('/addresses/streets', { params: { city: c } })
+      setStreets(data)
+    } catch { setStreets([]) }
+    finally { setLoadingStreets(false) }
+  }
+
+  const geocode = async () => {
+    if (!city || !street) return
+    setGeocoding(true)
+    try {
+      const { data } = await client.get('/addresses/geocode', { params: { street, city, house_number: houseNum } })
+      if (data.lat && data.lng) {
+        onChange(data.lat, data.lng)
+        notifications.show({ message: `📍 מיקום נקבע: ${street} ${houseNum}, ${city}`, color: 'green' })
+      } else {
+        notifications.show({ message: data.error || 'לא נמצאו קואורדינטות', color: 'orange' })
+      }
+    } catch { notifications.show({ message: 'שגיאה בחיפוש כתובת', color: 'red' }) }
+    finally { setGeocoding(false) }
+  }
+
+  const useGPS = () => {
+    setGpsLoading(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => { onChange(pos.coords.latitude, pos.coords.longitude); setGpsLoading(false); notifications.show({ message: '📍 מיקום נוכחי נקבע', color: 'green' }) },
+      () => { setGpsLoading(false); notifications.show({ message: 'לא ניתן לקבל מיקום', color: 'red' }) },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  return (
+    <Stack gap="xs">
+      <Group gap="xs">
+        <Button size="xs" variant="light" color="teal" loading={gpsLoading} onClick={useGPS} leftSection="📍">
+          מיקום נוכחי
+        </Button>
+        {lat && lng && (
+          <Text size="xs" c="dimmed">✅ {lat.toFixed(4)}, {lng.toFixed(4)}</Text>
+        )}
+        {!lat && <Text size="xs" c="orange">לא מוגדר</Text>}
+      </Group>
+      <Text size="xs" c="dimmed" fw={500}>או הזן כתובת:</Text>
+      <Group grow align="flex-end">
+        <Select
+          label="עיר"
+          placeholder="בחר עיר"
+          searchable
+          data={['עפולה','תל אביב','ירושלים','חיפה','ראשון לציון','פתח תקווה','אשדוד','נתניה',
+                 'באר שבע','רחובות','הרצליה','כפר סבא','חדרה','רמת גן','בני ברק','אשקלון',
+                 'נהריה','עכו','טבריה','נצרת','עראבה','שפרעם','קריית אתא','יקנעם','מגדל העמק']}
+          value={city || null}
+          onChange={v => { setCity(v ?? ''); setStreet(''); fetchStreets(v ?? '') }}
+        />
+        <Select
+          label="רחוב"
+          placeholder={loadingStreets ? 'טוען...' : 'בחר רחוב'}
+          searchable
+          disabled={!city || loadingStreets}
+          rightSection={loadingStreets ? <Loader size="xs" /> : undefined}
+          data={streets}
+          value={street || null}
+          onChange={v => setStreet(v ?? '')}
+        />
+        <TextInput label='מס׳' placeholder="5" w={70} value={houseNum} onChange={e => setHouseNum(e.target.value)} />
+        <Button size="sm" mt={24} loading={geocoding} disabled={!city || !street} onClick={geocode}>
+          קבע
+        </Button>
+      </Group>
+    </Stack>
+  )
+}
+
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'מנהל', MANAGER: 'מנהל', DISPATCHER: 'מוקד',
@@ -326,28 +415,12 @@ export default function TechniciansPage() {
             onChange={e => setEditForm(s => ({ ...s, password: e.target.value }))}
             error={editForm.password.length > 0 && editForm.password.length < 8 ? 'לפחות 8 תווים' : null}
           />
-          <Divider label="📍 מיקום בסיס (ברירת מחדל כשאין מיקום חי)" labelPosition="center" />
-          <Group grow>
-            <NumberInput
-              label="קו רוחב (Latitude)"
-              placeholder="32.6038"
-              decimalScale={6}
-              dir="ltr"
-              value={editForm.base_latitude ?? ''}
-              onChange={v => setEditForm(s => ({ ...s, base_latitude: v === '' ? null : Number(v) }))}
-            />
-            <NumberInput
-              label="קו אורך (Longitude)"
-              placeholder="35.2897"
-              decimalScale={6}
-              dir="ltr"
-              value={editForm.base_longitude ?? ''}
-              onChange={v => setEditForm(s => ({ ...s, base_longitude: v === '' ? null : Number(v) }))}
-            />
-          </Group>
-          <Text size="xs" c="dimmed">
-            💡 מצא קואורדינטות ב-Google Maps: לחץ ימני על המיקום ← העתק קואורדינטות
-          </Text>
+          <Divider label="📍 מיקום בסיס (לחישוב מסלול בוקר)" labelPosition="center" />
+          <BaseLocationPicker
+            lat={editForm.base_latitude}
+            lng={editForm.base_longitude}
+            onChange={(lat, lng) => setEditForm(s => ({ ...s, base_latitude: lat, base_longitude: lng }))}
+          />
           <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={closeEdit}>ביטול</Button>
             <Button
