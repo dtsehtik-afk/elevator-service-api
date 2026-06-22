@@ -30,7 +30,9 @@ function techIcon(color: string) {
 
 function staleness(ts: string | null): { label: string; color: string } {
   if (!ts) return { label: 'לא ידוע', color: '#868e96' }
-  const mins = Math.floor((Date.now() - new Date(ts).getTime()) / 60000)
+  // Normalize: if no timezone info, treat as UTC (server stores UTC)
+  const normalized = ts.endsWith('Z') || ts.includes('+') ? ts : ts + 'Z'
+  const mins = Math.floor((Date.now() - new Date(normalized).getTime()) / 60000)
   if (mins < 5)  return { label: `לפני ${mins} דק'`, color: '#2f9e44' }
   if (mins < 30) return { label: `לפני ${mins} דק'`, color: '#f59f00' }
   return { label: `לפני ${mins} דק'`, color: '#e03131' }
