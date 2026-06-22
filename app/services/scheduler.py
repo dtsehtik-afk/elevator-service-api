@@ -2189,6 +2189,101 @@ def _auto_refresh_holidays():
         logger.error(f"Holiday auto-refresh failed: {exc}")
 
 
+def _send_morning_work_summary():
+    """07:30 — send dispatcher a morning summary: open inspection deficiencies + open service calls."""
+    from app.database import SessionLocal
+    from app.models.inspection_report import InspectionReport
+    from app.models.elevator import Elevator
+    from app.models.service_call import ServiceCall
+    from app.services.whatsapp_service import notify_dispatcher
+    from app.services.inspection_service import _is_null_deficiency
+    from datetime import date, timedelta
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        lines = [f"☀️ *סיכום בוקר — {today.strftime('%d/%m/%Y')}*", ""]
+
+        # ── Open inspection deficiencies ──────────────────────────────────
+        open_reports = (
+            db.query(InspectionReport)
+            .filter(
+                InspectionReport.report_status.in_(["OPEN", "PARTIAL"]),
+                InspectionReport.elevator_id.isnot(None),
+                InspectionReport.inspection_date.isnot(None),
+            )
+            .all()
+        )
+        urgent_deficiencies = []
+        for report in open_reports:
+            elev = db.query(Elevator).filter(Elevator.id == report.elevator_id).first()
+            if not elev:
+                continue
+            addr = f"{elev.address}, {elev.city}"
+            for deficiency in (report.deficiencies or []):
+                if deficiency.get("done") or _is_null_deficiency(deficiency):
+                    continue
+                deadline_days = deficiency.get("deadline_days")
+                if deadline_days and report.inspection_date:
+                    deadline_date = report.inspection_date + timedelta(days=deadline_days)
+                    days_left = (deadline_date - today).days
+                    if days_left <= 7:
+                        emoji = "🔴" if days_left <= 0 else "🟠"
+                        status = f"עבר ב-{abs(days_left)} ימים" if days_left < 0 else (f"היום!" if days_left == 0 else f"עוד {days_left} יום")
+                        urgent_deficiencies.append(f"{emoji} {addr} — {(deficiency.get('description') or '')[:50]} ({status})")
+                else:
+                    days_since = (today - report.inspection_date).days if report.inspection_date else 0
+                    if days_since >= 14:
+                        emoji = "🔴" if days_since >= 30 else "🟠"
+                        urgent_deficiencies.append(f"{emoji} {addr} — {(deficiency.get('description') or '')[:50]} ({days_since} ימים)")
+
+        if urgent_deficiencies:
+            lines.append(f"🔍 *ליקויי בודק דחופים ({len(urgent_deficiencies)}):*")
+            lines.extend(urgent_deficiencies[:10])
+            if len(urgent_deficiencies) > 10:
+                lines.append(f"  ...ועוד {len(urgent_deficiencies) - 10}")
+        else:
+            lines.append("🔍 ליקויי בודק: אין ממתינים דחופים ✅")
+
+        lines.append("")
+
+        # ── Open service calls ────────────────────────────────────────────
+        open_calls = (
+            db.query(ServiceCall)
+            .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]))
+            .all()
+        )
+        critical = [c for c in open_calls if c.priority == "CRITICAL"]
+        high = [c for c in open_calls if c.priority == "HIGH"]
+
+        lines.append(f"📋 *קריאות שירות פתוחות: {len(open_calls)}*")
+        if critical:
+            lines.append(f"  🔴 קריטיות: {len(critical)}")
+        if high:
+            lines.append(f"  🟠 גבוהות: {len(high)}")
+        if not open_calls:
+            lines.append("  אין קריאות פתוחות ✅")
+
+        # Show top 5 urgent calls
+        urgent_calls = sorted(open_calls, key=lambda c: (c.priority != "CRITICAL", c.priority != "HIGH", c.created_at))
+        for sc in urgent_calls[:5]:
+            elev = db.query(Elevator).filter(Elevator.id == sc.elevator_id).first() if sc.elevator_id else None
+            addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"
+            num = f"S{sc.call_number:05d}" if sc.call_number else str(sc.id)[:8]
+            pri_emoji = "🔴" if sc.priority == "CRITICAL" else ("🟠" if sc.priority == "HIGH" else "🟡")
+            lines.append(f"  {pri_emoji} {num} — {addr}")
+
+        if not lines[-1].startswith("  ") and not urgent_deficiencies and not open_calls:
+            return  # Nothing to report
+
+        notify_dispatcher("\n".join(lines))
+        logger.info("Morning work summary sent")
+    except Exception as exc:
+        logger.error("_send_morning_work_summary failed: %s", exc)
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """Start the APScheduler background scheduler."""
     from zoneinfo import ZoneInfo
@@ -2207,7 +2302,8 @@ def start_scheduler():
     _scheduler.add_job(_scan_drive_inspections,              "interval", minutes=15)
     _scheduler.add_job(_check_location_reminders,            "interval", minutes=10)
     _scheduler.add_job(_check_monitoring_calls,              "cron",     hour=8,  minute=0)
-    _scheduler.add_job(_check_inspection_deficiency_escalation, "interval", hours=6)
+    _scheduler.add_job(_check_inspection_deficiency_escalation, "cron", hour=7, minute=30, day_of_week="sun,mon,tue,wed,thu,fri")
+    _scheduler.add_job(_send_morning_work_summary,             "cron", hour=7, minute=30, day_of_week="sun,mon,tue,wed,thu,fri")
     # Geocode elevators missing coordinates: once 90s after startup + nightly at 02:00
     from datetime import timedelta
     _scheduler.add_job(
