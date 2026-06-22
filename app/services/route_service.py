@@ -80,8 +80,13 @@ def build_route(
     tech_lat = technician.current_latitude
     tech_lng = technician.current_longitude
     if not tech_lat or not tech_lng or not is_israel_coords(tech_lat, tech_lng):
-        logger.warning("Technician %s has no valid Israel GPS — cannot build route", technician.name)
-        return [], []
+        # Fallback to home/base coordinates for morning route building
+        tech_lat = technician.base_latitude
+        tech_lng = technician.base_longitude
+        if not tech_lat or not tech_lng or not is_israel_coords(tech_lat, tech_lng):
+            logger.warning("Technician %s has no valid GPS or base location — cannot build route", technician.name)
+            return [], []
+        logger.info("Building morning route for %s from base location", technician.name)
 
     # ── Collect candidate calls ───────────────────────────────────────────────
     candidates: list[dict] = []

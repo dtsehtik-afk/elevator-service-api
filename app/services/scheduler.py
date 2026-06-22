@@ -334,6 +334,15 @@ def _send_morning_location_requests():
 
             if _send_message(phone, msg):
                 sent += 1
+
+            # Send optimized route (uses base coords if GPS not yet active)
+            if open_calls:
+                try:
+                    from app.services.route_service import send_route_to_technician
+                    send_route_to_technician(db, tech, cooldown_minutes=0)
+                except Exception as exc_route:
+                    logger.warning("Morning route send failed for %s: %s", tech.name, exc_route)
+
         db.commit()
         logger.info("Morning message sent to %d/%d technicians", sent, len(technicians))
     except Exception as exc:
