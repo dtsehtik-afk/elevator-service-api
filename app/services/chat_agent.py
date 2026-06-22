@@ -303,32 +303,53 @@ _GEMINI_URL = _GEMINI_PRIMARY
 # ── DB query functions (called when Claude invokes a tool) ────────────────────
 
 def _search_elevators(db: Session, query: str = "", city: str = "", limit: int = 20) -> list[dict]:
+    from sqlalchemy import or_
     q = db.query(Elevator)
     if city:
         q = q.filter(Elevator.city.ilike(f"%{city}%"))
-    if query:
-        terms = [t for t in query.split() if t not in ('רחוב', 'רח', 'בניין', 'לקוח', 'אצל')]
-        if terms:
-            from sqlalchemy import or_
-            for term in terms:
-                term_q = f"%{term}%"
-                q = q.filter(
-                    or_(
-                        Elevator.address.ilike(term_q),
-                        Elevator.city.ilike(term_q),
-                        Elevator.building_name.ilike(term_q),
-                        Elevator.serial_number.ilike(term_q)
-                    )
-                )
-        else:
-            q = q.filter(
-                Elevator.address.ilike(f"%{query}%")
-                | Elevator.city.ilike(f"%{query}%")
-                | Elevator.building_name.ilike(f"%{query}%")
-                | Elevator.serial_number.ilike(f"%{query}%")
-            )
     if not query and not city:
         return [{"שגיאה": "יש לציין query או city לחיפוש"}]
+
+    if query:
+        # Strip noise words
+        NOISE = {'רחוב', 'רח', "רח'", 'בניין', 'לקוח', 'אצל', 'ב', 'ה', 'של', 'את', 'על'}
+        terms = [t for t in query.split() if t not in NOISE and len(t) > 1]
+        if not terms:
+            terms = [query]
+
+        def _term_filter(q_base, term):
+            p = f"%{term}%"
+            return q_base.filter(or_(
+                Elevator.address.ilike(p),
+                Elevator.city.ilike(p),
+                Elevator.building_name.ilike(p),
+                Elevator.serial_number.ilike(p),
+            ))
+
+        # Strategy 1: AND — all terms must match (exact)
+        q_and = q
+        for term in terms:
+            q_and = _term_filter(q_and, term)
+        and_count = q_and.count()
+
+        if and_count > 0:
+            q = q_and
+        elif len(terms) > 1:
+            # Strategy 2: OR — any term matches (tolerates typos / missing words)
+            or_conditions = []
+            for term in terms:
+                p = f"%{term}%"
+                or_conditions += [
+                    Elevator.address.ilike(p),
+                    Elevator.city.ilike(p),
+                    Elevator.building_name.ilike(p),
+                    Elevator.serial_number.ilike(p),
+                ]
+            q = q.filter(or_(*or_conditions))
+        else:
+            # Single term, no results — return helpful message
+            q = _term_filter(q, terms[0])
+
     total = q.count()
     elevators = q.order_by(Elevator.address).limit(limit).all()
     result = [
@@ -1387,10 +1408,10 @@ def _get_my_route_by_phone(db: Session, phone: str) -> dict:
         return {
             "no_gps": True,
             "_הנחיה": (
-                "כתוב בדיוק את הטקסט הבא ואל תוסיף דבר: "
-                "'כדי לקבל מסלול מסודר, שלח את המיקום שלך 📍\\n"
-                "(לחץ על 📎 ← מיקום ← שלח)\\n"
-                "המסלול מחושב לפי הנקודה שממנה אתה מתחיל.'"
+                "כתוב בדיוק את הטקסט הבא ואל תוסיף דבר:\n"
+                "כדי לקבל מסלול מסודר, שלח את המיקום שלך 📍\n"
+                "(לחץ על 📎 ← מיקום ← שלח)\n"
+                "המסלול מחושב לפי הנקודה שממנה אתה מתחיל."
             ),
         }
 
@@ -1793,6 +1814,32 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 
 השתמש בכלים לשליפת מידע חי. אל תמציא תשובות.
 ענה בעברית קצרה וישירה. תאריכים בפורמט DD/MM/YYYY.
+
+══ כללי פורמט הכרחיים ══
+• לעולם אל תשתמש בסימני Markdown: אסור **, __, #, -, *, ```, [, ].
+• שורות חדשות — השתמש בשורה חדשה אמיתית (Enter), לא בתווים \n, \\n, <br>.
+• אסור להשתמש בנטוי, מודגש, או שום עיצוב טקסט.
+• הצג רשימות כשורות טקסט רגיל עם מספור (1. 2. 3.) או אמוג'י, לא Markdown.
+• תשובה קצרה ולעניין — לא יותר מ-5 שורות אלא אם נדרש יותר.
+
+══ חילוץ תיאור תקלה ══
+כאשר פותחים קריאה, חלץ מהטקסט:
+• תיאור_תקלה: מה בדיוק קרה לפי דברי המדווח (לא "תקלה כללית"!)
+• סוג_תקלה: STUCK (מעלית תקועה/לכוד) | DOOR (דלת) | ELECTRICAL (חשמל) | MECHANICAL (מכני) | RESCUE (חילוץ/לכוד דחוף) | MAINTENANCE (טיפול/תחזוקה) | OTHER
+• עדיפות: CRITICAL (לכוד/חילוץ) | HIGH (מעלית לא נוסעת) | MEDIUM | LOW
+דוגמה: "דלת לא נסגרת" → DOOR, HIGH, תיאור: "דלת המעלית לא נסגרת"
+
+══ כתובת לא נמצאת ══
+כאשר חיפוש כתובת לא מחזיר תוצאות:
+1. נסה search_elevators עם רק שם העיר (city=...) — חיפוש רחב יותר
+2. אם עדיין אין תוצאות — שאל: "לא מצאתי מעלית בכתובת זו. האם הכתובת היא [ניסוח חלופי]? או שלח את הכתובת המדויקת."
+3. אל תאמר "לא נמצא" בלי לנסות לפחות שני חיפושים.
+
+══ שיחה זורמת ══
+• אל תשאל שאלות מיותרות — אם יש מספיק מידע, בצע.
+• כאשר יש ספק בין שתי מעליות — הצג שתיהן ושאל "איזה מהן?"
+• כאשר מישהו אומר "כן/אישור/בסדר/1" — בצע מיד.
+• כאשר סוגרים קריאה — אשר בקצרה: "✅ קריאה S00XXX נסגרה ב[כתובת]".
 
 ══ כלל כלי אחד בלבד ══
 כלל ברזל: כל הודעה → קרא לכלי אחד בלבד — הכלי שעונה ישירות על הבקשה.
