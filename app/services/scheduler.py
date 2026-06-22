@@ -1350,7 +1350,7 @@ def _handle_chat_question(db, phone: str, question: str, settings, with_history:
 
     try:
         from app.services.chat_agent import answer_question
-        answer = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
+        answer, _tool_calls = answer_question(db, question, asker_name, phone=phone, with_history=with_history)
         _send_message(phone, f"🤖 *נציג המערכת*\n\n{answer}")
 
         # Save bot response to conversation history so it appears in the UI
