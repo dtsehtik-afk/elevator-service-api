@@ -292,6 +292,7 @@ def _send_morning_location_requests():
                 call = db.query(ServiceCall).filter(
                     ServiceCall.id == call_id,
                     ServiceCall.status.notin_(["CLOSED", "RESOLVED", "MONITORING"]),
+                    ServiceCall.fault_type != "MAINTENANCE",  # maintenance calls are shown separately in the app
                 ).first()
                 if not call:
                     continue
@@ -2256,25 +2257,31 @@ def _send_morning_work_summary():
 
         lines.append("")
 
-        # ── Open service calls ────────────────────────────────────────────
+        # ── Open service calls (excluding maintenance — handled separately) ─
         open_calls = (
             db.query(ServiceCall)
-            .filter(ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]))
+            .filter(
+                ServiceCall.status.in_(["OPEN", "ASSIGNED", "IN_PROGRESS"]),
+                ServiceCall.fault_type != "MAINTENANCE",
+            )
             .all()
         )
-        critical = [c for c in open_calls if c.priority == "CRITICAL"]
-        high = [c for c in open_calls if c.priority == "HIGH"]
+        critical = [c for c in open_calls if c.priority in ("CRITICAL", "HIGH")]
+        unassigned = [c for c in open_calls if c.status == "OPEN"]
 
         lines.append(f"📋 *קריאות שירות פתוחות: {len(open_calls)}*")
         if critical:
-            lines.append(f"  🔴 קריטיות: {len(critical)}")
-        if high:
-            lines.append(f"  🟠 גבוהות: {len(high)}")
+            lines.append(f"  🔴 דחופות (HIGH/CRITICAL): {len(critical)}")
+        if unassigned:
+            lines.append(f"  ⚠️ ללא שיבוץ: {len(unassigned)}")
         if not open_calls:
             lines.append("  אין קריאות פתוחות ✅")
 
-        # Show top 5 urgent calls
-        urgent_calls = sorted(open_calls, key=lambda c: (c.priority != "CRITICAL", c.priority != "HIGH", c.created_at))
+        # Show top 5 urgent unassigned calls
+        urgent_calls = sorted(
+            [c for c in open_calls if c.status == "OPEN"],
+            key=lambda c: (c.priority not in ("CRITICAL", "HIGH"), c.created_at)
+        )
         for sc in urgent_calls[:5]:
             elev = db.query(Elevator).filter(Elevator.id == sc.elevator_id).first() if sc.elevator_id else None
             addr = f"{elev.address}, {elev.city}" if elev else "לא ידוע"

@@ -1397,30 +1397,26 @@ def _get_my_route_by_phone(db: Session, phone: str) -> dict:
         return {"error": "לא נמצא טכנאי מקושר למספר הטלפון הזה"}
 
     from app.services.route_service import build_route, format_route_message
-    from app.services.maps_service import is_israel_coords
 
-    # Require valid Israel GPS — route cannot be optimized without location
-    has_valid_gps = bool(
-        tech.current_latitude and tech.current_longitude
-        and is_israel_coords(tech.current_latitude, tech.current_longitude)
-    )
-    if not has_valid_gps:
+    # build_route handles GPS → base_latitude fallback internally
+    stops, suggestions = build_route(db, tech)
+
+    if not stops:
         return {
             "no_gps": True,
             "_הנחיה": (
-                "כתוב בדיוק את הטקסט הבא ואל תוסיף דבר:\n"
-                "כדי לקבל מסלול מסודר, שלח את המיקום שלך 📍\n"
+                "כתוב בדיוק את הטקסט הבא בלי שינויים:\n"
+                "כדי לקבל מסלול, שלח את המיקום שלך 📍\n"
                 "(לחץ על 📎 ← מיקום ← שלח)\n"
                 "המסלול מחושב לפי הנקודה שממנה אתה מתחיל."
             ),
         }
 
-    stops, suggestions = build_route(db, tech)
     msg = format_route_message(tech.name, stops, suggestions)
     return {
         "תוצאה": "המסלול חושב בהצלחה",
         "טקסט_מסלול_מלא": msg,
-        "_הנחיה": "הצג אך ורק את תוכן 'טקסט_מסלול_מלא' — בדיוק כפי שהוא, מילה במילה. אל תוסיף לפניו ואחריו שום מידע (לא מיקום, לא הקשר, לא הקדמה)."
+        "_הנחיה": "העתק את תוכן 'טקסט_מסלול_מלא' כמות שהוא, מילה במילה, ללא שינוי, ללא הוספה, ללא הקדמה."
     }
 
 
@@ -1905,8 +1901,10 @@ _SYSTEM_PROMPT = """אתה עוזר דיגיטלי זמין לצוות דרך ו
 • "מבקש לטפל / אשמח לטפל / רוצה לטפל" → request_call_from_dispatcher(address_hint=...)
 • "התחלתי / אני שם / מתחיל לטפל" → mark_call_in_progress()
 
-כלל ברזל: close_my_active_call ו-take_service_call — בצע מיד כשהכוונה ברורה. אל תבקש אישור חוזר.
+כלל ברזל: close_my_active_call ו-take_service_call — בצע מיד כשהכוונה ברורה. אל תבקש אישור חוזר. אל תציג פרטי קריאה לפני הסגירה.
 כלל ברזל: close_service_call (הכלי הישן לסגירה לפי call_id) — דורש אישור מפורש לפני ביצוע.
+כלל ברזל אנטי-לופ: אם כבר שאלת "האם לסגור?" ובתגובה הבאה יש "כן/אישור/בסדר/הלכודים חולצו/טיפלתי/בוצע" — בצע מיד ללא שאלה נוספת. אסור לשאול שוב "מה מספר הקריאה?" אם כבר הוזכר מספר בשיחה.
+כלל ברזל: "תסגור את הקריאה ב[כתובת]" + תיאור מה נעשה → close_my_active_call(address_hint="[כתובת]", resolution_notes="[תיאור]") מיד. אין להציג פרטים לפני. אין לשאול "מה מספר הקריאה?".
 • "העבר למעקב / מעקב" + מספר קריאה → get_call_by_number → transfer_to_monitoring(call_id=..., notes=...)  [דורש אישור]"""
 
 
