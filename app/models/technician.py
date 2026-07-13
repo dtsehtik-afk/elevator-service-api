@@ -81,6 +81,9 @@ class Technician(Base):
     totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Bumped whenever the password changes — invalidates all previously issued JWTs
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_on_call: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

@@ -88,9 +88,19 @@ def update_technician(
     db: Session = Depends(get_db),
     current_user: Technician = Depends(get_current_user),
 ):
-    """Update a technician — admins can update anyone, technicians can only update themselves."""
-    if current_user.role != "ADMIN" and current_user.id != technician_id:
-        raise HTTPException(status_code=403, detail="You can only update your own profile")
+    """Update a technician — admins can update anyone, technicians can only update
+    their own non-privileged profile fields (name/phone/password)."""
+    if current_user.role != "ADMIN":
+        if current_user.id != technician_id:
+            raise HTTPException(status_code=403, detail="You can only update your own profile")
+        # Non-admins may not change privileged fields on themselves (prevents self-escalation).
+        privileged = {"role", "is_active", "is_on_call", "max_daily_calls", "area_codes", "specializations"}
+        supplied_privileged = privileged & set(data.model_dump(exclude_unset=True))
+        if supplied_privileged:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Only an admin can change: {', '.join(sorted(supplied_privileged))}",
+            )
     tech = technician_service.update_technician(db, technician_id, data)
     if not tech:
         raise HTTPException(status_code=404, detail="Technician not found")

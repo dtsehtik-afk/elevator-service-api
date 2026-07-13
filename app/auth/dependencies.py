@@ -37,6 +37,10 @@ def get_current_user(
     user = db.query(Technician).filter(Technician.email == email).first()
     if user is None or not user.is_active:
         raise credentials_exception
+    # Reject tokens issued before the last password change.
+    token_ver = payload.get("ver", 0)
+    if token_ver != (user.token_version or 0):
+        raise credentials_exception
     return user
 
 

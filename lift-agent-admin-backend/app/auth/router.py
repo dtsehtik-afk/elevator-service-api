@@ -188,9 +188,23 @@ def me(current: AdminUser = Depends(get_current_admin)):
 
 @router.post("/seed-admin", include_in_schema=False)
 def seed_admin(db: Session = Depends(get_db)):
+    import os
+
     if db.query(AdminUser).count() > 0:
         raise HTTPException(status_code=409, detail="Admin already exists")
-    user = AdminUser(name="Super Admin", email="admin@lift-agent.com", hashed_password=hash_password("changeme123"))
+
+    email = os.getenv("INITIAL_ADMIN_EMAIL", "admin@lift-agent.com")
+    env_password = os.getenv("INITIAL_ADMIN_PASSWORD")
+    password = env_password or "changeme123"
+
+    user = AdminUser(name="Super Admin", email=email, hashed_password=hash_password(password))
     db.add(user)
     db.commit()
-    return {"ok": True, "email": user.email, "password": "changeme123"}
+
+    # Only echo the password when it's the insecure default (so the operator knows to
+    # change it). When set via env it stays secret.
+    resp = {"ok": True, "email": user.email}
+    if not env_password:
+        resp["password"] = password
+        resp["warning"] = "Default password in use — change it immediately after first login."
+    return resp

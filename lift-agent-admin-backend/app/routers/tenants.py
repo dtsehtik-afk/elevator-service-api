@@ -54,14 +54,13 @@ class TenantUpdate(BaseModel):
     billing_notes: Optional[str] = None
 
 
-def _tenant_dict(t: Tenant) -> dict:
-    return {
+def _tenant_dict(t: Tenant, include_secret: bool = False) -> dict:
+    d = {
         "id": str(t.id),
         "name": t.name,
         "slug": t.slug,
         "domain": t.domain,
         "api_url": t.api_url,
-        "api_key": t.api_key,
         "plan": t.plan,
         "is_active": t.is_active,
         "is_demo": t.is_demo,
@@ -77,6 +76,11 @@ def _tenant_dict(t: Tenant) -> dict:
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "modules": [{"module": m.module, "enabled": m.enabled} for m in t.modules],
     }
+    # api_key is a shared secret — only expose it on single-tenant detail views,
+    # never in list responses.
+    if include_secret:
+        d["api_key"] = t.api_key
+    return d
 
 
 def _push_company_info(t: Tenant) -> dict:
@@ -128,7 +132,7 @@ def create_tenant(body: TenantCreate, db: Session = Depends(get_db), _=Depends(g
     db.commit()
     db.refresh(tenant)
     _push_company_info(tenant)
-    return _tenant_dict(tenant)
+    return _tenant_dict(tenant, include_secret=True)
 
 
 @router.get("/{tenant_id}")
@@ -136,7 +140,7 @@ def get_tenant(tenant_id: str, db: Session = Depends(get_db), _=Depends(get_curr
     t = db.query(Tenant).options(selectinload(Tenant.modules)).filter(Tenant.id == uuid.UUID(tenant_id)).first()
     if not t:
         raise HTTPException(status_code=404, detail="Not found")
-    return _tenant_dict(t)
+    return _tenant_dict(t, include_secret=True)
 
 
 @router.patch("/{tenant_id}")
@@ -149,7 +153,7 @@ def update_tenant(tenant_id: str, body: TenantUpdate, db: Session = Depends(get_
     db.commit()
     db.refresh(t)
     _push_company_info(t)
-    return _tenant_dict(t)
+    return _tenant_dict(t, include_secret=True)
 
 
 @router.post("/{tenant_id}/sync-company-info")

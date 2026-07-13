@@ -136,7 +136,9 @@ def login(
     if _is_new_ip(db, user.id, ip):
         _alert_admins_new_ip(db, user, ip)
 
-    token = create_access_token({"sub": user.email, "role": user.role})
+    token = create_access_token(
+        {"sub": user.email, "role": user.role, "ver": user.token_version or 0}
+    )
     return TokenResponse(access_token=token)
 
 
@@ -181,7 +183,9 @@ def totp_verify(
     if _is_new_ip(db, user.id, ip):
         _alert_admins_new_ip(db, user, ip)
 
-    token = create_access_token({"sub": user.email, "role": user.role})
+    token = create_access_token(
+        {"sub": user.email, "role": user.role, "ver": user.token_version or 0}
+    )
     return TokenResponse(access_token=token)
 
 
@@ -383,6 +387,8 @@ def reset_password(
 
     _otp_store.pop(matched_key, None)
     user.hashed_password = hash_password(new_password)
+    # Invalidate any JWTs issued before this password reset
+    user.token_version = (user.token_version or 0) + 1
     db.commit()
 
     return {"detail": "הסיסמה עודכנה בהצלחה"}

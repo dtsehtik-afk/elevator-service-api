@@ -613,6 +613,55 @@ All wrapped in `if engine.dialect.name == "postgresql":`. Key migrations:
 
 ---
 
+## Security Hardening (13–14/07/2026)
+
+Security review of the tenant API + admin console. Fixes applied:
+
+### Critical
+- **Privilege escalation fixed** — `PUT /technicians/{id}` let any technician update their
+  own profile, and `TechnicianUpdate` includes `role`/`is_active`/`is_on_call`/etc. A non-admin
+  could self-promote to ADMIN. Now non-admins are blocked from setting privileged fields on
+  themselves (`app/routers/technicians.py:92`). Admins are unaffected.
+
+### High
+- **Admin console SECRET_KEY** — was hardcoded default `change-me-in-production` with no guard.
+  Added a `model_validator` in `lift-agent-admin-backend/app/config.py` that raises in production
+  if the secret is unset/default. **Requires `SECRET_KEY` + `ENVIRONMENT=production` in the admin
+  console `.env`.**
+- **Admin console CORS** — was `allow_origins=["*"]` with credentials. Now driven by
+  `CORS_ORIGINS` env var (default `http://localhost:5174`). **Set `CORS_ORIGINS` to the admin
+  console domain in production.**
+- **seed-admin** — now reads `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` from env; only echoes
+  the password when the insecure default is used (with a warning).
+
+### Medium
+- **JWT revocation** — added `technicians.token_version` (INTEGER, migration in `main.py` lifespan).
+  Bumped on every password change/reset; validated in `get_current_user` via the `ver` claim.
+  Old tokens are rejected after a password change. Login/TOTP tokens now carry `ver`.
+- **API docs hidden in production** — `/docs`, `/redoc`, `/openapi.json` disabled when
+  `ENVIRONMENT=production`.
+- **Tenant api_key** — no longer returned in the admin console tenant **list** (only on single
+  tenant detail / create / update).
+- **DB password** — `docker-compose.yml` now requires `POSTGRES_PASSWORD` from `.env`
+  (`${POSTGRES_PASSWORD:?...}`), no more hardcoded `password`.
+
+### ⚠️ Deployment notes (required before next deploy)
+1. **`.env` on the tenant server** must contain `POSTGRES_PASSWORD` or `docker compose` will refuse
+   to start. The existing Postgres volume was created with password `password` — to avoid breaking
+   the existing DB, set `POSTGRES_PASSWORD=password` (matching current `DATABASE_URL`) unless you
+   are doing a deliberate credential rotation.
+2. **Admin console `.env`** must set `SECRET_KEY`, `ENVIRONMENT=production`, and `CORS_ORIGINS`.
+3. `token_version` column auto-migrates on startup (PostgreSQL) / `create_all` (SQLite).
+
+### Still open (flagged, not yet changed)
+- `/app/*` technician pages have no login — identity is the tech UUID in the URL. Works but the
+  UUID acts as a non-expiring bearer token. Recommend signed, time-limited links or real auth.
+- `/settings/company-info/admin-sync` is now **unauthenticated** (auth was removed upstream in
+  commits d2999f3d / 55f93347 to fix the sync flow). Low impact — only sets company display
+  name/icon — but it is an anonymous write. Revisit if it ever accepts more sensitive fields.
+
+---
+
 ## Session End Checklist
 
 At the end of every session:

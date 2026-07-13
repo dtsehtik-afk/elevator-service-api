@@ -85,6 +85,8 @@ def update_technician(
         raw_password = updates.pop("password")
         if raw_password:
             tech.hashed_password = hash_password(raw_password)
+            # Invalidate any JWTs issued before this password change
+            tech.token_version = (tech.token_version or 0) + 1
 
     for field, value in updates.items():
         if value is None and field in NON_NULLABLE:

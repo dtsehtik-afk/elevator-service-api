@@ -509,6 +509,8 @@ async def lifespan(app: FastAPI):
                 # MFA — TOTP fields on technicians
                 "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64)",
                 "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+                # Token version — bumped on password change to invalidate old JWTs
+                "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
                 # FCM token for silent push (location wake-up)
                 "ALTER TABLE technicians ADD COLUMN IF NOT EXISTS fcm_token TEXT",
                 # MFA — login history
@@ -631,12 +633,16 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
 
 
+# Hide interactive API docs (full schema) in production
+_docs_enabled = settings.environment != "production"
+
 app = FastAPI(
     title="Elevator Service API",
     description="מערכת ניהול שירות מעליות — 500 מעליות, עד 10 טכנאים",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
     lifespan=lifespan,
 )
 
